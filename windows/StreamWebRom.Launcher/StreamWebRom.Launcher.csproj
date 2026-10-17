@@ -9,7 +9,7 @@
     <AssemblyName>StreamWebRom</AssemblyName>
     <RootNamespace>StreamWebRom.Launcher</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Product>StreamWebRom</Product>
     <Company>WebRom</Company>
     <Description>StreamWebRom - estudio de streaming para OBS</Description>

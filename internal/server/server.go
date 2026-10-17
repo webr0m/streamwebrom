@@ -161,7 +161,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		h.Set("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self), autoplay=(self)")
 		// Pages are embeddable by OBS (which is not a browser frame), but
 		// not by arbitrary websites: protects against clickjacking.
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: mediastream:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: mediastream:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
 		if r.TLS != nil {
 			h.Set("Strict-Transport-Security", "max-age=31536000")
 		}

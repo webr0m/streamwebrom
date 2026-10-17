@@ -6,7 +6,7 @@ Scope handling is intentionally loose (any declaration in the file counts), so
 it catches typos and missing imports, not shadowing bugs."""
 import os, sys, esprima
 
-GLOBALS = set("""window document navigator location history localStorage sessionStorage console setTimeout clearTimeout
+GLOBALS = set("""window document Worker postMessage navigator location history localStorage sessionStorage console setTimeout clearTimeout
 setInterval clearInterval requestAnimationFrame cancelAnimationFrame fetch URL URLSearchParams JSON Math Date Number String
 Boolean Object Array Promise Map Set WeakMap Error TypeError RegExp Uint8Array Float32Array Infinity NaN isNaN parseInt
 parseFloat encodeURIComponent decodeURIComponent alert confirm prompt crypto performance Image Audio AudioContext
