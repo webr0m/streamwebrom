@@ -47,14 +47,14 @@ type Server struct {
 const MaxWSPerIP = 30
 
 // ClientIP returns the caller address. Proxy headers (Cloudflare Tunnel,
-// reverse proxies) are trusted only when the TCP peer is loopback/private,
+// a local reverse proxy) are trusted only when the TCP peer is loopback,
 // so a remote client cannot spoof its address.
 func ClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 		for _, h := range []string{"CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"} {
 			if v := strings.TrimSpace(strings.Split(r.Header.Get(h), ",")[0]); v != "" && net.ParseIP(v) != nil {
 				return v

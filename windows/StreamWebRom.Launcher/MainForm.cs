@@ -8,6 +8,11 @@ namespace StreamWebRom.Launcher;
 public sealed class MainForm : Form
 {
     private readonly ServerProcess _server = new();
+    private readonly Tunnel _tunnel = new();
+    private readonly TextBox _publicUrl = Ro();
+    private readonly CheckBox _tunnelOn = new() { Text = "Publicar en internet con Cloudflare Tunnel", AutoSize = true, ForeColor = Color.Gainsboro };
+    private readonly TextBox _host = new() { Width = 200, PlaceholderText = "stream.tudominio.com" };
+    private readonly TextBox _token = new() { Width = 260, UseSystemPasswordChar = true, PlaceholderText = "pega el token del túnel" };
     private readonly Settings _settings = Settings.Load();
     private readonly NotifyIcon _tray;
     private readonly Label _status = new() { AutoSize = true, Font = new Font("Segoe UI", 11, FontStyle.Bold) };
@@ -25,14 +30,17 @@ public sealed class MainForm : Form
     public MainForm(string[] args)
     {
         Text = "StreamWebRom";
-        Width = 760; Height = 600; MinimumSize = new Size(640, 480);
+        Width = 820; Height = 680; MinimumSize = new Size(640, 480);
         BackColor = Bg; ForeColor = Color.White; Font = new Font("Segoe UI", 9.5f);
         StartPosition = FormStartPosition.CenterScreen;
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
+        _tunnelOn.Checked = _settings.TunnelEnabled; _host.Text = _settings.PublicHost;
+        if (!string.IsNullOrEmpty(_settings.TunnelTokenProtected)) _token.PlaceholderText = "token guardado (cifrado) · pega otro para cambiarlo";
         _port.Value = _settings.Port; _udp.Value = _settings.UdpPort; _https.Checked = _settings.Https; _pubIp.Text = _settings.PublicIp;
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), RowCount = 5, ColumnCount = 1, BackColor = Bg };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), RowCount = 6, ColumnCount = 1, BackColor = Bg };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -50,11 +58,12 @@ public sealed class MainForm : Form
         urls.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         AddUrlRow(urls, "Este equipo", _localUrl);
         AddUrlRow(urls, "Tu red (teléfonos, otros PCs)", _lanUrl);
+        AddUrlRow(urls, "Internet (invitados y OBS remotos)", _publicUrl);
         root.Controls.Add(urls);
 
         var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, Padding = new Padding(0, 10, 0, 10) };
         var open = Btn("Abrir estudio", true);
-        open.Click += (_, _) => OpenUrl(_localUrl.Text);
+        open.Click += (_, _) => OpenUrl(_settings.TunnelActive ? _publicUrl.Text : _localUrl.Text);
         var folder = Btn("Grabaciones");
         folder.Click += (_, _) => { var d = Path.Combine(ServerProcess.DataDir, "data", "recordings"); Directory.CreateDirectory(d); Process.Start("explorer.exe", d); };
         var obsHelp = Btn("Cómo usar con OBS");
@@ -79,6 +88,19 @@ public sealed class MainForm : Form
         opts.Controls.Add(apply);
         root.Controls.Add(opts);
 
+        var tun = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, BackColor = Panel, Padding = new Padding(10), Margin = new Padding(0, 10, 0, 0) };
+        tun.Controls.Add(_tunnelOn);
+        tun.Controls.Add(Lbl("Dominio")); tun.Controls.Add(_host);
+        tun.Controls.Add(Lbl("Token")); tun.Controls.Add(_token);
+        var tunHelp = Btn("¿Dónde está el token?");
+        tunHelp.Click += (_, _) => MessageBox.Show(
+            "Cloudflare → Zero Trust → Networks → Tunnels → streamwebrom → Configure → copia el token de “Install and run a connector” (la parte larga después de --token).\n\n" +
+            "Se guarda cifrado con tu usuario de Windows y nunca sale de este PC.\n\n" +
+            "El video viaja por UDP directo a este PC: abre/reenvía el puerto UDP de media (por defecto 50000) en tu router para que conecten invitados detrás de cualquier red.",
+            "Cloudflare Tunnel", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        tun.Controls.Add(tunHelp);
+        root.Controls.Add(tun);
+
         var logBox = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8), BackColor = Color.FromArgb(15, 15, 24), Margin = new Padding(0, 10, 0, 0) };
         logBox.Controls.Add(_log);
         root.Controls.Add(logBox);
@@ -92,6 +114,7 @@ public sealed class MainForm : Form
         _tray = new NotifyIcon { Icon = Icon, Text = "StreamWebRom", Visible = true, ContextMenuStrip = menu };
         _tray.DoubleClick += (_, _) => ShowWindow();
 
+        _tunnel.Output += line => BeginInvoke(() => AppendLog(line));
         _server.Output += line => BeginInvoke(() => AppendLog(line));
         _server.Exited += code => BeginInvoke(() => { if (!_quitting) SetStatus($"detenido (código {code})", Color.OrangeRed); _startStop.Text = "Iniciar"; });
 
@@ -107,6 +130,8 @@ public sealed class MainForm : Form
             SaveSettings();
             _server.Start(_settings);
             SetStatus("● en línea", Color.LimeGreen);
+            if (_settings.TunnelActive) _ = StartTunnelAsync();
+            else if (_settings.TunnelEnabled) AppendLog("Túnel: pega el token de Cloudflare y pulsa “Aplicar y reiniciar” para publicar en " + _settings.PublicHost);
             _startStop.Text = "Detener";
             UpdateUrls();
             if (ServerProcess.FindFfmpeg() == null)
@@ -119,18 +144,32 @@ public sealed class MainForm : Form
         }
     }
 
-    private void StopServer() { _server.Stop(); SetStatus("detenido", Color.Orange); _startStop.Text = "Iniciar"; }
+    private async Task StartTunnelAsync()
+    {
+        try
+        {
+            await _tunnel.StartAsync(_settings.TunnelToken);
+            AppendLog("Túnel Cloudflare activo → https://" + _settings.PublicHost);
+            SetStatus("● en línea · " + _settings.PublicHost, Color.LimeGreen);
+        }
+        catch (Exception ex) { AppendLog("Túnel: " + ex.Message); }
+    }
+
+    private void StopServer() { _tunnel.Stop(); _server.Stop(); SetStatus("detenido", Color.Orange); _startStop.Text = "Iniciar"; }
 
     private void SaveSettings()
     {
         _settings.Port = (int)_port.Value; _settings.UdpPort = (int)_udp.Value;
         _settings.Https = _https.Checked; _settings.PublicIp = _pubIp.Text;
+        _settings.TunnelEnabled = _tunnelOn.Checked; _settings.PublicHost = _host.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(_token.Text)) { _settings.TunnelToken = _token.Text; _token.Clear(); _token.PlaceholderText = "token guardado (cifrado) · pega otro para cambiarlo"; }
         _settings.Save();
     }
 
     private void UpdateUrls()
     {
-        var scheme = _settings.Https ? "https" : "http";
+        var scheme = _settings.ServeHttps ? "https" : "http";
+        _publicUrl.Text = _settings.TunnelActive ? "https://" + _settings.PublicHost : "(túnel desactivado)";
         _localUrl.Text = $"{scheme}://localhost:{_settings.Port}";
         _lanUrl.Text = $"{scheme}://{LanIp()}:{_settings.Port}";
     }
@@ -158,7 +197,7 @@ public sealed class MainForm : Form
 
     private void ShowWindow() { Show(); ShowInTaskbar = true; WindowState = FormWindowState.Normal; Activate(); }
 
-    private void Quit() { _quitting = true; _server.Stop(); _tray.Visible = false; Application.Exit(); }
+    private void Quit() { _quitting = true; _tunnel.Stop(); _server.Stop(); _tray.Visible = false; Application.Exit(); }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -168,6 +207,7 @@ public sealed class MainForm : Form
             _tray.ShowBalloonTip(2000, "StreamWebRom", "Sigue funcionando en la bandeja. Clic derecho → Salir para cerrarlo.", ToolTipIcon.Info);
             return;
         }
+        _tunnel.Stop();
         _server.Stop();
         base.OnFormClosing(e);
     }
