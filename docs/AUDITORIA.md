@@ -77,3 +77,12 @@ que el original delega en servidores externos, y reescribir el cliente para que 
 - La grabación del programa compuesto se hace grabando el stream `program`; mezclar pistas aisladas en edición queda al usuario (se genera `.mkv` por fuente si hay ffmpeg).
 - Trickle ICE no se usa: las ofertas esperan hasta 2–3 s a juntar candidatos. Es más robusto, pero agrega ese tiempo al conectar.
 - Los tests de navegador (Chrome real) no corren en este entorno; el cliente se validó por sintaxis y los flujos WebRTC se probaron con clientes pion reales.
+
+## v1.2.0 — director remoto, escenas y efectos (2026-10-17)
+
+- **Control remoto**: el servidor sólo reenvía acciones de `RequestActions` (lista blanca) con `value` ≤ 4 KB; `transfer` exige que la sala de destino exista. El invitado valida cada valor (rango de resolución/FPS/bitrate, dispositivo dentro de los que ya autorizó, controles de cámara en lista blanca `CAMCTL`). Encender cámara, micrófono o pantalla siempre requiere un clic del invitado; apagar es inmediato.
+- **Reportes** invitado → anfitrión (`report`): sólo `devices`, `stats`, `quality`, `ack`, ≤ 16 KB, y únicamente llegan a anfitriones de la misma sala. Los IDs de dispositivo se comparten sólo con el anfitrión.
+- **Escenas** `outputs`: nombres `^[a-z0-9-]{1,16}$`, validadas en servidor; `/view?scene=N` sigue requiriendo la clave de visualización.
+- **Efectos de video**: MediaPipe Tasks Vision 0.10.14 (Apache-2.0) incluido en `web/vendor/mediapipe` (sin CDN). La CSP agrega sólo `'wasm-unsafe-eval'` (necesario para WebAssembly) y `worker-src 'self'`; sigue sin `unsafe-eval` ni scripts inline. Las imágenes/videos de fondo nunca salen del equipo (object URL; imágenes < 1,5 MB se guardan en localStorage).
+- **Rendimiento**: el bucle de efectos usa un reloj en Worker (no se frena en pestañas ocultas), descarta ticks atrasados y limita la segmentación según su costo para no bloquear la señalización (detectado en QA: sin GPU, la cola de ticks retrasaba los mensajes WebSocket).
+- **QA automatizada** (Chromium 155 headless con cámara falsa): desenfoque activo, fondo croma, reemplazo por imagen, estadísticas en vivo en el panel 🎛️, cambio remoto a 360p aplicado (640×360), mensaje privado, escena 2 con insignia en el invitado y salida `/view?scene=2`, traslado a otra sala.

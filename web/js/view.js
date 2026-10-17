@@ -1,6 +1,7 @@
 // Clean output for OBS Browser Source / vMix / any browser.
 //   /view?room=R&scene=1#key=VIEWKEY            full program (layout, brand, banners)
 //   /view?room=R&scene=1&transparent=1#key=...  same, transparent background
+//   /view?room=R&scene=2#key=...                extra scene 2..8 (its own lineup/layout, VDO.Ninja "add to scene")
 //   /view?room=R&stream=ID#key=...              one source, full frame
 // Optional (VDO.Ninja-style):
 //   &cover=1 crop to fill · &mute=1 / &noaudio no sound · &volume=0..100
@@ -14,6 +15,10 @@ const room = (params.get("room") || "").toLowerCase();
 const key = hashParams.get("key") || params.get("key") || "";
 const only = params.get("stream");
 const scene = params.has("scene") || !only;
+const sceneName = (params.get("scene") || "1").toLowerCase();
+// Scene 1 (or bare &scene) is the program; other names come from state.outputs.
+const view = () => sceneName === "1" || sceneName === "" || sceneName === "0" ? state
+  : { ...state, stage: [], layout: "grid", featured: "", ...((state.outputs || {})[sceneName] || {}) };
 const muted = params.get("mute") === "1" || params.has("noaudio") || params.has("na");
 const baseVol = (() => { const v = Number(params.get("volume") ?? params.get("vol") ?? 100); return Math.max(0, Math.min(1, v > 1 ? v / 100 : v)); })();
 const audioOnly = params.has("audioonly") || params.has("ao");
@@ -44,8 +49,8 @@ function playAudio(id, stream) {
 function syncAudio() {
   // Only what is on stage is audible in the program, exactly like the studio mix.
   for (const [id, a] of audios) {
-    a.muted = scene && !(state.stage || []).includes(id);
-    a.volume = Math.min(1, baseVol * (scene ? programGain(state, id) : 1));
+    a.muted = scene && !(view().stage || []).includes(id);
+    a.volume = Math.min(1, baseVol * (scene ? programGain(view(), id) : 1));
   }
   if (only) single.volume = baseVol;
 }
@@ -87,7 +92,7 @@ sig.connect({ type: "join", room, role: "viewer", key, name: "OBS" })
     if (scene && !only) {
       const c = $("#out");
       c.classList.remove("hidden");
-      new Compositor(c, sources, () => state, { transparent: params.get("transparent") === "1" }).start();
+      new Compositor(c, sources, view, { transparent: params.get("transparent") === "1" }).start();
     }
     (m.streams || []).forEach(watch);
     say(only ? "esperando señal…" : "");

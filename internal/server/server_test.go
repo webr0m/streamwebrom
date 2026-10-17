@@ -123,6 +123,22 @@ func TestPagesAndHeaders(t *testing.T) {
 			t.Errorf("%s: missing security headers", p)
 		}
 	}
+	// Background effects: vendored MediaPipe must be served with the right
+	// types, and the CSP must allow WebAssembly (but still no eval/inline).
+	for p, ct := range map[string]string{"/js/effects.js": "javascript", "/js/ticker.js": "javascript", "/vendor/mediapipe/vision_bundle.mjs": "javascript", "/vendor/mediapipe/vision_wasm_internal.wasm": "application/wasm", "/vendor/mediapipe/selfie_segmenter.tflite": ""} {
+		res, err := http.Get(e.ts.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != 200 || !strings.Contains(res.Header.Get("Content-Type"), ct) {
+			t.Errorf("%s: status %d type %q", p, res.StatusCode, res.Header.Get("Content-Type"))
+		}
+		csp := res.Header.Get("Content-Security-Policy")
+		if !strings.Contains(csp, "'wasm-unsafe-eval'") || strings.Contains(csp, "'unsafe-eval'") || strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
+			t.Errorf("%s: unexpected CSP %q", p, csp)
+		}
+	}
 	res, _ := http.Get(e.ts.URL + "/api/admin/stats")
 	if res.StatusCode != 401 {
 		t.Errorf("admin without token should be 401, got %d", res.StatusCode)
@@ -450,5 +466,35 @@ func TestModeration(t *testing.T) {
 	st := a.expect("state")
 	if !st.State.StageMuted || !st.State.Muted["s1"] || !st.State.Hidden["s2"] || st.State.Volumes["s3"] != 1.5 {
 		t.Fatalf("moderation state not broadcast: %+v", st.State)
+	}
+
+	// remote encoder control (director -> guest) carries its value
+	host.send(map[string]any{"type": "request", "target": aw.PeerID, "action": "quality", "value": map[string]any{"height": 720, "fps": 30, "kbps": 2500}})
+	if m := a.expect("request"); m.Action != "quality" || !strings.Contains(string(m.Value), `"height":720`) {
+		t.Fatalf("quality request: %+v", m)
+	}
+	// oversized values are refused
+	host.send(map[string]any{"type": "request", "target": aw.PeerID, "action": "message", "value": strings.Repeat("x", 5000)})
+	host.expect("error")
+	// transfer only to an existing room
+	host.send(map[string]any{"type": "request", "target": aw.PeerID, "action": "transfer", "value": "nope"})
+	if m := host.expect("error"); !strings.Contains(m.Error, "transfer") {
+		t.Fatalf("transfer: %+v", m)
+	}
+	// guest -> host reports (device list, stats)
+	a.send(map[string]any{"type": "report", "action": "stats", "value": map[string]any{"kbps": 2400}})
+	if m := host.expect("report"); m.Action != "stats" || m.PeerID != aw.PeerID {
+		t.Fatalf("report: %+v", m)
+	}
+	a.send(map[string]any{"type": "report", "action": "eval"})
+	a.expect("error")
+
+	// live scenes (VDO.Ninja scene=N)
+	host.send(map[string]any{"type": "state", "value": map[string]any{"outputs": map[string]any{"BAD NAME": map[string]any{}}}})
+	host.expect("error")
+	host.send(map[string]any{"type": "state", "value": map[string]any{"outputs": map[string]any{"2": map[string]any{"stage": []string{"s1"}, "layout": "split"}}}})
+	st = a.expect("state")
+	if st.State.Outputs["2"].Layout != "split" || len(st.State.Outputs["2"].Stage) != 1 {
+		t.Fatalf("outputs: %+v", st.State.Outputs)
 	}
 }

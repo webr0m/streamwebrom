@@ -12,6 +12,7 @@
 //   so whatever the camera exposes becomes a slider or switch.
 // - Mic gain is applied with a Web Audio GainNode only when != 100 %.
 import { $, el, toast, params } from "./rtc.js";
+import { applyEffect, effectActive, needsCamera, effectsPanel } from "./effects.js";
 
 const STORE = "swr.devices";
 
@@ -32,7 +33,7 @@ const off = (...names) => names.some((n) => params.has(n) && ["0", "false", "off
 export function loadPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch {}
-  p = { camera: "", mic: "", speaker: "", quality: "720", fps: "30", echo: true, denoise: true, autogain: true, stereo: false, mirror: true, gain: 100, codec: "", ...p };
+  p = { camera: "", mic: "", speaker: "", quality: "720", fps: "30", echo: true, denoise: true, autogain: true, stereo: false, mirror: true, gain: 100, codec: "", effect: "none", effectPreset: "", ...p };
   const g = (n) => params.get(n);
   // &quality=0/1/2 (VDO) or a height
   if (params.has("quality")) p.quality = ({ 0: "1080", 1: "720", 2: "360" })[g("quality")] || g("quality");
@@ -50,12 +51,17 @@ export function loadPrefs() {
   if (g("outputdevice") || g("sink") || g("od")) p.speakerHint = g("outputdevice") || g("sink") || g("od");
   if (flag("novideo", "nv", "audioonly") || g("videodevice") === "0") p.camera = "none";
   if (flag("noaudio", "na") || g("audiodevice") === "0") p.mic = "none";
+  // &effects=blur|blur-strong|bg|replace|none (VDO.Ninja: &effects / &blur) and &bgpreset=green|studio|...
+  if (g("effects") || g("effect")) p.effect = ({ 0: "none", 1: "blur", 2: "blur", 3: "blur-strong", 4: "bg", 5: "bg" })[g("effects") || g("effect")] || g("effects") || g("effect");
+  if (params.has("blur")) p.effect = "blur";
+  if (g("bgpreset")) { p.effect = "bg"; p.effectPreset = g("bgpreset"); }
   if (g("gain")) p.gain = Math.max(0, Math.min(400, Number(g("gain")) || 100));
   return p;
 }
 
 export function savePrefs(p) {
   const { cameraHint, micHint, speakerHint, ...keep } = p;
+  try { localStorage.setItem(STORE, JSON.stringify(keep)); return; } catch { delete keep.effectBgImage; delete keep.effectReplaceImage; } // quota: drop saved images
   localStorage.setItem(STORE, JSON.stringify(keep));
 }
 
@@ -121,6 +127,18 @@ function gum(c) {
  * device works; returns { stream, warnings[] }.
  */
 export async function openMedia(p) {
+  const r = await openRaw(effectActive(p) && !needsCamera(p) ? { ...p, camera: "none" } : p);
+  if (!effectActive(p)) return r;
+  const cam = r.stream.getVideoTracks()[0];
+  if (!cam && needsCamera(p)) return r;
+  try {
+    const fx = await applyEffect(cam || null, p);
+    if (fx !== cam) { if (cam) r.stream.removeTrack(cam); r.stream.addTrack(fx); }
+  } catch (e) { console.warn("effect", e); r.warnings.push("No se pudo aplicar el efecto de video; envío la cámara normal."); }
+  return r;
+}
+
+async function openRaw(p) {
   const warnings = [];
   if (!navigator.mediaDevices?.getUserMedia) {
     return { stream: new MediaStream(), warnings: ["Este navegador no permite cámara ni micrófono (¿página sin HTTPS?)."] };
@@ -194,6 +212,7 @@ async function withGain(stream, p) {
 
 /** Camera controls generated from capabilities: returns an element or null. */
 export function cameraControls(track) {
+  track = track?.raw || track;
   if (!track || !track.getCapabilities) return null;
   let caps; try { caps = track.getCapabilities(); } catch { return null; }
   const set = track.getSettings ? track.getSettings() : {};
@@ -258,6 +277,7 @@ export async function renderPanel(root, prefs, onChange, opts = {}) {
     el("div", {}, el("label", { text: "Ganancia del micrófono " }, gainLbl), gain),
     spk ? el("div", {}, el("label", { for: "dev-spk", text: "🎧 Audífonos / parlantes" }), el("div", { class: "row" }, spk, test)) :
       el("p", { class: "muted", style: "margin:0;font-size:12px", text: "🎧 La salida de audio se elige en el sistema (este navegador no permite cambiarla)." }),
+    opts.effects !== false ? effectsPanel(prefs, (what) => { savePrefs(prefs); onChange(prefs, what); }) : null,
     el("details", {}, el("summary", { text: "Opciones avanzadas de audio y video" }),
       el("div", { class: "col", style: "margin-top:8px" },
         chk("dev-echo", "Cancelación de eco", prefs.echo),

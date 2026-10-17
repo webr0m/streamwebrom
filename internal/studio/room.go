@@ -74,6 +74,7 @@ type State struct {
 	Recording []string          `json:"recording"`
 	Restream  *restream.Status  `json:"restream,omitempty"`
 	Scenes    map[string]Scene  `json:"scenes"`
+	Outputs   map[string]Output `json:"outputs"`   // live scenes 2..8 (and custom), each with its own lineup
 	Labels    map[string]string `json:"labels"`    // stream id -> display name / lower third
 	Countdown int64             `json:"countdown"` // unix ms target, 0 = none
 
@@ -89,6 +90,14 @@ type Scene struct {
 	Layout string   `json:"layout"`
 	Stage  []string `json:"stage"`
 	Banner *Banner  `json:"banner"`
+}
+
+// Output is a live scene other than the program: its own lineup and layout,
+// rendered by /view?scene=NAME (VDO.Ninja "add to scene N").
+type Output struct {
+	Stage    []string `json:"stage"`
+	Layout   string   `json:"layout"`
+	Featured string   `json:"featured"`
 }
 
 // Room is a production.

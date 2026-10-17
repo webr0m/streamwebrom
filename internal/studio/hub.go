@@ -285,6 +285,15 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 		p.mu.Unlock()
 		h.peerUpdated(p)
 		return nil
+	case "report": // guest -> hosts: device list, live stats, applied quality
+		if !slices.Contains(ReportActions, m.Action) {
+			return fmt.Errorf("unknown report %q", m.Action)
+		}
+		if len(m.Value) > maxReportValue {
+			return errors.New("report too large")
+		}
+		r.toHosts(Msg{Type: "report", Action: m.Action, Value: m.Value, PeerID: p.ID, Name: p.Name, ReqID: m.ReqID})
+		return nil
 	case "reaction":
 		e := m.Text
 		if utf8.RuneCountInString(e) > 4 {
@@ -483,7 +492,17 @@ func (h *Hub) subscribe(ctx context.Context, p *Peer, m Msg) error {
 }
 
 // RequestActions are the moderation requests a host may send to guests.
-var RequestActions = []string{"mute", "unmute", "camoff", "camon", "lowerhand", "screenoff"}
+var RequestActions = []string{
+	"mute", "unmute", "camoff", "camon", "lowerhand", "screenoff", // moderation
+	"quality", "device", "devices", "stats", "camctl", "gain", "audio", // remote device / encoder control (VDO.Ninja director)
+	"deafen", "undeafen", "message", "reload", "transfer", "screenon",
+}
+
+// ReportActions are the replies a guest may send back to the hosts.
+var ReportActions = []string{"devices", "stats", "quality", "ack"}
+
+const maxRequestValue = 4 << 10
+const maxReportValue = 16 << 10
 
 // requestTargets resolves a request target: a peer id, "*" (every guest) or
 // "stage" (every guest that has a stream on stage).
@@ -557,6 +576,15 @@ func (h *Hub) hostAction(host *Peer, m Msg) error {
 	case "request": // remote moderation: mute/unmute mic, camera off/on, lower hand...
 		if !slices.Contains(RequestActions, m.Action) {
 			return fmt.Errorf("unknown request %q", m.Action)
+		}
+		if len(m.Value) > maxRequestValue {
+			return errors.New("request value too large")
+		}
+		if m.Action == "transfer" {
+			var to string
+			if err := json.Unmarshal(m.Value, &to); err != nil || h.Room(to) == nil {
+				return errors.New("transfer: destination room not found")
+			}
 		}
 		targets := h.requestTargets(r, host, m.Target)
 		if len(targets) == 0 {
@@ -667,6 +695,25 @@ func (h *Hub) setState(r *Room, m Msg) error {
 					}
 					st.Scenes = sc
 				}
+			case "outputs": // VDO.Ninja-style extra scenes (/view?scene=N), "1" is the program
+				var o map[string]Output
+				if err = json.Unmarshal(v, &o); err == nil {
+					if len(o) > 12 {
+						return errors.New("too many scenes")
+					}
+					for name, sc := range o {
+						if !sceneNameRe.MatchString(name) {
+							return fmt.Errorf("bad scene name %q", name)
+						}
+						if len(sc.Stage) > 25 {
+							return errors.New("too many in scene")
+						}
+						if sc.Layout != "" && !slices.Contains(Layouts, sc.Layout) {
+							return fmt.Errorf("unknown layout %q", sc.Layout)
+						}
+					}
+					st.Outputs = o
+				}
 			case "labels":
 				var l map[string]string
 				if err = json.Unmarshal(v, &l); err == nil {
@@ -725,6 +772,8 @@ func limit(s string, n int) string {
 	}
 	return s
 }
+
+var sceneNameRe = regexp.MustCompile(`^[a-z0-9-]{1,16}$`)
 
 var colorRe = regexp.MustCompile(`^#[0-9a-fA-F]{3,8}$`)
 

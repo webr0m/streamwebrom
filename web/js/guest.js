@@ -11,6 +11,7 @@
 //   &novideo / &noaudio     audio-only / video-only
 import { $, el, toast, params, api, Signal, publish, subscribe, levelMeter } from "./rtc.js";
 import { listDevices, openScreen, loadPrefs, savePrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain } from "./devices.js";
+import { remoteSnapshot, remoteStats, CAMCTL } from "./remote.js";
 
 const room = (params.get("room") || "").toLowerCase();
 if (!room) location.href = "/";
@@ -31,7 +32,8 @@ api(`/api/rooms/${encodeURIComponent(room)}`).then((r) => {
   $("#pwBox").classList.toggle("hidden", !r.password);
 }).catch(() => { $("#roomTitle").textContent = "Esta sala no existe o ya terminó"; $("#joinBtn").disabled = true; });
 
-const videoKbps = () => Number(params.get("bitrate") || params.get("vb")) || kbpsFor(Number(prefs.quality));
+let remoteKbps = 0; // set by the host (director) from the studio
+const videoKbps = () => remoteKbps || Number(params.get("bitrate") || params.get("vb")) || kbpsFor(Number(prefs.quality));
 const pubOpts = (name) => ({ kind: "camera", name, videoKbps: videoKbps(), fps: Number(prefs.fps) || 30, codec: prefs.codec, stereo: prefs.stereo, audioKbps: prefs.stereo ? 256 : 96 });
 
 let meterTimer;
@@ -75,7 +77,7 @@ async function onPrefChange(p, what) {
 }
 
 /** Hot-swap camera or mic during the call (no reconnection, no renegotiation). */
-async function swapDevices(what) {
+async function swapDevices(what, quiet = false) {
   const kind = what === "video" ? "video" : "audio";
   const opened = await openMedia({ ...prefs, camera: kind === "video" ? prefs.camera : "none", mic: kind === "audio" ? prefs.mic : "none" });
   opened.warnings.forEach((w) => toast(w, "err"));
@@ -94,7 +96,7 @@ async function swapDevices(what) {
   if (kind === "audio") showMeter(media);
   $("#devCamCtl")?.replaceChildren(cameraControls(media.getVideoTracks()[0]) || "");
   sendMedia();
-  toast(kind === "video" ? "Cámara cambiada" : "Micrófono cambiado", "ok");
+  if (!quiet) toast(kind === "video" ? "Cámara cambiada" : "Micrófono cambiado", "ok");
 }
 
 onDeviceChange(() => {
@@ -165,8 +167,100 @@ sig.on("request", (m) => {
     case "camon": ask("El anfitrión te pide encender la cámara", "Encender", () => setCam(true)); break;
     case "lowerhand": $("#handBtn").classList.remove("on"); break;
     case "screenoff": if (screenPub) stopScreen(); toast("El anfitrión detuvo tu pantalla compartida"); break;
+    case "screenon": if (!screenPub) ask("El anfitrión te pide compartir tu pantalla", "Compartir", () => $("#screenBtn").click()); break;
+    default: remoteControl(m.action, m.value).catch((e) => toast(e.message, "err"));
   }
 });
+
+// ---------- director remote control (VDO.Ninja-style) ----------
+// The host can tune what we send (resolution, fps, bitrate), switch our camera
+// or mic among the devices we already allowed, adjust camera controls (zoom,
+// focus, exposure...), mic gain and processing, and read live stats. Turning a
+// camera or mic ON still needs the guest's click (see ask()).
+const report = (action, value) => sig.send({ type: "report", action, value });
+let deafened = false;
+async function remoteControl(action, v) {
+  const camTrack = () => { const t = media.getVideoTracks()[0]; return t?.raw || t; };
+  switch (action) {
+    case "devices":
+      return report("devices", await remoteSnapshot(media, prefs, { videoKbps: videoKbps() }));
+    case "stats":
+      return report("stats", await remoteStats(pub));
+    case "quality": {
+      const h = Number(v?.height), fps = Number(v?.fps), kbps = Number(v?.kbps);
+      if (h && h >= 144 && h <= 2160) prefs.quality = String(h);
+      if (fps && fps >= 1 && fps <= 60) prefs.fps = String(fps);
+      remoteKbps = kbps >= 50 && kbps <= 50000 ? Math.round(kbps) : (v?.kbps === 0 ? 0 : remoteKbps);
+      const t = camTrack();
+      let ok = false;
+      if (t && t.applyConstraints && !media.getVideoTracks()[0]?.effect) {
+        try {
+          await t.applyConstraints({ width: { ideal: Math.round(Number(prefs.quality) * 16 / 9) }, height: { ideal: Number(prefs.quality) }, frameRate: { ideal: Number(prefs.fps) } });
+          ok = true;
+        } catch (e) { console.warn("applyConstraints", e); }
+      }
+      if (!ok && t) await swapDevices("video", true);
+      if (pub) await pub.setBitrate(videoKbps(), Number(prefs.fps) || 30);
+      savePrefs(prefs);
+      toast(`El anfitrión ajustó tu video: ${prefs.quality}p · ${prefs.fps} fps · ${videoKbps()} kbps`);
+      return report("quality", await remoteSnapshot(media, prefs, { videoKbps: videoKbps() }));
+    }
+    case "device": {
+      const kind = v?.kind === "audio" ? "audio" : "video";
+      const { cams, mics } = await listDevices();
+      const list = kind === "video" ? cams : mics;
+      if (!list.some((d) => d.deviceId === v?.deviceId)) throw new Error("Dispositivo no encontrado");
+      if (kind === "video") prefs.camera = v.deviceId; else prefs.mic = v.deviceId;
+      savePrefs(prefs);
+      await swapDevices(kind, true);
+      toast(kind === "video" ? "El anfitrión cambió tu cámara" : "El anfitrión cambió tu micrófono");
+      return report("devices", await remoteSnapshot(media, prefs, { videoKbps: videoKbps() }));
+    }
+    case "camctl": {
+      const t = camTrack();
+      if (!t || !CAMCTL.includes(v?.name)) throw new Error("Control de cámara no disponible");
+      await t.applyConstraints({ advanced: [{ [v.name]: v.value }] });
+      return;
+    }
+    case "gain": {
+      const g = Number(v);
+      if (!(g >= 0 && g <= 400)) return;
+      prefs.gain = Math.round(g); savePrefs(prefs);
+      await swapDevices("audio", true);
+      return toast(`El anfitrión ajustó tu micrófono a ${prefs.gain}%`);
+    }
+    case "audio": {
+      for (const k of ["echo", "denoise", "autogain", "stereo"]) if (typeof v?.[k] === "boolean") prefs[k] = v[k];
+      savePrefs(prefs);
+      return swapDevices("audio", true);
+    }
+    case "deafen": case "undeafen":
+      deafened = action === "deafen";
+      for (const r of remotes.values()) if (r.video) r.video.muted = deafened;
+      return toast(deafened ? "El anfitrión silenció lo que escuchas (por ejemplo, para que no se acople)" : "Vuelves a escuchar la sala");
+    case "message":
+      return showHostMessage(String(v || "").slice(0, 500));
+    case "reload": {
+      const u = new URL(location.href);
+      u.searchParams.set("label", $("#name").value); u.searchParams.set("autostart", "1");
+      return location.replace(u.toString());
+    }
+    case "transfer": {
+      const u = new URL(location.href);
+      u.searchParams.set("room", String(v || "")); u.searchParams.set("label", $("#name").value); u.searchParams.set("autostart", "1");
+      toast("El anfitrión te está moviendo a otra sala…");
+      sig.close(); pub?.stop();
+      return setTimeout(() => location.replace(u.toString()), 600);
+    }
+  }
+}
+
+function showHostMessage(text) {
+  if (!text) return;
+  const box = el("div", { class: "hostmsg" }, el("b", { text: "Mensaje del anfitrión" }), el("p", { text }), el("button", { class: "small primary", onclick: () => box.remove(), text: "Entendido" }));
+  document.body.append(box);
+  setTimeout(() => box.remove(), 30000);
+}
 sig.on("error", (m) => toast(m.error, "err"));
 
 function ask(text, btn, fn) {
@@ -194,9 +288,9 @@ function unwatch(id) {
 
 function addTile(id, stream, name, mine, level) {
   const v = el("video", { playsinline: true, autoplay: true });
-  v.muted = mine; v.srcObject = stream;
+  v.muted = mine || deafened; v.srcObject = stream;
   if (mine) mirrorPreview(v); else applySink(v, prefs.speaker);
-  v.play().catch(() => { v.muted = true; v.play().catch(() => {}); document.addEventListener("click", () => { v.muted = mine; v.play(); }, { once: true }); });
+  v.play().catch(() => { v.muted = true; v.play().catch(() => {}); document.addEventListener("click", () => { v.muted = mine || deafened; v.play(); }, { once: true }); });
   const vol = mine ? null : el("input", { type: "range", min: 0, max: 1, step: 0.05, value: 1, title: "Volumen (solo para ti)", class: "tilevol", oninput: (e) => { v.volume = Number(e.target.value); } });
   const tile = el("div", { class: "tile", "data-id": id }, v, el("span", { class: "name", text: name }), vol);
   $("#grid").append(tile);
@@ -208,8 +302,9 @@ function updateStageBadge() {
   const mine = [pub?.id, screenPub?.id, ...extraCams.keys()].filter(Boolean);
   const live = mine.some((id) => (state.stage || []).includes(id));
   const progMuted = state.stageMuted || mine.some((id) => state.muted?.[id]);
+  const others = Object.entries(state.outputs || {}).filter(([, o]) => mine.some((id) => (o.stage || []).includes(id))).map(([n]) => n);
   const b = $("#stageState");
-  b.textContent = live ? (state.live ? "EN VIVO" : "en escenario") + (live && progMuted ? " · silenciado" : "") : "backstage";
+  b.textContent = live ? (state.live ? "EN VIVO" : "en escenario") + (live && progMuted ? " · silenciado" : "") : others.length ? `en escena ${others.join(", ")}` : "backstage";
   b.className = "pill " + (live ? "red" : "");
 }
 

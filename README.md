@@ -22,6 +22,9 @@ Ver [docs/AUDITORIA.md](docs/AUDITORIA.md).
 | ⚡ **Veloz** | SFU: cada invitado sube una sola vez. Reenvío RTP sin decodificar, PLI inmediato, jitter buffer mínimo. |
 | 🎧 **Dispositivos como VDO.Ninja** | Elige cámara, micrófono y audífonos dentro de la app (también en plena llamada, sin cortar). Resolución hasta 4K, FPS, ganancia, eco/ruido/AGC, estéreo HQ, códec, zoom/enfoque/exposición/linterna/desenfoque de fondo según lo que soporte la cámara. |
 | 🛡️ **Control del anfitrión** | Silenciar escenario, silenciar a todos, silenciar u ocultar a alguien solo en el programa, volumen por fuente, apagar cámaras, pedir audio/cámara, bajar manos, expulsar. |
+| 🎛️ **Director como VDO.Ninja** | Por invitado: resolución, FPS y bitrate de lo que envía, cambiar su cámara o micrófono, zoom/enfoque/exposición, ganancia y eco/ruido, estadísticas en vivo, mensaje privado, que no escuche, recargar y mover a otra sala. |
+| 🎞️ **Escenas 1–8** | Programa + 7 escenas extra, cada una con su gente y layout, con link de OBS propio (`scene=N`) y vista previa. |
+| ✨ **Efectos de video** | Desenfoque de fondo, fondo virtual (imagen, video, degradados, verde/azul croma) o reemplazar la cámara por imagen/video. Se procesa en el equipo, sin CDN. |
 | 📺 **Pantalla virtual** | Ventana limpia del programa para proyector, segundo monitor, captura de ventana o Cámara Virtual de OBS (doble clic = pantalla completa). |
 | 🔐 **Seguro** | Roles validados en servidor, bcrypt, claves separadas (anfitrión / ver / publicar), CSP estricta, rate-limit. |
 
@@ -90,12 +93,14 @@ Las claves viajan en el fragmento `#`, que el navegador nunca envía al servidor
 | `stereo` · `denoise=0` · `echo=0` · `autogain=0` · `gain=150` | Audio profesional |
 | `novideo` · `noaudio` · `muted` · `videomute` | Solo audio, solo video, entrar silenciado |
 | `screenshare` | Entrar compartiendo pantalla |
+| `effects=blur/bg/replace` · `blur` · `bgpreset=green` | Efecto de video (desenfoque, fondo virtual, reemplazo) |
 
 **Salida para OBS** `/view?room=R&…#key=VIEWKEY`
 
 | Parámetro | Efecto |
 |---|---|
 | `scene=1` | Programa completo · `transparent=1` fondo transparente |
+| `scene=2` … `scene=8` | Escenas extra armadas en el estudio |
 | `stream=ID` | Una sola cámara (cada fuente tiene su botón **🔗 OBS**) |
 | `cover=1` · `mirror=1` · `rotate=90` · `bg=000000` | Encuadre |
 | `mute=1` · `volume=50` · `audioonly=1` | Audio |

@@ -1,0 +1,4 @@
+MediaPipe Tasks Vision 0.10.14 (@mediapipe/tasks-vision) and selfie_segmenter.tflite
+Copyright Google LLC. Licensed under the Apache License, Version 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+Vendored unmodified so background effects work offline and under CSP script-src self.
