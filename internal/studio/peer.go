@@ -1,0 +1,149 @@
+package studio
+
+import (
+	"encoding/json"
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/pion/webrtc/v4"
+	"golang.org/x/time/rate"
+
+	"github.com/webr0m/streamwebrom/internal/restream"
+	"github.com/webr0m/streamwebrom/internal/sfu"
+)
+
+// Msg is the single signalling envelope (JSON over WebSocket).
+type Msg struct {
+	Type string `json:"type"`
+
+	// identity / auth
+	Room     string `json:"room,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Role     Role   `json:"role,omitempty"`
+	Key      string `json:"key,omitempty"`      // host key or view key
+	Password string `json:"password,omitempty"` // guest password
+	PeerID   string `json:"peerId,omitempty"`
+
+	// media
+	Stream string                     `json:"stream,omitempty"`
+	Kind   string                     `json:"kind,omitempty"`
+	SDP    *webrtc.SessionDescription `json:"sdp,omitempty"`
+	Info   *sfu.Info                  `json:"info,omitempty"`
+
+	// control
+	Action string          `json:"action,omitempty"`
+	Target string          `json:"target,omitempty"`
+	Value  json.RawMessage `json:"value,omitempty"`
+	Text   string          `json:"text,omitempty"`
+	Error  string          `json:"error,omitempty"`
+	ReqID  string          `json:"reqId,omitempty"`
+
+	// state
+	State    *State                 `json:"state,omitempty"`
+	Peers    []PeerInfo             `json:"peers,omitempty"`
+	Streams  []sfu.Info             `json:"streams,omitempty"`
+	Peer     *PeerInfo              `json:"peer,omitempty"`
+	Chat     []Comment              `json:"chat,omitempty"`
+	Comment  *Comment               `json:"comment,omitempty"`
+	ICE      []webrtc.ICEServer     `json:"ice,omitempty"`
+	Keys     *Keys                  `json:"keys,omitempty"`
+	Dests    []restream.Destination `json:"dests,omitempty"`
+	Settings *restream.Settings     `json:"settings,omitempty"`
+	Mic      *bool                  `json:"mic,omitempty"`
+	Cam      *bool                  `json:"cam,omitempty"`
+	TS       int64                  `json:"ts,omitempty"`
+}
+
+// Peer is one WebSocket connection.
+type Peer struct {
+	ID   string
+	Name string
+	Role Role
+
+	room *Room
+	conn *websocket.Conn
+	out  chan []byte
+	lim  *rate.Limiter
+
+	mu   sync.Mutex
+	mic  bool
+	cam  bool
+	hand bool
+	subs map[string]*sfu.Subscriber
+	pubs map[string]*sfu.Stream
+	once sync.Once
+	gone chan struct{}
+}
+
+func newPeer(conn *websocket.Conn, lim *rate.Limiter) *Peer {
+	return &Peer{ID: token(12), conn: conn, out: make(chan []byte, 256), lim: lim,
+		subs: map[string]*sfu.Subscriber{}, pubs: map[string]*sfu.Stream{}, gone: make(chan struct{})}
+}
+
+// Info returns the public view. stage is the room's current stage list.
+func (p *Peer) Info(stage []string) PeerInfo {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	onStage := false
+	for _, s := range stage {
+		if _, ok := p.pubs[s]; ok {
+			onStage = true
+		}
+	}
+	return PeerInfo{ID: p.ID, Name: p.Name, Role: p.Role, Mic: p.mic, Cam: p.cam, Hand: p.hand, Stage: onStage}
+}
+
+// Send queues a message; slow consumers are dropped instead of blocking the room.
+func (p *Peer) Send(m Msg) {
+	b, err := json.Marshal(m)
+	if err == nil {
+		p.sendRaw(b)
+	}
+}
+
+func (p *Peer) sendRaw(b []byte) {
+	select {
+	case <-p.gone:
+	case p.out <- b:
+	default:
+		// Buffer full: the client is not reading. Disconnect it.
+		p.close()
+	}
+}
+
+func (p *Peer) close() {
+	p.once.Do(func() {
+		close(p.gone)
+		_ = p.conn.Close()
+	})
+}
+
+const (
+	writeWait  = 10 * time.Second
+	pongWait   = 45 * time.Second
+	pingPeriod = 20 * time.Second
+)
+
+func (p *Peer) writeLoop() {
+	t := time.NewTicker(pingPeriod)
+	defer t.Stop()
+	for {
+		select {
+		case <-p.gone:
+			return
+		case b := <-p.out:
+			_ = p.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := p.conn.WriteMessage(websocket.TextMessage, b); err != nil {
+				p.close()
+				return
+			}
+		case <-t.C:
+			_ = p.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := p.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				p.close()
+				return
+			}
+		}
+	}
+}

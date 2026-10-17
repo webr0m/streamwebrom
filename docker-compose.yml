@@ -1,0 +1,13 @@
+services:
+  streamwebrom:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8443:8443/tcp"
+      - "50000:50000/udp"
+    environment:
+      SWR_SELF_SIGNED: "true"      # o usa SWR_AUTOCERT=tu-dominio.com con los puertos 80/443
+      SWR_PUBLIC_IP: ""            # tu IP pública si hay NAT
+      SWR_ADMIN_TOKEN: ""          # habilita /api/admin/stats y /metrics
+    volumes:
+      - ./streamwebrom-data:/data

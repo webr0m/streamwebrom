@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Estudio · StreamWebRom</title>
+<link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#7c5cff"><link rel="apple-touch-icon" href="/img/icon-192.png"><link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="studio">
+  <header class="topbar">
+    <a class="brand" href="/"><img src="/img/logo.svg" alt=""></a>
+    <span class="title" id="title">Estudio</span>
+    <span class="pill" id="status">conectando…</span>
+    <span class="pill hidden" id="liveTimer"></span>
+    <span class="grow"></span>
+    <button id="addCam" title="Agregar tu cámara">🎥 Cámara</button>
+    <button id="addScreen" title="Compartir pantalla">🖥️ Pantalla</button>
+    <button id="addMedia" title="Video o imagen local">🎞️ Medio</button>
+    <input type="file" id="mediaFile" accept="video/*,image/*" class="hidden">
+    <button id="invite">🔗 Invitar</button>
+    <button id="record">⏺️ Grabar</button>
+    <button class="primary" id="golive">● Transmitir</button>
+  </header>
+
+  <section class="main">
+    <div class="program-wrap">
+      <canvas id="program"></canvas>
+      <span class="badge pill red hidden" id="liveBadge">EN VIVO</span>
+    </div>
+    <div class="layouts" id="layouts"></div>
+    <div class="row wrap" style="justify-content:center">
+      <button class="small" id="countdown">⏳ Cuenta regresiva 5:00</button>
+      <button class="small" id="clearScreen">🧹 Limpiar pantalla</button>
+      <span class="muted" style="font-size:12px">Atajos: 1–8 layouts · B banner · C limpiar</span>
+    </div>
+    <h3 style="margin:6px 0 0">Backstage <span class="muted" style="font-size:12px;font-weight:400">— clic en “Al escenario” para mostrar</span></h3>
+    <div class="backstage" id="backstage"></div>
+  </section>
+
+  <aside class="side">
+    <nav class="tabs" id="tabs">
+      <button data-tab="chat" class="active">💬 Chat</button>
+      <button data-tab="banners">🏷️ Banners</button>
+      <button data-tab="brand">🎨 Marca</button>
+      <button data-tab="dest">📡 Destinos</button>
+      <button data-tab="scenes">🎬 Escenas</button>
+      <button data-tab="obs">🧩 OBS</button>
+      <button data-tab="people">👥 Gente</button>
+    </nav>
+
+    <div class="tabpane active" data-pane="chat">
+      <div class="chatlog" id="chatlog"></div>
+      <div class="row"><input id="chatInput" placeholder="Escribe un mensaje…" maxlength="500"><button id="chatSend">Enviar</button></div>
+    </div>
+
+    <div class="tabpane" data-pane="banners">
+      <div><label>Nuevo banner</label><textarea id="bannerText" rows="2" maxlength="300" placeholder="¡Suscríbete y activa la campanita!"></textarea></div>
+      <div class="row"><label class="row" style="margin:0"><input type="checkbox" id="bannerTicker"> Ticker deslizante</label><span class="grow"></span><button id="bannerAdd">Agregar</button></div>
+      <div class="list" id="bannerList"></div>
+    </div>
+
+    <div class="tabpane" data-pane="brand">
+      <div class="row"><div><label>Color</label><input type="color" id="brandColor" value="#7c5cff"></div>
+        <div class="grow"><label>Tema</label><select id="brandTheme"><option value="bubble">Burbuja</option><option value="minimal">Minimal</option><option value="bold">Bold</option></select></div></div>
+      <div><label>Fondo (color #hex o URL https de imagen)</label><input id="brandBg" placeholder="#0b0b12"></div>
+      <div><label>Logo (PNG/SVG, máx. 400 KB)</label><input type="file" id="brandLogo" accept="image/*"></div>
+      <div><label>Overlay a pantalla completa (PNG transparente, máx. 1.5 MB)</label><input type="file" id="brandOverlay" accept="image/png,image/webp"></div>
+      <label class="row"><input type="checkbox" id="brandNames" checked> Mostrar nombres</label>
+      <div class="row"><button id="brandClearLogo" class="small">Quitar logo</button><button id="brandClearOverlay" class="small">Quitar overlay</button><span class="grow"></span><button class="primary" id="brandSave">Aplicar</button></div>
+      <div><label>Título del programa</label><div class="row"><input id="showTitle" maxlength="120"><button id="titleSave" class="small">Guardar</button></div></div>
+      <label class="row"><input type="checkbox" id="lobbyToggle"> Sala de espera (aprobar invitados)</label>
+    </div>
+
+    <div class="tabpane" data-pane="dest">
+      <p class="muted" style="margin:0">Transmite a varias plataformas a la vez. Las claves se guardan solo en este navegador.</p>
+      <div><label>Plataforma</label><select id="destPreset">
+        <option value="rtmp://a.rtmp.youtube.com/live2/">YouTube</option>
+        <option value="rtmp://live.twitch.tv/app/">Twitch</option>
+        <option value="rtmps://live-api-s.facebook.com:443/rtmp/">Facebook</option>
+        <option value="rtmps://fa723fc1b171.global-contribute.live-video.net/app/">Kick</option>
+        <option value="rtmps://rtmp.linkedin.com:443/live/">LinkedIn (usa tu URL)</option>
+        <option value="">Personalizado (RTMP/RTMPS/SRT)</option>
+      </select></div>
+      <div><label>URL del servidor</label><input id="destURL"></div>
+      <div><label>Clave de transmisión</label><input id="destKey" type="password" autocomplete="off"></div>
+      <button id="destAdd">Agregar destino</button>
+      <div class="list" id="destList"></div>
+      <div class="row"><div class="grow"><label>Bitrate video (kbps)</label><input id="vKbps" type="number" value="4500" min="500" max="20000"></div>
+        <div class="grow"><label>FPS</label><select id="fps"><option>30</option><option>60</option></select></div></div>
+      <div class="muted" id="restreamStats" style="font-size:12px"></div>
+    </div>
+
+    <div class="tabpane" data-pane="scenes">
+      <div class="row"><input id="sceneName" placeholder="Nombre de la escena" maxlength="40"><button id="sceneSave">Guardar actual</button></div>
+      <div class="list" id="sceneList"></div>
+    </div>
+
+    <div class="tabpane" data-pane="obs">
+      <p class="muted" style="margin:0">Pega estos enlaces en OBS → Fuente → <b>Navegador</b> (1920×1080, marca “Controlar audio vía OBS”).</p>
+      <div id="obsLinks" class="col"></div>
+      <h3>Enviar OBS al estudio (WHIP)</h3>
+      <p class="muted" style="margin:0">OBS 30+: Ajustes → Emisión → Servicio <b>WHIP</b>.</p>
+      <div id="whipLinks" class="col"></div>
+    </div>
+
+    <div class="tabpane" data-pane="people">
+      <div id="knocks" class="list"></div>
+      <div id="people" class="list"></div>
+    </div>
+  </aside>
+</div>
+<script type="module" src="/js/studio.js"></script>
+<script type="module" src="/js/pwa.js"></script>
+</body>
+</html>

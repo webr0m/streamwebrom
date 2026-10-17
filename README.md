@@ -1,0 +1,114 @@
+# StreamWebRom
+
+**Estudio de streaming en vivo, en un solo binario.** Invitados por enlace, salida limpia para OBS,
+multistream a YouTube/Twitch/Facebook/Kick, grabación aislada por invitado y branding en vivo.
+Servidor en Go (SFU WebRTC con [pion](https://github.com/pion/webrtc)), cliente web sin dependencias.
+
+Inspirado en VDO.Ninja, StreamYard y Discord — reescrito desde cero, auditado y con tests.
+Ver [docs/AUDITORIA.md](docs/AUDITORIA.md).
+
+## Qué trae
+
+| | |
+|---|---|
+| 🎥 **Invitados con un link** | Sin cuentas ni instalar nada. Prueba de cámara/micrófono, calidad y supresión de ruido antes de entrar. |
+| 🚪 **Backstage y sala de espera** | Los invitados esperan fuera de cámara; los subes al escenario con un clic. Admite o rechaza a cada uno. |
+| 🎬 **8 layouts + escenas** | Solo, dividido, cuadrícula, PiP, lateral, destacado, pantalla y noticiero. Atajos 1–8. Guarda escenas. |
+| 🏷️ **Marca en vivo** | Color, tema, fondo, logo, overlay PNG, nombres, banners, ticker, comentarios en pantalla y cuenta regresiva. |
+| 📡 **Multistream** | Varios destinos RTMP/RTMPS/SRT a la vez con un solo ffmpeg. H.264 se copia sin recodificar. |
+| 🧩 **OBS de verdad** | Browser Source del programa (opcional transparente) o de cada invitado. **WHIP** para enviar OBS al estudio y **WHEP** para recibir en OBS/reproductores. |
+| ⏺️ **Grabación aislada** | Cada fuente se graba por separado, en calidad original, del lado del servidor (`.ivf/.ogg/.h264` → `.mkv`). |
+| 💬 **Comunidad** | Chat, reacciones, levantar la mano, indicador de quién habla, push-to-talk (Espacio), atajos M/V. |
+| ⚡ **Veloz** | SFU: cada invitado sube una sola vez. Reenvío RTP sin decodificar, PLI inmediato, jitter buffer mínimo. |
+| 🔐 **Seguro** | Roles validados en servidor, bcrypt, claves separadas (anfitrión / ver / publicar), CSP estricta, rate-limit. |
+
+## Inicio rápido
+
+Descarga el binario de tu plataforma en **Releases** y ejecútalo:
+
+```bash
+# Solo este equipo (http://localhost:8443)
+./streamwebrom -open
+
+# Teléfonos y otros PCs de tu red (HTTPS autofirmado, acepta el aviso una vez)
+./streamwebrom -self-signed -udp-port 50000
+
+# Servidor público con certificado Let's Encrypt
+sudo ./streamwebrom -autocert live.midominio.com -addr :443 -udp-port 50000 -public-ip 203.0.113.10
+```
+
+**Windows:** descarga `StreamWebRom-Windows-x64.exe` (app nativa .NET 8). Se queda en la bandeja,
+muestra los enlaces y abre el estudio. Para multistream instala ffmpeg (`winget install ffmpeg`)
+o deja `ffmpeg.exe` junto al ejecutable.
+
+**Docker:** `docker compose up -d`
+
+## Usarlo con OBS
+
+1. Abre el estudio → **Crear estudio** → invita gente con **🔗 Invitar**.
+2. Pestaña **🧩 OBS** → copia **Programa completo**.
+3. OBS → Fuentes → **+** → **Navegador** → pega la URL · 1920×1080 · marca *Controlar audio vía OBS*.
+
+| URL | Para qué |
+|---|---|
+| `/view?room=R&scene=1#key=VIEWKEY` | Programa completo con layout, marca y banners |
+| `/view?room=R&scene=1&transparent=1#key=…` | Lo mismo con fondo transparente, para tus escenas de OBS |
+| `/view?room=R&stream=ID#key=…` | Un solo invitado a pantalla completa (`&cover=1` recorta, `&mute=1` sin audio) |
+| `POST /whip/R/obs` + Bearer `pushKey` | OBS → Ajustes → Emisión → Servicio **WHIP** |
+| `POST /whep/R/program` + Bearer `viewKey` | Reproductores WHEP |
+
+Las claves viajan en el fragmento `#`, que el navegador nunca envía al servidor ni a los logs.
+
+## Configuración
+
+Cada opción es flag o variable de entorno `SWR_<NOMBRE>` (p. ej. `-udp-port` = `SWR_UDP_PORT`).
+
+| Flag | Por defecto | Descripción |
+|---|---|---|
+| `-addr` | `:8443` | Dirección de escucha |
+| `-self-signed` | `false` | HTTPS con certificado autofirmado persistente (LAN) |
+| `-autocert` | | Dominio para Let's Encrypt |
+| `-tls-cert` / `-tls-key` | | Tu propio certificado |
+| `-udp-port` | `0` | Un solo puerto UDP para toda la media (recomendado con firewall/Docker) |
+| `-public-ip` | | IP pública anunciada (NAT 1:1, VPS) |
+| `-stun` / `-turn` / `-turn-user` / `-turn-pass` | STUN de Google y Cloudflare | Servidores ICE |
+| `-ffmpeg` | `ffmpeg` | Binario para multistream y mux de grabaciones |
+| `-data` | `streamwebrom-data` | Grabaciones y certificados |
+| `-origins` | mismo host | Orígenes WebSocket permitidos (`*` = cualquiera) |
+| `-max-rooms` / `-max-peers` | `500` / `64` | Límites |
+| `-msg-rate` / `-msg-burst` / `-max-msg` | `30` / `60` / `256KiB` | Anti-abuso de señalización |
+| `-admin-token` | | Habilita `/api/admin/stats` y `/metrics` (Prometheus) |
+| `-open` | `false` | Abre el navegador al iniciar |
+
+## Desarrollo
+
+```bash
+make run          # servidor local
+make test         # vet + tests + sintaxis JS
+make test-race    # detector de carreras (requiere cgo)
+make all          # binarios para linux/mac/windows (amd64 y arm64)
+make launcher     # app Windows .NET con el servidor embebido
+```
+
+```
+cmd/streamwebrom     punto de entrada
+internal/sfu         SFU: publicación, suscripción, reenvío RTP, PLI
+internal/studio      salas, roles, estado de producción, protocolo de señalización
+internal/server      HTTP, WebSocket, API, WHIP/WHEP, cabeceras de seguridad
+internal/restream    multistream RTMP/SRT con ffmpeg
+internal/record      grabación aislada por fuente
+internal/tlsutil     certificados autofirmados para LAN
+web/                 cliente (módulos ES, sin build): estudio, invitado, salida OBS
+windows/             lanzador nativo .NET 8 para Windows
+```
+
+Los tests incluyen integración real: un cliente WebRTC publica por WHIP, otro recibe por WHEP,
+se graba el stream y se hace multistream VP8+Opus → H.264+AAC a un servidor RTMP local.
+
+## Licencia
+
+AGPL-3.0-or-later. Si ofreces StreamWebRom como servicio a otras personas, debes ofrecerles su código fuente.
+
+```bash
+go install github.com/webr0m/streamwebrom/cmd/streamwebrom@latest
+```
