@@ -54,6 +54,15 @@ que el original delega en servidores externos, y reescribir el cliente para que 
 | Salida limpia para OBS (Browser Source), con fondo transparente opcional | VDO.Ninja | ✅ |
 | WHIP (OBS → estudio) y WHEP (estudio → OBS/reproductores) estándar | OBS 30+, VDO.Ninja | ✅ |
 
+## 3b. Auditoría v1.1.0 (dispositivos y moderación)
+
+- Las peticiones del anfitrión a invitados usan una lista blanca (`mute`, `unmute`, `camoff`, `camon`, `lowerhand`, `screenoff`); cualquier otra acción se rechaza en el servidor. No existe ningún canal para ejecutar código remoto (VDO.Ninja usa `eval` sobre mensajes recibidos).
+- Privacidad: el anfitrión puede **apagar** micrófono o cámara de un invitado, pero **encenderlos** siempre requiere un clic del invitado.
+- Silenciar/ocultar "solo en el programa" y el volumen por fuente son estado de la sala validado en el servidor (volumen 0–2, máx. 200 entradas); no tocan los dispositivos del invitado.
+- Los nombres de dispositivos se insertan con `textContent` (sin `innerHTML`).
+- Los parámetros de URL solo ajustan preferencias locales; nunca se envían al servidor como HTML.
+- Tests nuevos: `TestModeration` (lista blanca, objetivos `*`/`stage`, permisos, validación de volumen). Revisión estática de módulos JS con `scripts/jslint.py` (identificadores no declarados e imports inexistentes).
+
 ## 4. Rendimiento
 
 - Reenvío RTP sin decodificar; cada paquete se copia por suscriptor sin locks globales.

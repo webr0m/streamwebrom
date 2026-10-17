@@ -183,7 +183,8 @@ export class Compositor {
       if (bubble && !full) { roundRect(ctx, r.x, r.y, r.w, r.h, 18); ctx.clip(); }
       ctx.fillStyle = "#111";
       ctx.fillRect(r.x, r.y, r.w, r.h);
-      const ok = s.kind === "screen" ? drawContain(ctx, s.video, r) : drawCover(ctx, s.video, r, false);
+      const hidden = (st.hidden && st.hidden[id]) || s.camOff;
+      const ok = !hidden && (s.kind === "screen" ? drawContain(ctx, s.video, r) : drawCover(ctx, s.video, r, !!s.mirror));
       if (!ok) {
         ctx.fillStyle = "#1c1c2a"; ctx.fillRect(r.x, r.y, r.w, r.h);
         ctx.fillStyle = accent; ctx.beginPath();
@@ -295,24 +296,39 @@ export class Compositor {
 }
 
 /** Mixes the audio of every on-stage source into one track (program audio). */
+/** Program gain for a stream given the production state (volume, mute, stage mute). */
+export function programGain(st, id) {
+  if (!st || st.stageMuted || (st.muted && st.muted[id])) return 0;
+  const v = st.volumes && st.volumes[id];
+  return typeof v === "number" ? Math.max(0, Math.min(2, v)) : 1;
+}
+
 export class AudioMixer {
   constructor() {
     this.ctx = new AudioContext({ latencyHint: "interactive", sampleRate: 48000 });
     this.dest = this.ctx.createMediaStreamDestination();
-    this.nodes = new Map();
+    this.nodes = new Map(); // id -> { src, gain, track }
   }
   get track() { return this.dest.stream.getAudioTracks()[0]; }
-  sync(ids, sources) {
-    if (this.ctx.state === "suspended") this.ctx.resume();
-    for (const [id, n] of this.nodes) if (!ids.includes(id)) { n.disconnect(); this.nodes.delete(id); }
+  sync(ids, sources, st) {
+    if (this.ctx.state === "suspended") this.ctx.resume().catch(() => {});
+    for (const [id, n] of this.nodes) {
+      const s = sources.get(id), t = s && s.stream && s.stream.getAudioTracks()[0];
+      if (!ids.includes(id) || t !== n.track) { n.src.disconnect(); n.gain.disconnect(); this.nodes.delete(id); }
+    }
     for (const id of ids) {
-      if (this.nodes.has(id)) continue;
-      const s = sources.get(id);
-      const t = s && s.stream && s.stream.getAudioTracks()[0];
-      if (!t) continue;
-      const node = this.ctx.createMediaStreamSource(new MediaStream([t]));
-      node.connect(this.dest);
-      this.nodes.set(id, node);
+      let n = this.nodes.get(id);
+      if (!n) {
+        const s = sources.get(id);
+        const t = s && s.stream && s.stream.getAudioTracks()[0];
+        if (!t) continue;
+        const src = this.ctx.createMediaStreamSource(new MediaStream([t]));
+        const gain = this.ctx.createGain();
+        src.connect(gain).connect(this.dest);
+        n = { src, gain, track: t };
+        this.nodes.set(id, n);
+      }
+      n.gain.gain.setTargetAtTime(programGain(st, id), this.ctx.currentTime, 0.03);
     }
   }
 }

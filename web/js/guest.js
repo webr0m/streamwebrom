@@ -1,14 +1,29 @@
+// Guest page: pre-join device check, then join the room (VDO.Ninja-style "push").
+// URL options (VDO.Ninja compatible where it makes sense):
+//   &label= / &name=        prefill (and with &autostart, skip) the name
+//   &autostart / &autojoin  join right away
+//   &password= / &pw=       room password
+//   &webcam / &screenshare  start with camera (default) or with screen share
+//   &muted / &videomute     join with mic or camera off
+//   &bitrate= (kbps)        video bitrate · &codec=h264|vp8|vp9|av1
+//   &quality=0|1|2 or &height=, &fps=, &stereo, &denoise=0, &echo=0, &autogain=0
+//   &videodevice= &audiodevice= &outputdevice=  index (1..n), part of the name, or 0 = off
+//   &novideo / &noaudio     audio-only / video-only
 import { $, el, toast, params, api, Signal, publish, subscribe, levelMeter } from "./rtc.js";
+import { listDevices, openScreen, loadPrefs, savePrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain } from "./devices.js";
 
 const room = (params.get("room") || "").toLowerCase();
 if (!room) location.href = "/";
-let media = null, pub = null, screenPub = null, screenMedia = null;
+const prefs = loadPrefs();
+let media = new MediaStream(), pub = null, screenPub = null, screenMedia = null;
+const extraCams = new Map(); // pubId -> { pub, media }
 let state = {};
-const remotes = new Map(); // streamId -> { tile, sub, level }
+const remotes = new Map(); // streamId -> { tile, sub, video }
 const sig = new Signal();
 let myId = "";
 
-$("#name").value = localStorage.getItem("swr.name") || "";
+$("#name").value = params.get("label") || params.get("name") || localStorage.getItem("swr.name") || "";
+if (params.get("password") || params.get("pw")) $("#pw").value = params.get("password") || params.get("pw");
 
 // ---------- pre-join ----------
 api(`/api/rooms/${encodeURIComponent(room)}`).then((r) => {
@@ -16,44 +31,80 @@ api(`/api/rooms/${encodeURIComponent(room)}`).then((r) => {
   $("#pwBox").classList.toggle("hidden", !r.password);
 }).catch(() => { $("#roomTitle").textContent = "Esta sala no existe o ya terminó"; $("#joinBtn").disabled = true; });
 
-async function listDevices() {
-  const devs = await navigator.mediaDevices.enumerateDevices();
-  for (const [sel, kind] of [["#cam", "videoinput"], ["#mic", "audioinput"]]) {
-    const s = $(sel), cur = s.value;
-    s.replaceChildren(...devs.filter((d) => d.kind === kind).map((d, i) => el("option", { value: d.deviceId, text: d.label || `${kind} ${i + 1}` })));
-    if (kind === "videoinput") s.append(el("option", { value: "none", text: "Sin cámara" }));
-    if (cur) s.value = cur;
-  }
-}
-
-function constraints() {
-  const q = Number($("#quality").value);
-  const cam = $("#cam").value, mic = $("#mic").value, ns = $("#ns").checked;
-  return {
-    video: cam === "none" ? false : { deviceId: cam ? { exact: cam } : undefined, width: { ideal: q * 16 / 9 }, height: { ideal: q }, frameRate: { ideal: 30 } },
-    audio: { deviceId: mic ? { exact: mic } : undefined, echoCancellation: ns, noiseSuppression: ns, autoGainControl: true, channelCount: 1 },
-  };
-}
+const videoKbps = () => Number(params.get("bitrate") || params.get("vb")) || kbpsFor(Number(prefs.quality));
+const pubOpts = (name) => ({ kind: "camera", name, videoKbps: videoKbps(), fps: Number(prefs.fps) || 30, codec: prefs.codec, stereo: prefs.stereo, audioKbps: prefs.stereo ? 256 : 96 });
 
 let meterTimer;
-async function startPreview() {
-  media?.getTracks().forEach((t) => t.stop());
-  try {
-    media = await navigator.mediaDevices.getUserMedia(constraints());
-  } catch (e) {
-    toast("No se pudo abrir cámara/micrófono: " + e.message, "err");
-    media = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => new MediaStream());
-  }
-  $("#preview").srcObject = media;
-  await listDevices();
+function showMeter(stream) {
   clearInterval(meterTimer);
-  const lvl = levelMeter(media);
+  const lvl = levelMeter(stream);
   meterTimer = setInterval(() => { $("#meter").style.width = Math.round(lvl() * 100) + "%"; }, 80);
 }
-["#cam", "#mic", "#quality", "#ns"].forEach((s) => $(s).addEventListener("change", startPreview));
+
+function mirrorPreview(v) { v.style.transform = prefs.mirror ? "scaleX(-1)" : ""; }
+
+async function open(kinds = "all") {
+  const { stream, warnings } = await openMedia(prefs);
+  $("#devWarn").textContent = warnings.join(" ");
+  warnings.forEach((w) => toast(w, "err"));
+  if (kinds === "all") return stream;
+  return stream;
+}
+
+async function startPreview() {
+  // Show the selectors right away (labels fill in once permission is granted).
+  if (!$("#devPre").children.length) await renderPanel($("#devPre"), prefs, onPrefChange);
+  media.getTracks().forEach((t) => t.stop());
+  media = await open();
+  if (!media.getTracks().length && !$("#devWarn").textContent) $("#devWarn").textContent = "No se detectó cámara ni micrófono. Puedes entrar igual para ver y chatear.";
+  $("#preview").srcObject = media; mirrorPreview($("#preview"));
+  showMeter(media);
+  await renderPanel($("#devPre"), prefs, onPrefChange);
+  $("#camCtlPre").replaceChildren(cameraControls(media.getVideoTracks()[0]) || "");
+}
+
+async function onPrefChange(p, what) {
+  if (what === "speaker") { for (const r of remotes.values()) applySink(r.video, p.speaker); return; }
+  if (what === "other") {
+    mirrorPreview($("#preview"));
+    const me = $('[data-id="me"] video'); if (me) mirrorPreview(me);
+    return;
+  }
+  if (!pub) return startPreview(); // still in pre-join: just reopen everything
+  await swapDevices(what);
+}
+
+/** Hot-swap camera or mic during the call (no reconnection, no renegotiation). */
+async function swapDevices(what) {
+  const kind = what === "video" ? "video" : "audio";
+  const opened = await openMedia({ ...prefs, camera: kind === "video" ? prefs.camera : "none", mic: kind === "audio" ? prefs.mic : "none" });
+  opened.warnings.forEach((w) => toast(w, "err"));
+  const fresh = kind === "video" ? opened.stream.getVideoTracks()[0] : opened.stream.getAudioTracks()[0];
+  const old = kind === "video" ? media.getVideoTracks()[0] : media.getAudioTracks()[0];
+  const wasOn = old ? old.enabled : true;
+  if (fresh) fresh.enabled = wasOn;
+  if (old) { media.removeTrack(old); old.stop(); }
+  if (fresh) media.addTrack(fresh);
+  if (pub && !(await pub.replaceTrack(kind, fresh || null)) && fresh) {
+    // The original publication had no track of this kind: republish once.
+    pub.stop(); pub = await publish(sig, media, pubOpts($("#name").value));
+  }
+  if (kind === "video" && pub) await pub.setBitrate(videoKbps(), Number(prefs.fps) || 30);
+  const me = $('[data-id="me"] video'); if (me) { me.srcObject = media; mirrorPreview(me); }
+  if (kind === "audio") showMeter(media);
+  $("#devCamCtl")?.replaceChildren(cameraControls(media.getVideoTracks()[0]) || "");
+  sendMedia();
+  toast(kind === "video" ? "Cámara cambiada" : "Micrófono cambiado", "ok");
+}
+
+onDeviceChange(() => {
+  const target = $("#devDialog")?.open ? $("#devPanel") : $("#pre").classList.contains("hidden") ? null : $("#devPre");
+  if (target) renderPanel(target, prefs, onPrefChange);
+});
 startPreview();
 
-$("#joinBtn").onclick = async () => {
+$("#joinBtn").onclick = join;
+async function join() {
   const name = $("#name").value.trim();
   if (!name) return toast("Escribe tu nombre", "err");
   localStorage.setItem("swr.name", name);
@@ -66,28 +117,38 @@ $("#joinBtn").onclick = async () => {
     toast(e.message, "err");
     $("#joinBtn").disabled = false;
   }
-};
+}
+if ((params.has("autostart") || params.has("autojoin") || params.has("aj")) && $("#name").value) setTimeout(join, 800);
 
 sig.on("welcome", (m) => { if (!$("#waiting").classList.contains("hidden")) enter(m); });
 sig.on("denied", () => { document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card" }, el("h2", { text: "El anfitrión no aprobó tu ingreso." })))); });
 sig.on("kicked", () => { sig.close(); leave("El anfitrión te retiró de la sala."); });
-sig.on("reconnected", async (m) => { myId = m.peerId; if (media) pub = await publish(sig, media, { kind: "camera", name: $("#name").value, videoKbps: kbps() }).catch(() => null); });
-
-const kbps = () => ({ 360: 800, 720: 2500, 1080: 4500 })[$("#quality").value] || 2500;
+sig.on("reconnected", async (m) => {
+  // The server forgot our old publications: publish fresh ones.
+  myId = m.peerId;
+  try { pub?.pc.close(); } catch {}
+  pub = media.getTracks().length ? await publish(sig, media, pubOpts($("#name").value)).catch(() => null) : null;
+  if (screenPub) { try { screenPub.pc.close(); } catch {} screenPub = await publish(sig, screenMedia, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail" }).catch(() => null); }
+  for (const [id, x] of extraCams) { try { x.pub.pc.close(); } catch {} extraCams.delete(id); x.media.getTracks().forEach((t) => t.stop()); }
+  for (const id of [...remotes.keys()]) unwatch(id);
+  for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
+  sendMedia();
+});
 
 async function enter(m) {
   myId = m.peerId;
   state = m.state || {};
   $("#pre").classList.add("hidden"); $("#waiting").classList.add("hidden"); $("#call").classList.remove("hidden");
   clearInterval(meterTimer);
+  if (params.has("muted") || params.has("mute")) media.getAudioTracks().forEach((t) => (t.enabled = false));
+  if (params.has("videomute") || params.has("vm")) media.getVideoTracks().forEach((t) => (t.enabled = false));
   addTile("me", media, $("#name").value + " (tú)", true, levelMeter(media));
-  if (media.getTracks().length) {
-    pub = await publish(sig, media, { kind: "camera", name: $("#name").value, videoKbps: kbps() });
-  }
-  sendMedia();
+  if (media.getTracks().length) pub = await publish(sig, media, pubOpts($("#name").value));
+  setMic(micOn()); setCam(camOn());
   for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
   for (const c of m.chat || []) addChat(c);
   updateStageBadge();
+  if (params.has("screenshare") || params.has("ss")) $("#screenBtn").click();
 }
 
 // ---------- remote media ----------
@@ -97,18 +158,32 @@ sig.on("state", (m) => { state = m.state; updateStageBadge(); });
 sig.on("chat", (m) => addChat(m.comment));
 sig.on("reaction", (m) => fly(m.text));
 sig.on("request", (m) => {
-  if (m.action === "mute") { setMic(false); toast("El anfitrión silenció tu micrófono"); }
-  if (m.action === "unmute") toast("El anfitrión te pide activar tu micrófono (M)");
+  switch (m.action) {
+    case "mute": setMic(false); toast("El anfitrión silenció tu micrófono"); break;
+    case "unmute": ask("El anfitrión te pide activar el micrófono", "Activar", () => setMic(true)); break;
+    case "camoff": setCam(false); toast("El anfitrión apagó tu cámara"); break;
+    case "camon": ask("El anfitrión te pide encender la cámara", "Encender", () => setCam(true)); break;
+    case "lowerhand": $("#handBtn").classList.remove("on"); break;
+    case "screenoff": if (screenPub) stopScreen(); toast("El anfitrión detuvo tu pantalla compartida"); break;
+  }
 });
 sig.on("error", (m) => toast(m.error, "err"));
 
+function ask(text, btn, fn) {
+  // Privacy: the host can turn things off, but turning them on needs the guest's click.
+  const box = el("div", { class: "toast ask" }, el("span", { text }), el("button", { class: "small primary", onclick: () => { fn(); box.remove(); }, text: btn }), el("button", { class: "small", onclick: () => box.remove(), text: "Ahora no" }));
+  ($("#toasts") || document.body).append(box);
+  setTimeout(() => box.remove(), 15000);
+}
+
 async function watch(id, kind, owner, name) {
-  if (kind === "program" || owner === myId || remotes.has(id)) return;
+  if (kind === "program" || owner === myId || remotes.has(id) || id === pub?.id || id === screenPub?.id || extraCams.has(id)) return;
   remotes.set(id, {});
   try {
     const sub = await subscribe(sig, id);
     const lvl = sub.stream.getAudioTracks().length ? levelMeter(sub.stream) : () => 0;
-    remotes.set(id, { sub, tile: addTile(id, sub.stream, sub.name || name || "Invitado", false, lvl) });
+    const tile = addTile(id, sub.stream, sub.name || name || "Invitado", false, lvl);
+    remotes.set(id, { sub, tile, video: tile.querySelector("video") });
   } catch { remotes.delete(id); }
 }
 function unwatch(id) {
@@ -120,24 +195,27 @@ function unwatch(id) {
 function addTile(id, stream, name, mine, level) {
   const v = el("video", { playsinline: true, autoplay: true });
   v.muted = mine; v.srcObject = stream;
-  if (mine) v.style.transform = "scaleX(-1)";
-  v.play().catch(() => { document.addEventListener("click", () => v.play(), { once: true }); });
-  const tile = el("div", { class: "tile", "data-id": id }, v, el("span", { class: "name", text: name }));
+  if (mine) mirrorPreview(v); else applySink(v, prefs.speaker);
+  v.play().catch(() => { v.muted = true; v.play().catch(() => {}); document.addEventListener("click", () => { v.muted = mine; v.play(); }, { once: true }); });
+  const vol = mine ? null : el("input", { type: "range", min: 0, max: 1, step: 0.05, value: 1, title: "Volumen (solo para ti)", class: "tilevol", oninput: (e) => { v.volume = Number(e.target.value); } });
+  const tile = el("div", { class: "tile", "data-id": id }, v, el("span", { class: "name", text: name }), vol);
   $("#grid").append(tile);
   const t = setInterval(() => { if (!tile.isConnected) return clearInterval(t); tile.classList.toggle("speaking", level() > 0.15); }, 150);
   return tile;
 }
 
 function updateStageBadge() {
-  const live = pub && (state.stage || []).includes(pub.id);
+  const mine = [pub?.id, screenPub?.id, ...extraCams.keys()].filter(Boolean);
+  const live = mine.some((id) => (state.stage || []).includes(id));
+  const progMuted = state.stageMuted || mine.some((id) => state.muted?.[id]);
   const b = $("#stageState");
-  b.textContent = live ? (state.live ? "EN VIVO" : "en escenario") : "backstage";
+  b.textContent = live ? (state.live ? "EN VIVO" : "en escenario") + (live && progMuted ? " · silenciado" : "") : "backstage";
   b.className = "pill " + (live ? "red" : "");
 }
 
 // ---------- controls ----------
 function setMic(on) {
-  media?.getAudioTracks().forEach((t) => (t.enabled = on));
+  media?.getAudioTracks().forEach((t) => { t.enabled = on; if (t.raw) t.raw.enabled = on; });
   $("#micBtn").className = "icon " + (on ? "on" : "off");
   sendMedia();
 }
@@ -148,27 +226,64 @@ function setCam(on) {
 }
 const micOn = () => !!media?.getAudioTracks().some((t) => t.enabled);
 const camOn = () => !!media?.getVideoTracks().some((t) => t.enabled);
-function sendMedia() { sig.send({ type: "media", mic: micOn(), cam: camOn() }); }
+function sendMedia() { if (pub) sig.send({ type: "media", mic: micOn(), cam: camOn() }); }
 
 $("#micBtn").onclick = () => setMic(!micOn());
 $("#camBtn").onclick = () => setCam(!camOn());
 $("#handBtn").onclick = () => { sig.send({ type: "hand" }); $("#handBtn").classList.toggle("on"); };
-$("#chatBtn").onclick = () => $("#chat").classList.toggle("hidden");
+$("#chatBtn").onclick = () => { $("#chat").classList.toggle("hidden"); $("#chatBtn").classList.remove("on"); };
 $("#reactBtn").onclick = () => $("#reactions").classList.toggle("hidden");
 for (const e of ["👏", "❤️", "😂", "🔥", "🎉", "👍"]) $("#reactions").append(el("button", { class: "small", onclick: () => sig.send({ type: "reaction", text: e }), text: e }));
-$("#screenBtn").onclick = async () => {
-  if (screenPub) { screenPub.stop(); screenMedia.getTracks().forEach((t) => t.stop()); screenPub = null; $("#screenBtn").classList.remove("on"); return; }
-  try {
-    screenMedia = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
-    screenPub = await publish(sig, screenMedia, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail" });
-    $("#screenBtn").classList.add("on");
-    screenMedia.getVideoTracks()[0].onended = () => { screenPub?.stop(); screenPub = null; $("#screenBtn").classList.remove("on"); };
-  } catch (e) { if (e.name !== "NotAllowedError") toast(e.message, "err"); }
+
+$("#setBtn").onclick = async () => {
+  const dlg = settingsDialog();
+  await renderPanel($("#devPanel"), prefs, onPrefChange);
+  $("#devCamCtl").replaceChildren(cameraControls(media.getVideoTracks()[0]) || "");
+  dlg.showModal();
 };
+
+function stopScreen() {
+  screenPub?.stop(); screenMedia?.getTracks().forEach((t) => t.stop());
+  screenPub = null; screenMedia = null; $("#screenBtn").classList.remove("on");
+}
+$("#screenBtn").onclick = async () => {
+  if (screenPub) return stopScreen();
+  try {
+    screenMedia = await openScreen();
+    screenPub = await publish(sig, screenMedia, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail", codec: prefs.codec, stereo: true, audioKbps: 192 });
+    $("#screenBtn").classList.add("on");
+    screenMedia.getVideoTracks()[0].onended = stopScreen;
+  } catch (e) { if (e.name !== "NotAllowedError" && e.name !== "AbortError") toast(e.name === "NotSupportedError" ? e.message : explain(e), "err"); }
+};
+
+// A second (third…) camera from the same device, e.g. overhead cam or capture card.
+$("#cam2Btn").onclick = async () => {
+  const { cams } = await listDevices();
+  const used = media.getVideoTracks()[0]?.getSettings().deviceId;
+  const options = cams.filter((c) => c.deviceId !== used);
+  if (!options.length) return toast("No hay otra cámara conectada.", "err");
+  const dlg = el("dialog", { class: "card devdialog" },
+    el("h3", { text: "Agregar otra cámara" }),
+    ...options.map((c, i) => el("button", { onclick: async () => { dlg.close(); dlg.remove(); await addExtraCam(c); }, text: c.label || `Cámara ${i + 2}` })),
+    el("button", { class: "small", onclick: () => { dlg.close(); dlg.remove(); }, text: "Cancelar" }));
+  document.body.append(dlg); dlg.showModal();
+};
+async function addExtraCam(dev) {
+  const { stream, warnings } = await openMedia({ ...prefs, camera: dev.deviceId, mic: "none" });
+  warnings.forEach((w) => toast(w, "err"));
+  if (!stream.getVideoTracks().length) return;
+  const name = `${$("#name").value} · ${(dev.label || "cámara 2").slice(0, 24)}`;
+  const p = await publish(sig, stream, { ...pubOpts(name), name });
+  extraCams.set(p.id, { pub: p, media: stream });
+  const tile = addTile(p.id, stream, name + " (tú)", true, () => 0);
+  tile.querySelector(".name").after(el("button", { class: "small tileclose", onclick: () => { p.stop(); stream.getTracks().forEach((t) => t.stop()); extraCams.delete(p.id); tile.remove(); }, text: "✕" }));
+  stream.getVideoTracks()[0].onended = () => { p.stop(); extraCams.delete(p.id); tile.remove(); };
+}
+
 $("#leaveBtn").onclick = () => leave("Saliste de la sala.");
 
 function leave(text) {
-  pub?.stop(); screenPub?.stop(); sig.close();
+  pub?.stop(); screenPub?.stop(); for (const x of extraCams.values()) x.pub.stop(); sig.close();
   media?.getTracks().forEach((t) => t.stop());
   document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card col" }, el("h2", { text }), el("a", { class: "btn", href: location.href, text: "Volver a entrar" }))));
 }
@@ -176,7 +291,7 @@ function leave(text) {
 // Keyboard: M mic, V camera, hold Space = push-to-talk while muted (Discord style)
 let ptt = false;
 document.addEventListener("keydown", (e) => {
-  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName) || $("#call").classList.contains("hidden")) return;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName) || $("#call").classList.contains("hidden") || $("#devDialog")?.open) return;
   if (e.key === "m") setMic(!micOn());
   if (e.key === "v") setCam(!camOn());
   if (e.code === "Space" && !micOn() && !ptt) { ptt = true; setMic(true); e.preventDefault(); }
@@ -200,3 +315,5 @@ function fly(e) {
   document.body.append(n);
   setTimeout(() => n.remove(), 2500);
 }
+
+window.addEventListener("beforeunload", () => savePrefs(prefs));

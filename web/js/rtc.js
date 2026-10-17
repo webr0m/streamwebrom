@@ -122,7 +122,9 @@ function gathered(pc, ms = 2000) {
 }
 
 /** Prefer a codec on a transceiver if the browser has it. */
+const CODECS = { h264: "video/H264", vp8: "video/VP8", vp9: "video/VP9", av1: "video/AV1" };
 function prefer(tr, mime) {
+  mime = CODECS[String(mime || "").toLowerCase()] || mime;
   if (!mime || !RTCRtpSender.getCapabilities || !tr.setCodecPreferences) return;
   const caps = RTCRtpSender.getCapabilities(tr.sender.track?.kind || "video");
   if (!caps) return;
@@ -147,13 +149,31 @@ export async function publish(sig, media, opts = {}) {
   await pc.setLocalDescription(await pc.createOffer());
   await gathered(pc);
   const res = await sig.request({ type: "publish", kind: opts.kind || "camera", stream: opts.stream || "", name: opts.name || "", sdp: pc.localDescription });
-  await pc.setRemoteDescription(res.sdp);
+  const answer = opts.stereo ? { type: res.sdp.type, sdp: stereoOpus(res.sdp.sdp, opts.audioKbps || 256) } : res.sdp;
+  await pc.setRemoteDescription(answer);
   await tune(senders, opts);
   return {
-    id: res.stream, pc, senders,
+    id: res.stream, pc, senders, opts,
     stop() { try { sig.send({ type: "unpublish", stream: res.stream }); } catch {} pc.close(); },
-    async replaceTrack(kind, track) { if (senders[kind]) await senders[kind].replaceTrack(track); },
+    /** Hot-swap a device without renegotiating (falls back to null = silence/black). */
+    async replaceTrack(kind, track) {
+      if (!senders[kind]) return false;
+      if (track && opts.contentHint && kind === "video") track.contentHint = opts.contentHint;
+      await senders[kind].replaceTrack(track || null);
+      return true;
+    },
+    async setBitrate(videoKbps, fps) { Object.assign(opts, { videoKbps, fps: fps || opts.fps }); await tune(senders, opts); },
   };
+}
+
+/** Ask the browser to send real stereo Opus at a high bitrate (music, DJ, instruments). */
+export function stereoOpus(sdp, kbps) {
+  const m = sdp.match(/a=rtpmap:(\d+) opus\/48000/i);
+  if (!m) return sdp;
+  const pt = m[1], extra = `stereo=1;sprop-stereo=1;maxaveragebitrate=${kbps * 1000}`;
+  const re = new RegExp(`a=fmtp:${pt} ([^\r\n]*)`);
+  return re.test(sdp) ? sdp.replace(re, (_, f) => `a=fmtp:${pt} ${f.replace(/;?(stereo|sprop-stereo|maxaveragebitrate)=[^;]*/g, "")};${extra}`)
+    : sdp.replace(m[0], `${m[0]}\r\na=fmtp:${pt} ${extra}`);
 }
 
 async function tune(senders, opts) {

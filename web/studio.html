@@ -13,10 +13,13 @@
     <span class="pill" id="status">conectando…</span>
     <span class="pill hidden" id="liveTimer"></span>
     <span class="grow"></span>
+    <button id="settings" title="Cámara, micrófono y audífonos">⚙️</button>
+    <button id="monitor" class="on" title="Escuchar a los invitados en tus audífonos">🎧</button>
     <button id="addCam" title="Agregar tu cámara">🎥 Cámara</button>
     <button id="addScreen" title="Compartir pantalla">🖥️ Pantalla</button>
     <button id="addMedia" title="Video o imagen local">🎞️ Medio</button>
     <input type="file" id="mediaFile" accept="video/*,image/*" class="hidden">
+    <button id="virtual" title="Pantalla virtual: salida limpia del programa en otra ventana (captúrala, ponla a pantalla completa o úsala como cámara virtual)">📺 Pantalla virtual</button>
     <button id="invite">🔗 Invitar</button>
     <button id="record">⏺️ Grabar</button>
     <button class="primary" id="golive">● Transmitir</button>
@@ -31,7 +34,16 @@
     <div class="row wrap" style="justify-content:center">
       <button class="small" id="countdown">⏳ Cuenta regresiva 5:00</button>
       <button class="small" id="clearScreen">🧹 Limpiar pantalla</button>
-      <span class="muted" style="font-size:12px">Atajos: 1–8 layouts · B banner · C limpiar</span>
+      <span class="muted" style="font-size:12px">Atajos: 1–8 layouts · B banner · C limpiar · S silenciar escenario</span>
+    </div>
+    <div class="row wrap modbar" style="justify-content:center">
+      <button class="small" id="muteStage" title="Silencia todo el escenario en el programa (S)">🔇 Silenciar escenario</button>
+      <button class="small" id="muteAll" title="Silencia el micrófono de todos los invitados">🙊 Silenciar a todos</button>
+      <button class="small" id="askUnmuteAll" title="Pide a todos activar su micrófono">🎙️ Pedir audio a todos</button>
+      <button class="small" id="camsOff" title="Apaga la cámara de todos los invitados">📷 Apagar cámaras</button>
+      <button class="small" id="lowerHands">✋ Bajar manos</button>
+      <button class="small" id="clearStage">⬇️ Todos al backstage</button>
+      <button class="small" id="allStage">⬆️ Todos al escenario</button>
     </div>
     <h3 style="margin:6px 0 0">Backstage <span class="muted" style="font-size:12px;font-weight:400">— clic en “Al escenario” para mostrar</span></h3>
     <div class="backstage" id="backstage"></div>
@@ -97,6 +109,12 @@
 
     <div class="tabpane" data-pane="obs">
       <p class="muted" style="margin:0">Pega estos enlaces en OBS → Fuente → <b>Navegador</b> (1920×1080, marca “Controlar audio vía OBS”).</p>
+      <div class="row wrap obsopts">
+        <label class="row"><input type="checkbox" id="obsCover"> Recortar para llenar</label>
+        <label class="row"><input type="checkbox" id="obsMute"> Sin audio</label>
+        <label class="row"><input type="checkbox" id="obsLabel"> Mostrar nombre</label>
+        <label class="row"><input type="checkbox" id="obsTransparent"> Fondo transparente</label>
+      </div>
       <div id="obsLinks" class="col"></div>
       <h3>Enviar OBS al estudio (WHIP)</h3>
       <p class="muted" style="margin:0">OBS 30+: Ajustes → Emisión → Servicio <b>WHIP</b>.</p>

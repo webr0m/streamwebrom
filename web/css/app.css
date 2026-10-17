@@ -137,3 +137,24 @@ body.view { background: transparent; overflow: hidden; }
 body.view canvas, body.view video { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; }
 body.view.cover video { object-fit: cover; }
 body.view .status { position: fixed; left: 12px; bottom: 12px; font-size: 12px; color: #fff; background: rgba(0,0,0,.5); padding: 4px 8px; border-radius: 6px; }
+
+/* Devices & moderation */
+.tile .tools { flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 12px); }
+.tile .tools button.off { background: var(--bad); }
+.tile.progmuted { outline: 2px dashed var(--bad); outline-offset: -4px; }
+.tile .tilevolrow { position: absolute; left: 8px; right: 8px; bottom: 34px; opacity: 0; transition: opacity .15s; font-size: 12px; }
+.tile:hover .tilevolrow, .tile:focus-within .tilevolrow { opacity: 1; }
+.tile .tilevol { padding: 0; height: 18px; background: transparent; border: 0; accent-color: var(--accent); }
+.call .tile > .tilevol { position: absolute; right: 8px; bottom: 8px; width: 110px; opacity: 0; transition: opacity .15s; }
+.call .tile:hover > .tilevol { opacity: 1; }
+.tile .tileclose { position: absolute; right: 6px; top: 6px; }
+.modbar button.off { background: var(--bad); border-color: transparent; }
+dialog.devdialog { width: min(520px, 94vw); max-height: 90vh; overflow: auto; color: var(--text); padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+dialog.devdialog:not([open]) { display: none; }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.camctl input[type=range] { padding: 0; }
+.toast.ask { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-left-color: var(--warn); }
+body.view.transparent { background: transparent !important; }
+body.view .viewlabel:not(:empty) { position: fixed; left: 24px; bottom: 24px; font: 700 28px Inter, system-ui, sans-serif; color: #fff; background: rgba(0,0,0,.55); padding: 6px 14px; border-radius: 10px; }
+body.view .viewstats { position: fixed; right: 12px; top: 12px; font: 12px ui-monospace, monospace; color: #fff; background: rgba(0,0,0,.6); padding: 4px 8px; border-radius: 6px; }
