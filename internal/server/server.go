@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -49,6 +50,20 @@ const MaxWSPerIP = 30
 // ClientIP returns the caller address. Proxy headers (Cloudflare Tunnel,
 // a local reverse proxy) are trusted only when the TCP peer is loopback,
 // so a remote client cannot spoof its address.
+
+// Windows takes MIME types from the registry, where .mjs/.wasm are often
+// missing or text/plain; browsers refuse modules and streaming WebAssembly
+// served like that. Pin the types the web app needs on every OS.
+func init() {
+	for ext, typ := range map[string]string{
+		".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+		".wasm": "application/wasm", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml",
+		".webmanifest": "application/manifest+json", ".tflite": "application/octet-stream",
+	} {
+		_ = mime.AddExtensionType(ext, typ)
+	}
+}
+
 func ClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
