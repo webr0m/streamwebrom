@@ -1,0 +1,35 @@
+stages: [test, build]
+
+variables:
+  GOFLAGS: "-mod=mod"
+
+test:
+  stage: test
+  image: golang:1.26
+  before_script:
+    - apt-get update && apt-get install -y ffmpeg nodejs
+  script:
+    - go vet ./...
+    - go test -count=1 ./...
+    - go test -race -count=1 ./...
+    - for f in web/js/*.js; do cp $f /tmp/$(basename $f).mjs; node --check /tmp/$(basename $f).mjs; done
+
+binaries:
+  stage: build
+  image: golang:1.26
+  script:
+    - make all
+  artifacts:
+    paths: [dist/]
+    expire_in: 30 days
+
+windows-launcher:
+  stage: build
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  needs: [binaries]
+  script:
+    - dotnet publish windows/StreamWebRom.Launcher -c Release -o dist/windows-launcher
+    - mv dist/windows-launcher/StreamWebRom.exe dist/StreamWebRom-Windows-x64.exe
+  artifacts:
+    paths: [dist/StreamWebRom-Windows-x64.exe]
+    expire_in: 30 days

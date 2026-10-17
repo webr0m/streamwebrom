@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StreamWebRom · Estudio de streaming</title>
+<link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#7c5cff"><link rel="apple-touch-icon" href="/img/icon-192.png"><link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<main class="landing">
+  <div class="hero">
+    <section>
+      <div class="brand"><img src="/img/logo.svg" alt="">StreamWebRom</div>
+      <h1 style="margin-top:22px">Tu estudio en vivo.<br>Directo a OBS, YouTube y Twitch.</h1>
+      <p class="muted">Invitados por enlace, sin instalar nada. Latencia ultrabaja con WebRTC, salida limpia para OBS, multistream RTMP, grabación por invitado y branding en vivo.</p>
+      <div class="features">
+        <div>🎥 Invitados con un link</div><div>🧩 Salida para OBS (Browser Source y WHEP)</div>
+        <div>📡 Multistream a varias plataformas</div><div>🎬 Escenas y 8 layouts</div>
+        <div>🏷️ Banners, ticker, logo y nombres</div><div>💬 Chat y comentarios en pantalla</div>
+        <div>⏺️ Grabación aislada por invitado</div><div>🚪 Sala de espera y backstage</div>
+      </div>
+    </section>
+    <section class="card col">
+      <h2>Crear estudio</h2>
+      <div><label for="title">Nombre del programa</label><input id="title" placeholder="Mi show en vivo" maxlength="120"></div>
+      <div><label for="room">ID de sala (opcional)</label><input id="room" placeholder="se genera automáticamente" maxlength="48" pattern="[a-z0-9_-]+"></div>
+      <div><label for="pw">Contraseña para invitados (opcional)</label><input id="pw" type="password" maxlength="128" autocomplete="new-password"></div>
+      <label class="row"><input id="lobby" type="checkbox"> Sala de espera: aprobar a cada invitado</label>
+      <button class="primary" id="create">Crear estudio</button>
+      <button class="hidden" id="install">⬇ Instalar como app</button>
+      <hr style="border:0;border-top:1px solid var(--line);width:100%">
+      <h3>¿Te invitaron?</h3>
+      <div class="row"><input id="joinRoom" placeholder="ID de sala"><button id="join">Entrar</button></div>
+      <div id="recent" class="list"></div>
+    </section>
+  </div>
+</main>
+<script type="module" src="/js/index.js"></script>
+<script type="module" src="/js/pwa.js"></script>
+</body>
+</html>

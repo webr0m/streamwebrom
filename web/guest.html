@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unirse · StreamWebRom</title>
+<link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#7c5cff"><link rel="apple-touch-icon" href="/img/icon-192.png"><link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<section id="pre" class="prejoin">
+  <div class="col">
+    <div class="brand"><img src="/img/logo.svg" alt="">StreamWebRom</div>
+    <div class="preview"><video id="preview" muted playsinline autoplay></video></div>
+    <div class="meter"><i id="meter"></i></div>
+  </div>
+  <div class="card col">
+    <h2 id="roomTitle">Unirse al programa</h2>
+    <div><label for="name">Tu nombre</label><input id="name" maxlength="40" autocomplete="name"></div>
+    <div id="pwBox" class="hidden"><label for="pw">Contraseña</label><input id="pw" type="password" maxlength="128"></div>
+    <div><label for="cam">Cámara</label><select id="cam"></select></div>
+    <div><label for="mic">Micrófono</label><select id="mic"></select></div>
+    <div><label for="quality">Calidad</label><select id="quality">
+      <option value="720">720p (recomendado)</option><option value="1080">1080p</option><option value="360">360p (conexión lenta)</option></select></div>
+    <label class="row"><input id="ns" type="checkbox" checked> Supresión de ruido y eco</label>
+    <button class="primary" id="joinBtn">Entrar</button>
+    <p class="muted" id="hint" style="margin:0;font-size:12px">Tu video solo sale en vivo cuando el anfitrión te sube al escenario.</p>
+  </div>
+</section>
+
+<section id="waiting" class="landing hidden"><div class="card"><h2>Esperando al anfitrión…</h2><p class="muted">Te dejarán entrar en un momento.</p></div></section>
+
+<section id="call" class="call hidden">
+  <div class="grid" id="grid"></div>
+  <div class="bar">
+    <button class="icon on" id="micBtn" title="Micrófono (M)">🎙️</button>
+    <button class="icon on" id="camBtn" title="Cámara (V)">📷</button>
+    <button class="icon" id="screenBtn" title="Compartir pantalla">🖥️</button>
+    <button class="icon" id="handBtn" title="Levantar la mano">✋</button>
+    <button class="icon" id="reactBtn" title="Reaccionar">😀</button>
+    <button class="icon" id="chatBtn" title="Chat">💬</button>
+    <span class="pill" id="stageState">backstage</span>
+    <button class="danger" id="leaveBtn">Salir</button>
+  </div>
+  <div class="card drawer hidden" id="chat">
+    <div class="chatlog" id="chatlog"></div>
+    <div class="row"><input id="chatInput" maxlength="500" placeholder="Mensaje…"><button id="chatSend">➤</button></div>
+  </div>
+  <div class="card hidden" id="reactions" style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:8px"></div>
+</section>
+<script type="module" src="/js/guest.js"></script>
+<script type="module" src="/js/pwa.js"></script>
+</body>
+</html>

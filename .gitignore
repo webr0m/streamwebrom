@@ -1,0 +1,7 @@
+/dist/
+/streamwebrom-data/
+/windows/**/bin/
+/windows/**/obj/
+*.exe
+*.test
+*.out
