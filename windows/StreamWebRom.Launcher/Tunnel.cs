@@ -63,8 +63,10 @@ public sealed class Tunnel : IDisposable
 
     public void Stop()
     {
-        try { if (Running) { _proc!.Kill(true); _proc.WaitForExit(3000); } } catch { }
+        var p = _proc;
         _proc = null;
+        try { if (p is { HasExited: false }) { p.Kill(true); p.WaitForExit(3000); } } catch { }
+        p?.Dispose();
     }
 
     public void Dispose() => Stop();

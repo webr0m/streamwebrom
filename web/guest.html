@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Unirse · StreamWebRom</title>
-<link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#7c5cff"><link rel="apple-touch-icon" href="/img/icon-192.png"><link rel="stylesheet" href="/css/app.css">
+<link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#141518"><link rel="apple-touch-icon" href="/img/icon-192.png"><link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
 <section id="pre" class="prejoin">
@@ -29,20 +29,20 @@
 <section id="call" class="call hidden">
   <div class="grid" id="grid"></div>
   <div class="bar">
-    <button class="icon on" id="micBtn" title="Micrófono (M)">🎙️</button>
-    <button class="icon on" id="camBtn" title="Cámara (V)">📷</button>
-    <button class="icon" id="screenBtn" title="Compartir pantalla">🖥️</button>
-    <button class="icon" id="cam2Btn" title="Agregar otra cámara">➕</button>
-    <button class="icon" id="setBtn" title="Cámara, micrófono y audífonos">⚙️</button>
-    <button class="icon" id="handBtn" title="Levantar la mano">✋</button>
-    <button class="icon" id="reactBtn" title="Reaccionar">😀</button>
-    <button class="icon" id="chatBtn" title="Chat">💬</button>
+    <button class="icon on" id="micBtn" data-icon="mic" title="Micrófono (M)" aria-label="Micrófono"></button>
+    <button class="icon on" id="camBtn" data-icon="cam" title="Cámara (V)" aria-label="Cámara"></button>
+    <button class="icon" id="screenBtn" data-icon="screen" title="Compartir pantalla" aria-label="Compartir pantalla"></button>
+    <button class="icon" id="cam2Btn" data-icon="plus" title="Agregar otra cámara" aria-label="Agregar otra cámara"></button>
+    <button class="icon" id="setBtn" data-icon="settings" title="Cámara, micrófono y audífonos" aria-label="Ajustes"></button>
+    <button class="icon" id="handBtn" data-icon="hand" title="Levantar la mano" aria-label="Levantar la mano"></button>
+    <button class="icon" id="reactBtn" data-icon="smile" title="Reaccionar" aria-label="Reaccionar"></button>
+    <button class="icon" id="chatBtn" data-icon="chat" title="Chat" aria-label="Chat"></button>
     <span class="pill" id="stageState">backstage</span>
-    <button class="danger" id="leaveBtn">Salir</button>
+    <button class="danger" id="leaveBtn" data-icon="leave">Salir</button>
   </div>
   <div class="card drawer hidden" id="chat">
     <div class="chatlog" id="chatlog"></div>
-    <div class="row"><input id="chatInput" maxlength="500" placeholder="Mensaje…"><button id="chatSend">➤</button></div>
+    <div class="row"><input id="chatInput" maxlength="500" placeholder="Mensaje…"><button id="chatSend" class="primary">Enviar</button></div>
   </div>
   <div class="card hidden" id="reactions" style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:8px"></div>
 </section>

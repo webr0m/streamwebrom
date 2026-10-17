@@ -86,3 +86,26 @@ que el original delega en servidores externos, y reescribir el cliente para que 
 - **Efectos de video**: MediaPipe Tasks Vision 0.10.14 (Apache-2.0) incluido en `web/vendor/mediapipe` (sin CDN). La CSP agrega sólo `'wasm-unsafe-eval'` (necesario para WebAssembly) y `worker-src 'self'`; sigue sin `unsafe-eval` ni scripts inline. Las imágenes/videos de fondo nunca salen del equipo (object URL; imágenes < 1,5 MB se guardan en localStorage).
 - **Rendimiento**: el bucle de efectos usa un reloj en Worker (no se frena en pestañas ocultas), descarta ticks atrasados y limita la segmentación según su costo para no bloquear la señalización (detectado en QA: sin GPU, la cola de ticks retrasaba los mensajes WebSocket).
 - **QA automatizada** (Chromium 155 headless con cámara falsa): desenfoque activo, fondo croma, reemplazo por imagen, estadísticas en vivo en el panel 🎛️, cambio remoto a 360p aplicado (640×360), mensaje privado, escena 2 con insignia en el invitado y salida `/view?scene=2`, traslado a otra sala.
+
+## v1.3.0 — auditoría de código y nueva interfaz (2026-10-17)
+
+Revisión completa de servidor (Go), cliente (JS) y app de Windows (.NET). Estado inicial: `go vet` limpio, `go test` y `go test -race` en verde, JS sin errores de sintaxis. Hallazgos corregidos (todos con test cuando aplica):
+
+| # | Severidad | Hallazgo | Corrección |
+|---|---|---|---|
+| 1 | Alta | `Room.Update` mutaba el estado antes de validar todo el parche: un error a mitad dejaba cambios aplicados sin difundir (clientes desincronizados). | Copia profunda + reemplazo solo si todo valida. `TestStatePatchIsAtomic`, `TestUpdateIsAllOrNothing`. |
+| 2 | Alta | Reconexión del cliente: un intento fallido terminaba el bucle de reintentos. | `everWelcomed`: reintenta con backoff hasta `close()`. |
+| 3 | Alta | Tras reconectar, el anfitrión mantenía suscripciones y publicaciones muertas (video congelado, cámara fuera del programa). | Re-suscribe y re-publica con el mismo ID de stream. |
+| 4 | Media | Carrera de datos: `Peer.Role` escrito al admitir (goroutine del anfitrión) y leído sin lock por la del invitado. | Acceso con `p.mu` (`role()`). |
+| 5 | Media | TOCTOU en `golive`: dos peticiones simultáneas podían iniciar dos sesiones ffmpeg. | Bandera `starting` bajo el lock de la sala. |
+| 6 | Media | Sesiones WHIP/WHEP nunca se borraban si el cliente no enviaba DELETE. | Se olvidan al cerrarse la media. |
+| 7 | Media | Al salir un invitado, sus streams seguían en las escenas 2–8, en `featured` y en `recording`. | Limpieza completa en `leave`. |
+| 8 | Media | `record *` abortaba con el primer stream ya grabando o sin pistas. | Se omiten y se registra; error claro si no hay nada. `TestRecordAllWithoutSources`. |
+| 9 | Baja | Invitado que abandona la sala de espera quedaba en la lista del anfitrión. | Mensaje `knock-cancel`. `TestLobbyKnockCancel`. |
+| 10 | Baja | Fugas en el cliente: `setInterval` de imágenes, object URLs, suscripciones tardías, PeerConnections fallidas. | Liberación explícita. |
+| 11 | Baja | Atajos de teclado capturaban Ctrl+número y teclas repetidas. | Filtro de modificadores/diálogos. |
+| 12 | Baja | Clave SRT visible en la lista de destinos. | Se muestra solo `esquema://host/••••`. |
+| 13 | Baja | Token admin comparado con `!=`. | `subtle.ConstantTimeCompare`. |
+| 14 | Baja | Launcher: estado “detenido” erróneo tras reiniciar; binario embebido comparado solo por tamaño. | Evento de salida ligado al proceso actual; SHA-256. |
+
+**Interfaz**: se evaluaron clones libres de StreamYard (p. ej. Flexio, Castify, streamyard-clone-nodejs): son prototipos React/Next con backend propio y sin las funciones de este proyecto, así que se rediseñó la interfaz existente con la disposición de StreamYard, sin tocar la lógica. QA con Chromium headless (cámara falsa): anfitrión + invitado, layouts, backstage, menú Producción, paneles; sin errores de consola. La app .NET compila con `dotnet build` (EnableWindowsTargeting) y `dotnet publish` genera el `.exe` único.

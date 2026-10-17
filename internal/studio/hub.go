@@ -144,7 +144,7 @@ func (h *Hub) ReapNow(now time.Time) int {
 	n := 0
 	for id, r := range h.rooms {
 		r.mu.RLock()
-		idle := len(r.peers) == 0 && len(r.streams) == 0 && now.Sub(r.emptyAt) > h.o.RoomTTL
+		idle := len(r.peers) == 0 && len(r.waiting) == 0 && len(r.streams) == 0 && now.Sub(r.emptyAt) > h.o.RoomTTL
 		r.mu.RUnlock()
 		if idle {
 			r.close()
@@ -222,7 +222,8 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 		return h.join(p, m)
 	}
 	r := p.room
-	if p.Role == "" { // waiting in lobby
+	role := p.role()
+	if role == "" { // waiting in lobby
 		return errors.New("waiting for the host to let you in")
 	}
 	switch m.Type {
@@ -295,14 +296,14 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 		r.toHosts(Msg{Type: "report", Action: m.Action, Value: m.Value, PeerID: p.ID, Name: p.Name, ReqID: m.ReqID})
 		return nil
 	case "reaction":
-		e := m.Text
-		if utf8.RuneCountInString(e) > 4 {
+		e := strings.TrimSpace(m.Text)
+		if e == "" || utf8.RuneCountInString(e) > 4 {
 			return errors.New("bad reaction")
 		}
 		r.broadcast(Msg{Type: "reaction", Text: e, PeerID: p.ID, Name: p.Name}, "")
 		return nil
 	}
-	if p.Role != RoleHost {
+	if role != RoleHost {
 		return fmt.Errorf("%s requires host", m.Type)
 	}
 	return h.hostAction(p, m)
@@ -345,7 +346,9 @@ func (h *Hub) join(p *Peer, m Msg) error {
 	if lobby {
 		r.waiting[p.ID] = p
 	} else {
+		p.mu.Lock()
 		p.Role = role
+		p.mu.Unlock()
 		r.peers[p.ID] = p
 	}
 	r.mu.Unlock()
@@ -362,9 +365,10 @@ func (h *Hub) join(p *Peer, m Msg) error {
 func (h *Hub) welcome(p *Peer) {
 	r := p.room
 	st := r.Snapshot()
-	w := Msg{Type: "welcome", PeerID: p.ID, Role: p.Role, Room: r.ID, State: &st,
+	role := p.role()
+	w := Msg{Type: "welcome", PeerID: p.ID, Role: role, Room: r.ID, State: &st,
 		Peers: r.Peers(), Streams: r.Streams(), Chat: r.history(), ICE: h.o.ICE}
-	if p.Role == RoleHost {
+	if role == RoleHost {
 		w.Keys = &Keys{Room: r.ID, ViewKey: r.viewKey, PushKey: r.pushKey}
 		r.mu.RLock()
 		for _, wp := range r.waiting {
@@ -373,7 +377,7 @@ func (h *Hub) welcome(p *Peer) {
 		r.mu.RUnlock()
 	}
 	p.Send(w)
-	if p.Role != RoleViewer {
+	if role != RoleViewer {
 		inf := p.Info(st.Stage)
 		r.broadcast(Msg{Type: "peer-joined", Peer: &inf}, p.ID)
 	}
@@ -392,6 +396,7 @@ func (h *Hub) leave(p *Peer) {
 		return
 	}
 	r.mu.Lock()
+	_, knocking := r.waiting[p.ID]
 	delete(r.waiting, p.ID)
 	_, was := r.peers[p.ID]
 	delete(r.peers, p.ID)
@@ -399,6 +404,9 @@ func (h *Hub) leave(p *Peer) {
 		r.emptyAt = time.Now()
 	}
 	r.mu.Unlock()
+	if knocking { // let hosts drop the stale "wants to join" entry
+		r.toHosts(Msg{Type: "knock-cancel", PeerID: p.ID})
+	}
 	p.mu.Lock()
 	pubs := p.pubs
 	subs := p.subs
@@ -410,20 +418,36 @@ func (h *Hub) leave(p *Peer) {
 	for _, s := range subs {
 		s.Close()
 	}
-	if was && p.Role != RoleViewer {
+	if was && p.role() != RoleViewer {
 		r.broadcast(Msg{Type: "peer-left", PeerID: p.ID}, "")
 	}
-	// Drop departed streams from the stage.
+	// Drop departed streams from the program and every extra scene, and
+	// refresh the recording list (their recordings stopped with them).
 	if len(pubs) > 0 {
+		gone := func(id string) bool { _, ok := pubs[id]; return ok }
 		_ = r.Update(func(st *State) error {
-			st.Stage = slices.DeleteFunc(st.Stage, func(id string) bool { _, ok := pubs[id]; return ok })
+			st.Stage = slices.DeleteFunc(st.Stage, gone)
+			if gone(st.Featured) {
+				st.Featured = ""
+			}
+			for name, o := range st.Outputs {
+				o.Stage = slices.DeleteFunc(o.Stage, gone)
+				if gone(o.Featured) {
+					o.Featured = ""
+				}
+				st.Outputs[name] = o
+			}
+			if h.o.Recorder != nil {
+				st.Recording = h.o.Recorder.Active(r.ID)
+			}
 			return nil
 		})
 	}
 }
 
 func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
-	if p.Role == RoleViewer {
+	role := p.role()
+	if role == RoleViewer {
 		return errors.New("viewers cannot publish")
 	}
 	if m.SDP == nil {
@@ -436,7 +460,7 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 	if kind != "camera" && kind != "screen" && kind != "program" && kind != "media" {
 		return errors.New("bad kind")
 	}
-	if kind == "program" && p.Role != RoleHost {
+	if kind == "program" && role != RoleHost {
 		return errors.New("only the host publishes the program")
 	}
 	id := m.Stream
@@ -447,7 +471,7 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 		return errors.New("bad stream id")
 	}
 	// A guest may not hijack someone else's stream id.
-	if old := p.room.Stream(id); old != nil && old.Owner != p.ID && p.Role != RoleHost {
+	if old := p.room.Stream(id); old != nil && old.Owner != p.ID && role != RoleHost {
 		return errors.New("stream id in use")
 	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -551,7 +575,9 @@ func (h *Hub) hostAction(host *Peer, m Msg) error {
 		p := r.waiting[m.Target]
 		delete(r.waiting, m.Target)
 		if p != nil && m.Type == "admit" {
+			p.mu.Lock()
 			p.Role = RoleGuest
+			p.mu.Unlock()
 			r.peers[p.ID] = p
 		}
 		r.mu.Unlock()
@@ -810,7 +836,8 @@ func (h *Hub) record(r *Room, m Msg) error {
 		return errors.New("recording disabled")
 	}
 	ids := []string{m.Stream}
-	if m.Stream == "" || m.Stream == "*" {
+	all := m.Stream == "" || m.Stream == "*"
+	if all {
 		ids = nil
 		for _, s := range r.Streams() {
 			ids = append(ids, s.ID)
@@ -826,10 +853,20 @@ func (h *Hub) record(r *Room, m Msg) error {
 			return fmt.Errorf("stream %q not found", id)
 		}
 		if _, err := h.o.Recorder.Start(r.ID, s); err != nil {
+			// "Record everything" must not abort because one source is already
+			// being recorded or has no media yet: record the rest.
+			if all {
+				h.log.Warn("record: skipped stream", "room", r.ID, "stream", id, "err", err)
+				continue
+			}
 			return err
 		}
 	}
-	return r.Update(func(st *State) error { st.Recording = h.o.Recorder.Active(r.ID); return nil })
+	active := h.o.Recorder.Active(r.ID)
+	if all && m.Action != "stop" && len(active) == 0 {
+		return errors.New("nothing to record yet: add a camera, screen or guest first")
+	}
+	return r.Update(func(st *State) error { st.Recording = active; return nil })
 }
 
 func (h *Hub) goLive(r *Room, m Msg) error {
@@ -846,18 +883,22 @@ func (h *Hub) goLive(r *Room, m Msg) error {
 		settings = *m.Settings
 	}
 	r.mu.Lock()
-	if r.restream != nil {
+	if r.restream != nil || r.starting {
 		r.mu.Unlock()
 		return errors.New("already live")
 	}
+	r.starting = true // two hosts pressing "Go live" at once must not start two ffmpegs
 	r.mu.Unlock()
 	sess, err := restream.Start(h.o.FFmpeg, s, m.Dests, settings, h.log)
+	r.mu.Lock()
+	r.starting = false
+	if err == nil {
+		r.restream = sess
+	}
+	r.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	r.mu.Lock()
-	r.restream = sess
-	r.mu.Unlock()
 	go func() {
 		t := time.NewTicker(2 * time.Second)
 		defer t.Stop()

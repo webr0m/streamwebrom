@@ -5,6 +5,7 @@ multistream a YouTube/Twitch/Facebook/Kick, grabación aislada por invitado y br
 Servidor en Go (SFU WebRTC con [pion](https://github.com/pion/webrtc)), cliente web sin dependencias.
 
 Inspirado en VDO.Ninja, StreamYard y Discord — reescrito desde cero, auditado y con tests.
+Desde la v1.3 el estudio tiene una **interfaz al estilo StreamYard**: escenas a la izquierda, lienzo y layouts al centro, backstage y barra de botones abajo, y paneles con riel de íconos a la derecha.
 Ver [docs/AUDITORIA.md](docs/AUDITORIA.md).
 
 ## Qué trae

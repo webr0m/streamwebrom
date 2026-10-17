@@ -5,6 +5,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -279,7 +280,7 @@ func (s *Server) roomInfo(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) admin(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.AdminToken == "" || bearer(r) != s.cfg.AdminToken {
+		if s.cfg.AdminToken == "" || subtle.ConstantTimeCompare([]byte(bearer(r)), []byte(s.cfg.AdminToken)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -329,11 +330,14 @@ func readOffer(w http.ResponseWriter, r *http.Request) (webrtc.SessionDescriptio
 	return webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: string(b)}, true
 }
 
-func (s *Server) writeAnswer(w http.ResponseWriter, r *http.Request, ans *webrtc.SessionDescription, closeFn func()) {
+func (s *Server) writeAnswer(w http.ResponseWriter, r *http.Request, ans *webrtc.SessionDescription, closeFn func(), done <-chan struct{}) {
 	id := studio.NewRoomID() + studio.NewRoomID()
 	s.mu.Lock()
 	s.sessions[id] = closeFn
 	s.mu.Unlock()
+	// Forget the session when the media ends on its own (OBS quit without
+	// sending DELETE, network loss): otherwise the map grows forever.
+	go func() { <-done; s.forget(id) }()
 	w.Header().Set("Content-Type", "application/sdp")
 	w.Header().Set("Location", r.URL.Path+"/"+id)
 	w.Header().Set("ETag", `"`+id+`"`)
@@ -378,7 +382,7 @@ func (s *Server) whip(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.writeAnswer(w, r, ans, st.Close)
+	s.writeAnswer(w, r, ans, st.Close, st.Done())
 	s.log.Info("whip publish", "room", room.ID, "stream", st.ID)
 }
 
@@ -408,7 +412,7 @@ func (s *Server) whep(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), code)
 		return
 	}
-	s.writeAnswer(w, r, ans, sub.Close)
+	s.writeAnswer(w, r, ans, sub.Close, sub.Done())
 }
 
 func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {

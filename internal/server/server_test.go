@@ -498,3 +498,52 @@ func TestModeration(t *testing.T) {
 		t.Fatalf("outputs: %+v", st.State.Outputs)
 	}
 }
+
+// A lobby guest who gives up must disappear from the host's knock list.
+func TestLobbyKnockCancel(t *testing.T) {
+	e := newEnv(t)
+	k := e.createRoom(t, `{"room":"knock-room","lobby":true}`)
+	host := e.dial(t)
+	host.send(map[string]any{"type": "join", "room": "knock-room", "role": "host", "key": k.HostKey})
+	host.expect("welcome")
+	g := e.dial(t)
+	g.send(map[string]any{"type": "join", "room": "knock-room", "name": "Ana"})
+	g.expect("waiting")
+	knock := host.expect("knock")
+	_ = g.c.Close()
+	if m := host.expect("knock-cancel"); m.PeerID != knock.PeerID {
+		t.Fatalf("knock-cancel for %q, want %q", m.PeerID, knock.PeerID)
+	}
+}
+
+// A state patch rejected half-way must not leave a partial change behind.
+func TestStatePatchIsAtomic(t *testing.T) {
+	e := newEnv(t)
+	k := e.createRoom(t, `{"room":"atomic-room","title":"Antes"}`)
+	host := e.dial(t)
+	host.send(map[string]any{"type": "join", "room": "atomic-room", "role": "host", "key": k.HostKey})
+	host.expect("welcome")
+	host.send(map[string]any{"type": "state", "value": map[string]any{"title": "Después", "layout": "nope"}})
+	host.expect("error")
+	if got := e.hub.Room("atomic-room").Snapshot().Title; got != "Antes" {
+		t.Fatalf("title changed to %q by a rejected patch", got)
+	}
+	host.send(map[string]any{"type": "state", "value": map[string]any{"title": "Después", "layout": "solo"}})
+	st := host.expect("state").State
+	if st.Title != "Después" || st.Layout != "solo" {
+		t.Fatalf("valid patch not applied: %+v", st)
+	}
+}
+
+// "Record everything" with no sources yet is a clear error, not a silent no-op.
+func TestRecordAllWithoutSources(t *testing.T) {
+	e := newEnv(t)
+	k := e.createRoom(t, `{"room":"rec-empty"}`)
+	host := e.dial(t)
+	host.send(map[string]any{"type": "join", "room": "rec-empty", "role": "host", "key": k.HostKey})
+	host.expect("welcome")
+	host.send(map[string]any{"type": "record", "action": "start", "stream": "*"})
+	if m := host.expect("error"); !strings.Contains(m.Error, "nothing to record") {
+		t.Fatalf("unexpected error %q", m.Error)
+	}
+}

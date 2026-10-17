@@ -81,6 +81,14 @@ func newPeer(conn *websocket.Conn, lim *rate.Limiter) *Peer {
 		subs: map[string]*sfu.Subscriber{}, pubs: map[string]*sfu.Stream{}, gone: make(chan struct{})}
 }
 
+// role reads the peer's role; it changes once, when the host admits a
+// guest from the lobby, while the guest's own goroutine may be reading it.
+func (p *Peer) role() Role {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.Role
+}
+
 // Info returns the public view. stage is the room's current stage list.
 func (p *Peer) Info(stage []string) PeerInfo {
 	p.mu.Lock()

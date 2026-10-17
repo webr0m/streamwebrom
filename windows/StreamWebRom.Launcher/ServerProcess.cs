@@ -28,13 +28,28 @@ public sealed class ServerProcess : IDisposable
             throw new FileNotFoundException("streamwebrom.exe no está incluido en este build.");
         }
         // Only rewrite when the embedded binary changed (keeps Windows Firewall rule valid).
-        if (!File.Exists(target) || new FileInfo(target).Length != res.Length)
+        // Compare content, not just size: two builds can have the same length.
+        if (!File.Exists(target) || new FileInfo(target).Length != res.Length || !SameHash(res, target))
         {
+            res.Position = 0;
             var tmp = target + ".new";
             using (var f = File.Create(tmp)) res.CopyTo(f);
             File.Move(tmp, target, true);
         }
         return target;
+    }
+
+    private static bool SameHash(Stream res, string file)
+    {
+        try
+        {
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            res.Position = 0;
+            var h1 = sha.ComputeHash(res);
+            using var f = File.OpenRead(file);
+            return h1.AsSpan().SequenceEqual(sha.ComputeHash(f));
+        }
+        catch { return false; }
     }
 
     public void Start(Settings s)
@@ -58,13 +73,22 @@ public sealed class ServerProcess : IDisposable
             WorkingDirectory = DataDir,
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
-        _proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        _proc.OutputDataReceived += (_, e) => { if (e.Data != null) Output?.Invoke(e.Data); };
-        _proc.ErrorDataReceived += (_, e) => { if (e.Data != null) Output?.Invoke(e.Data); };
-        _proc.Exited += (_, _) => Exited?.Invoke(_proc?.ExitCode ?? -1);
-        _proc.Start();
-        _proc.BeginOutputReadLine();
-        _proc.BeginErrorReadLine();
+        var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+        proc.OutputDataReceived += (_, e) => { if (e.Data != null) Output?.Invoke(e.Data); };
+        proc.ErrorDataReceived += (_, e) => { if (e.Data != null) Output?.Invoke(e.Data); };
+        // Report only unexpected exits of the *current* process. Before, killing the
+        // old server in "Aplicar y reiniciar" fired Exited after the new one had
+        // started, so the window showed "detenido" while the server was running.
+        proc.Exited += (_, _) =>
+        {
+            if (!ReferenceEquals(_proc, proc)) return;
+            int code; try { code = proc.ExitCode; } catch { code = -1; }
+            Exited?.Invoke(code);
+        };
+        _proc = proc;
+        proc.Start();
+        proc.BeginOutputReadLine();
+        proc.BeginErrorReadLine();
     }
 
     public static string? FindFfmpeg()
@@ -84,8 +108,10 @@ public sealed class ServerProcess : IDisposable
 
     public void Stop()
     {
-        try { if (Running) { _proc!.Kill(true); _proc.WaitForExit(3000); } } catch { }
-        _proc = null;
+        var p = _proc;
+        _proc = null; // first, so its Exited event is recognised as intentional
+        try { if (p is { HasExited: false }) { p.Kill(true); p.WaitForExit(3000); } } catch { }
+        p?.Dispose();
     }
 
     public void Dispose() => Stop();

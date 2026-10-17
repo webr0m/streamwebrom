@@ -51,6 +51,7 @@ export class Signal extends EventTarget {
     this.ice = [];
     this.retry = 0;
     this.closed = false;
+    this.everWelcomed = false; // once in, keep retrying until close()
   }
 
   connect(joinMsg) {
@@ -63,7 +64,7 @@ export class Signal extends EventTarget {
       ws.onopen = () => { this.retry = 0; ws.send(JSON.stringify(joinMsg)); };
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
-        if (m.type === "welcome") { welcomed = true; this.ice = m.ice || []; this.flush(); resolve(m); }
+        if (m.type === "welcome") { welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.flush(); resolve(m); }
         if (m.type === "waiting") resolve(m);
         if (m.type === "error" && !welcomed && !m.reqId) { reject(new Error(m.error)); }
         if (m.reqId && this.pending.has(m.reqId)) {
@@ -80,13 +81,16 @@ export class Signal extends EventTarget {
         this.pending.clear();
         this.dispatchEvent(new CustomEvent("disconnected"));
         if (!welcomed) reject(new Error("no se pudo conectar al servidor"));
-        if (!this.closed && welcomed) {
+        // Retry while the server is down: a failed reconnect attempt used to
+        // end the loop (it was never "welcomed"), leaving the page dead.
+        if (!this.closed && (welcomed || this.everWelcomed)) {
           const wait = Math.min(10000, 500 * 2 ** this.retry++);
           setTimeout(() => this.connect(this.joinMsg).then((m) => this.dispatchEvent(new CustomEvent("reconnected", { detail: m }))).catch(() => {}), wait);
         }
       };
       this.keepalive && clearInterval(this.keepalive);
-      this.keepalive = setInterval(() => this.send({ type: "ping", ts: Date.now() }), 15000);
+      // Only ping an open socket: queued pings would pile up during an outage.
+      this.keepalive = setInterval(() => { if (this.ws?.readyState === 1) this.send({ type: "ping", ts: Date.now() }); }, 15000);
     });
   }
 
@@ -146,11 +150,18 @@ export async function publish(sig, media, opts = {}) {
     senders[track.kind] = tr.sender;
     if (track.kind === "video") prefer(tr, opts.codec);
   }
-  await pc.setLocalDescription(await pc.createOffer());
-  await gathered(pc);
-  const res = await sig.request({ type: "publish", kind: opts.kind || "camera", stream: opts.stream || "", name: opts.name || "", sdp: pc.localDescription });
-  const answer = opts.stereo ? { type: res.sdp.type, sdp: stereoOpus(res.sdp.sdp, opts.audioKbps || 256) } : res.sdp;
-  await pc.setRemoteDescription(answer);
+  let res;
+  try {
+    await pc.setLocalDescription(await pc.createOffer());
+    await gathered(pc);
+    res = await sig.request({ type: "publish", kind: opts.kind || "camera", stream: opts.stream || "", name: opts.name || "", sdp: pc.localDescription });
+    const answer = opts.stereo ? { type: res.sdp.type, sdp: stereoOpus(res.sdp.sdp, opts.audioKbps || 256) } : res.sdp;
+    await pc.setRemoteDescription(answer);
+  } catch (e) {
+    pc.close(); // do not leak a half-open connection (and its camera reference)
+    if (res?.stream) sig.send({ type: "unpublish", stream: res.stream });
+    throw e;
+  }
   await tune(senders, opts);
   return {
     id: res.stream, pc, senders, opts,
@@ -205,10 +216,17 @@ export async function subscribe(sig, id) {
     // Minimal jitter buffer: we're feeding a live show, not a VOD player.
     try { e.receiver.playoutDelayHint = 0; e.receiver.jitterBufferTarget = 0; } catch {}
   };
-  const offer = await sig.request({ type: "subscribe", stream: id });
-  await pc.setRemoteDescription(offer.sdp);
-  await pc.setLocalDescription(await pc.createAnswer());
-  await gathered(pc);
+  let offer;
+  try {
+    offer = await sig.request({ type: "subscribe", stream: id });
+    await pc.setRemoteDescription(offer.sdp);
+    await pc.setLocalDescription(await pc.createAnswer());
+    await gathered(pc);
+  } catch (e) {
+    pc.close();
+    if (offer) sig.send({ type: "unsubscribe", stream: id });
+    throw e;
+  }
   sig.send({ type: "answer", stream: id, sdp: pc.localDescription });
   return { id, name: offer.name, stream: media, pc, close() { sig.send({ type: "unsubscribe", stream: id }); pc.close(); } };
 }

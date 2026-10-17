@@ -118,6 +118,7 @@ type Room struct {
 	chat     []Comment
 	emptyAt  time.Time
 	restream *restream.Session
+	starting bool // a go-live is being set up (guards against double start)
 }
 
 // Keys returned once to the creator.
@@ -249,19 +250,44 @@ func (r *Room) label(s *sfu.Stream) string {
 func (r *Room) Snapshot() State {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	b, _ := json.Marshal(r.state)
-	var s State
-	_ = json.Unmarshal(b, &s)
+	s, _ := cloneState(r.state)
 	return s
 }
 
-// Update mutates the state under lock and broadcasts it.
+// cloneState deep-copies a state (maps, slices and pointers included).
+func cloneState(in State) (State, error) {
+	b, err := json.Marshal(in)
+	if err != nil {
+		return in, err
+	}
+	var s State
+	if err := json.Unmarshal(b, &s); err != nil {
+		return in, err
+	}
+	if s.Labels == nil {
+		s.Labels = map[string]string{}
+	}
+	if s.Scenes == nil {
+		s.Scenes = map[string]Scene{}
+	}
+	return s, nil
+}
+
+// Update mutates the state under lock and broadcasts it. The change is
+// all-or-nothing: fn works on a deep copy that replaces the state only when
+// fn succeeds, so a patch rejected half-way (e.g. a valid title followed by
+// an unknown layout) never leaves the room with a state nobody was told about.
 func (r *Room) Update(fn func(*State) error) error {
 	r.mu.Lock()
-	if err := fn(&r.state); err != nil {
+	next, err := cloneState(r.state)
+	if err == nil {
+		err = fn(&next)
+	}
+	if err != nil {
 		r.mu.Unlock()
 		return err
 	}
+	r.state = next
 	r.mu.Unlock()
 	st := r.Snapshot()
 	r.broadcast(Msg{Type: "state", State: &st}, "")
@@ -286,7 +312,7 @@ func (r *Room) toHosts(m Msg) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, p := range r.peers {
-		if p.Role == RoleHost {
+		if p.role() == RoleHost {
 			p.Send(m)
 		}
 	}
@@ -319,7 +345,7 @@ func (r *Room) Peers() []PeerInfo {
 func (r *Room) empty() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return len(r.peers) == 0 && len(r.streams) == 0
+	return len(r.peers) == 0 && len(r.waiting) == 0 && len(r.streams) == 0
 }
 
 func (r *Room) close() {

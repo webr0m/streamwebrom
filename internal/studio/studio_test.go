@@ -57,3 +57,21 @@ func TestCleanName(t *testing.T) {
 		t.Fatal("default name")
 	}
 }
+
+func TestUpdateIsAllOrNothing(t *testing.T) {
+	r, _, err := newRoom("atomic", "", false, "T")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = r.Update(func(st *State) error {
+		st.Title = "changed"
+		st.Labels["x"] = "y"
+		return errFull
+	})
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if st := r.Snapshot(); st.Title != "T" || st.Labels["x"] != "" {
+		t.Fatalf("failed update leaked into state: %+v", st)
+	}
+}

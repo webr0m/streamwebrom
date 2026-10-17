@@ -10,7 +10,11 @@ const monitors = new Map(); // streamId -> <audio> for the host's headphones
 const room = (params.get("room") || "").toLowerCase();
 const savedRooms = JSON.parse(localStorage.getItem("swr.rooms") || "{}");
 const hostKey = hashParams.get("key") || savedRooms[room]?.hostKey;
-if (!room || !hostKey) { alert("Falta la sala o la clave de anfitrión. Crea un estudio desde la portada."); location.href = "/"; }
+if (!room || !hostKey) {
+  alert("Falta la sala o la clave de anfitrión. Crea un estudio desde la portada.");
+  location.href = "/";
+  throw new Error("missing room or host key"); // stop here: the rest needs both
+}
 // Remember the key locally and scrub it from the address bar (screenshots, screen shares).
 savedRooms[room] = { ...(savedRooms[room] || {}), room, hostKey, created: savedRooms[room]?.created || Date.now() };
 localStorage.setItem("swr.rooms", JSON.stringify(savedRooms));
@@ -46,13 +50,15 @@ const sceneState = (name) => ({ ...state, ...sceneOf(name) });
 const scenePrev = new Compositor($("#scenePreview"), sources, () => sceneState(editScene));
 function renderSceneBar() {
   const bar = $("#sceneBar");
-  bar.replaceChildren(el("span", { class: "muted", text: "Editando:" }),
+  bar.replaceChildren(el("span", { class: "muted scenehint", text: "Editando:" }),
     ...SCENES.map((n) => {
       const count = sceneOf(n).stage.filter((id) => sources.has(id)).length;
-      return el("button", { class: "small" + (editScene === n ? " active" : ""), title: n === "1" ? "Programa (lo que sale en vivo)" : `Escena ${n} (salida extra para OBS)`,
-        onclick: () => { editScene = n; renderSceneBar(); renderState(); }, text: (n === "1" ? "🔴 Programa" : `Escena ${n}`) + (count ? ` · ${count}` : "") });
+      return el("button", { class: "scenecard" + (n === "1" ? " program" : "") + (editScene === n ? " active" : ""), title: n === "1" ? "Programa (lo que sale en vivo)" : `Escena ${n} (salida extra para OBS)`,
+        onclick: () => { editScene = n; renderSceneBar(); renderState(); } },
+        el("span", { class: "scenename", text: n === "1" ? "Programa" : `Escena ${n}` }),
+        el("span", { class: "scenecount", text: count ? `${count} en escena` : "vacía" }));
     }),
-    el("button", { class: "small", title: "Copiar el link de OBS de esta escena", onclick: () => keys.viewKey ? copy(sceneURL(editScene)) : toast("Aún conectando…", "err"), text: "🔗 Link OBS" }));
+    el("button", { class: "small scenelink", title: "Copiar el link de OBS de esta escena", onclick: () => keys.viewKey ? copy(sceneURL(editScene)) : toast("Aún conectando…", "err"), text: "🔗 Link OBS" }));
   const extra = editScene !== "1";
   $("#scenePreviewWrap").classList.toggle("hidden", !extra);
   $("#scenePreviewLabel").textContent = extra ? `Vista previa de la escena ${editScene} (no es lo que sale en vivo)` : "";
@@ -67,7 +73,26 @@ const mixer = new AudioMixer();
 function setStatus(t, cls = "") { const s = $("#status"); s.textContent = t; s.className = "pill " + cls; }
 
 sig.on("disconnected", () => setStatus("reconectando…", "red"));
-sig.on("reconnected", (m) => { onWelcome(m); setStatus("conectado", "green"); });
+sig.on("reconnected", async (m) => {
+  // The server dropped everything tied to the old connection: our
+  // subscriptions (guests' video would freeze) and our own publications
+  // (the host's camera would vanish from the show). Rebuild both.
+  for (const [id, s] of [...sources]) {
+    if (s.local) continue;
+    s.sub?.close(); monitors.get(id)?.remove(); monitors.delete(id); sources.delete(id);
+  }
+  try { program?.pc.close(); } catch {}
+  program = null;
+  for (const [id, pub] of [...local]) {
+    const s = sources.get(id);
+    try { pub.pc.close(); } catch {}
+    try {
+      const fresh = await publish(sig, s.stream, { ...pub.opts, stream: id }); // same id keeps its stage slot
+      local.set(id, fresh); s.pub = fresh;
+    } catch (e) { console.warn("republish", id, e); local.delete(id); sources.delete(id); }
+  }
+  onWelcome(m); setStatus("conectado", "green");
+});
 
 function onWelcome(m) {
   state = m.state; keys = m.keys || keys;
@@ -89,6 +114,7 @@ sig.on("stream-added", (m) => addRemote(m.info.id, m.info.kind, m.info.owner, m.
 sig.on("stream-removed", (m) => removeSource(m.stream));
 sig.on("chat", (m) => addChat(m.comment));
 sig.on("knock", (m) => addKnock(m));
+sig.on("knock-cancel", (m) => { const it = $(`#knocks [data-peer="${CSS.escape(m.peerId)}"]`); if (it) { it.remove(); toast("Un invitado dejó la sala de espera"); } });
 sig.on("reaction", (m) => flyReaction(m.text));
 sig.on("restream", (m) => { const r = m.state.restream; $("#restreamStats").textContent = r ? (r.stats || "") + (r.lastError ? " · " + r.lastError : "") : ""; });
 sig.on("error", (m) => toast(m.error, "err"));
@@ -99,6 +125,7 @@ async function addRemote(id, kind, owner, name) {
   sources.set(id, placeholder);
   try {
     const sub = await subscribe(sig, id);
+    if (sources.get(id) !== placeholder) { sub.close(); return; } // removed while connecting
     const v = placeholder.video;
     v.muted = true; v.playsInline = true; v.autoplay = true; v.srcObject = sub.stream;
     await v.play().catch(() => {});
@@ -106,7 +133,7 @@ async function addRemote(id, kind, owner, name) {
     setTimeout(() => { if (sub.stream.getAudioTracks().length) { placeholder.level = levelMeter(sub.stream); monitor(id, sub.stream); } syncAudio(); }, 300);
     renderBackstage();
   } catch (e) {
-    sources.delete(id);
+    if (sources.get(id) === placeholder) sources.delete(id);
     console.warn("subscribe", id, e);
   }
 }
@@ -134,24 +161,24 @@ function monitor(id, stream) {
 }
 function syncMonitor() {
   for (const [id, a] of monitors) { a.muted = !monitorOn; a.volume = Math.min(1, localVol(id)); }
-  $("#monitor").className = monitorOn ? "on" : "";
+  $("#monitor").classList.toggle("on", monitorOn);
 }
 const localVolumes = JSON.parse(sessionStorage.getItem("swr.mon") || "{}");
 const localVol = (id) => localVolumes[id] ?? 1;
 $("#monitor").onclick = () => { monitorOn = !monitorOn; localStorage.setItem("swr.monitor", monitorOn ? "1" : "0"); syncMonitor(); toast(monitorOn ? "Escuchando a los invitados" : "Monitor silenciado"); };
 
 // ---------- host's own sources ----------
-async function addLocal(media, kind, name, extra = {}) {
+async function addLocal(media, kind, name, extra = {}, cleanup = null) {
   try {
     const pub = await publish(sig, media, { kind, name, videoKbps: kind === "screen" ? 6000 : 4000, contentHint: kind === "screen" ? "detail" : "motion", ...extra });
     const v = el("video", { muted: true, playsinline: true, autoplay: true });
     v.muted = true; v.srcObject = media; v.play().catch(() => {});
-    sources.set(pub.id, { video: v, stream: media, name, kind, owner: "me", level: levelMeter(media), local: true, pub });
+    sources.set(pub.id, { video: v, stream: media, name, kind, owner: "me", level: levelMeter(media), local: true, pub, cleanup });
     local.set(pub.id, pub);
     media.getVideoTracks()[0]?.addEventListener("ended", () => stopLocal(pub.id));
     renderBackstage();
     return pub.id;
-  } catch (e) { toast(explain(e), "err"); media.getTracks().forEach((t) => t.stop()); }
+  } catch (e) { toast(explain(e), "err"); media.getTracks().forEach((t) => t.stop()); cleanup?.(); }
 }
 
 function stopLocal(id) {
@@ -159,8 +186,9 @@ function stopLocal(id) {
   if (!pub) return;
   pub.stop();
   s?.stream.getTracks().forEach((t) => t.stop());
+  s?.cleanup?.();
   local.delete(id); sources.delete(id);
-  if (id === hostCamId) { hostCamId = ""; $("#addCam").textContent = "🎥 Cámara"; }
+  if (id === hostCamId) { hostCamId = ""; $("#addCam").textContent = "Cámara"; }
   setState({ stage: (state.stage || []).filter((x) => x !== id) });
   renderBackstage();
 }
@@ -169,12 +197,12 @@ $("#addCam").onclick = async () => {
   if (hostCamId) { // second press: another camera from this computer
     return pickExtraCamera();
   }
-  const btn = $("#addCam"); btn.disabled = true; btn.textContent = "⏳ Abriendo cámara…";
-  const { stream, warnings } = await openMedia(prefs).finally(() => { btn.disabled = false; btn.textContent = "🎥 Cámara"; });
+  const btn = $("#addCam"); btn.disabled = true; btn.textContent = "Abriendo…";
+  const { stream, warnings } = await openMedia(prefs).finally(() => { btn.disabled = false; btn.textContent = "Cámara"; });
   warnings.forEach((w) => toast(w, "err"));
   if (!stream.getTracks().length) return toast(warnings.length ? "No se pudo abrir ninguna cámara ni micrófono." : "No hay cámara ni micrófono conectados.", "err");
   const id = await addLocalCam(stream, "Anfitrión");
-  if (id) { hostCamId = id; setState({ stage: [...(state.stage || []), id] }); $("#addCam").textContent = "➕ Otra cámara"; }
+  if (id) { hostCamId = id; setState({ stage: [...(state.stage || []), id] }); $("#addCam").textContent = "Otra cámara"; }
 };
 async function addLocalCam(stream, name) {
   const id = await addLocal(stream, "camera", name, { videoKbps: kbpsFor(Number(prefs.quality)), fps: Number(prefs.fps) || 30, codec: prefs.codec, stereo: prefs.stereo, audioKbps: prefs.stereo ? 256 : 128 });
@@ -236,21 +264,26 @@ $("#addMedia").onclick = () => $("#mediaFile").click();
 $("#mediaFile").onchange = async (e) => {
   const f = e.target.files[0];
   if (!f) return;
-  let media;
-  if (f.type.startsWith("image/")) {
-    const img = new Image(); img.src = URL.createObjectURL(f); await img.decode();
-    const c = el("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
-    const ctx = c.getContext("2d");
-    setInterval(() => ctx.drawImage(img, 0, 0), 500);
-    ctx.drawImage(img, 0, 0);
-    media = c.captureStream(2);
-  } else {
-    const v = el("video", { loop: true, playsinline: true }); v.src = URL.createObjectURL(f);
-    await v.play();
-    media = v.captureStream ? v.captureStream() : v.mozCaptureStream();
-  }
-  await addLocal(media, "media", f.name.replace(/\.[^.]+$/, "").slice(0, 40));
   e.target.value = "";
+  const url = URL.createObjectURL(f);
+  let media, cleanup;
+  try {
+    if (f.type.startsWith("image/")) {
+      const img = new Image(); img.src = url; await img.decode();
+      const c = el("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext("2d");
+      const timer = setInterval(() => ctx.drawImage(img, 0, 0), 500);
+      ctx.drawImage(img, 0, 0);
+      media = c.captureStream(2);
+      cleanup = () => { clearInterval(timer); URL.revokeObjectURL(url); }; // was never cleared
+    } else {
+      const v = el("video", { loop: true, playsinline: true }); v.src = url;
+      await v.play();
+      media = v.captureStream ? v.captureStream() : v.mozCaptureStream();
+      cleanup = () => { v.pause(); v.removeAttribute("src"); v.load(); URL.revokeObjectURL(url); };
+    }
+  } catch (x) { URL.revokeObjectURL(url); return toast("No se pudo abrir el archivo: " + x.message, "err"); }
+  await addLocal(media, "media", f.name.replace(/\.[^.]+$/, "").slice(0, 40), {}, cleanup);
 };
 
 // ---------- state helpers ----------
@@ -275,21 +308,22 @@ function renderState() {
   $$("#layouts button").forEach((b) => b.classList.toggle("active", b.dataset.l === sceneOf(editScene).layout));
   renderSceneBar();
   const live = !!state.live;
-  $("#golive").textContent = live ? "■ Terminar" : "● Transmitir";
-  $("#golive").className = live ? "live" : "primary";
+  $("#golive").textContent = live ? "Terminar" : "Transmitir";
+  $("#golive").classList.toggle("live", live);
+  $("#golive").classList.toggle("primary", !live);
   $("#liveBadge").classList.toggle("hidden", !live);
   if (live && !liveSince) liveSince = (state.restream?.since || Date.now() / 1000) * 1000;
   if (!live) liveSince = 0;
   const rec = (state.recording || []).length > 0;
-  $("#record").textContent = rec ? "■ Detener grabación" : "⏺️ Grabar";
-  $("#record").className = rec ? "danger" : "";
+  $("#record").textContent = rec ? "Detener grabación" : "Grabar";
+  $("#record").classList.toggle("recording", rec);
   const b = state.brand || {};
   $("#brandColor").value = b.color || "#7c5cff";
   $("#brandTheme").value = b.theme || "bubble";
   if (document.activeElement !== $("#brandBg")) $("#brandBg").value = b.background || "";
   $("#brandNames").checked = b.showNames !== false;
-  $("#muteStage").className = "small " + (state.stageMuted ? "off" : "");
-  $("#muteStage").textContent = state.stageMuted ? "🔊 Activar escenario" : "🔇 Silenciar escenario";
+  $("#muteStage").classList.toggle("off", !!state.stageMuted);
+  $("#muteStage").textContent = state.stageMuted ? "Activar escenario" : "Silenciar escenario";
   renderBackstage(); renderBanners(); renderScenes(); syncAudio();
 }
 
@@ -307,7 +341,7 @@ const toggleMap = (key, id) => setState({ [key]: { ...(state[key] || {}), [id]: 
 function renderBackstage() {
   const box = $("#backstage");
   box.replaceChildren();
-  if (!sources.size) box.append(el("p", { class: "muted", text: "Aún no hay fuentes. Invita gente o agrega tu cámara/pantalla." }));
+  if (!sources.size) box.append(el("div", { class: "empty" }, el("b", { text: "Aún no hay fuentes" }), el("span", { class: "muted", text: "Invita gente o agrega tu cámara o pantalla desde la barra de abajo." })));
   for (const [id, s] of sources) {
     const owner = peers.get(s.owner);
     s.camOff = !!(owner && owner.cam === false && s.kind === "camera");
@@ -331,7 +365,7 @@ function renderBackstage() {
       scenesWith(id).length ? el("span", { class: "scenes", title: "Escenas donde aparece", text: scenesWith(id).map((n) => n === "1" ? "P" : n).join(" ") }) : null,
       el("span", { class: "name", text: ((state.labels && state.labels[id]) || s.name + (s.kind === "screen" ? " · pantalla" : "")) + (owner && owner.mic === false ? " 🔇" : "") }),
       el("div", { class: "tools" },
-        el("button", { class: onStage(id) ? "on" : "", onclick: () => toggleStage(id), text: onStage(id) ? "Quitar" : (editScene === "1" ? "Al escenario" : `A escena ${editScene}`) }),
+        el("button", { class: "stagebtn " + (onStage(id) ? "on" : ""), onclick: () => toggleStage(id), text: onStage(id) ? "Quitar" : (editScene === "1" ? "Al escenario" : `A escena ${editScene}`) }),
         el("button", { title: "Destacar en esta escena", onclick: () => setScene(editScene, { featured: sceneOf(editScene).featured === id ? "" : id }), text: sceneOf(editScene).featured === id ? "★" : "☆" }),
         el("button", { class: progMuted ? "off" : "", title: progMuted ? "Activar en el programa" : "Silenciar en el programa (el invitado no se entera)", onclick: () => toggleMap("muted", id), text: progMuted ? "🔈✕" : "🔈" }),
         el("button", { class: hidden ? "off" : "", title: hidden ? "Mostrar video" : "Ocultar video (mantiene el audio)", onclick: () => toggleMap("hidden", id), text: hidden ? "🙈" : "👁" }),
@@ -369,7 +403,8 @@ function renderPeople() {
 
 function addKnock(m) {
   toast(`${m.name} quiere entrar`);
-  const it = el("div", { class: "item" }, el("span", { class: "grow", text: "🚪 " + m.name }),
+  if ($(`#knocks [data-peer="${CSS.escape(m.peerId)}"]`)) return; // re-sent on reconnect
+  const it = el("div", { class: "item", "data-peer": m.peerId }, el("span", { class: "grow", text: "🚪 " + m.name }),
     el("button", { class: "small primary", onclick: () => { sig.send({ type: "admit", target: m.peerId }); it.remove(); }, text: "Admitir" }),
     el("button", { class: "small", onclick: () => { sig.send({ type: "deny", target: m.peerId }); it.remove(); }, text: "Rechazar" }));
   $("#knocks").append(it);
@@ -377,7 +412,8 @@ function addKnock(m) {
 }
 
 // ---------- layouts ----------
-LAYOUTS.forEach(([l, label], i) => $("#layouts").append(el("button", { "data-l": l, title: `${label} (${i + 1})`, onclick: () => setScene(editScene, { layout: l }), text: label })));
+LAYOUTS.forEach(([l, label], i) => $("#layouts").append(el("button", { "data-l": l, title: `${label} (${i + 1})`, "aria-label": label, onclick: () => setScene(editScene, { layout: l }) },
+  el("i", { class: "lp", "aria-hidden": "true" }), el("span", { text: label }))));
 $("#muteStage").onclick = () => setState({ stageMuted: !state.stageMuted });
 $("#muteAll").onclick = () => { sig.send({ type: "request", target: "*", action: "mute" }); toast("Silenciando a todos los invitados"); };
 $("#askUnmuteAll").onclick = () => { sig.send({ type: "request", target: "*", action: "unmute" }); toast("Pedí a todos activar el micrófono"); };
@@ -399,12 +435,15 @@ $("#virtual").onclick = () => {
 $("#countdown").onclick = () => setState({ countdown: state.countdown > Date.now() ? 0 : Date.now() + 5 * 60 * 1000 });
 $("#clearScreen").onclick = () => setState({ banner: null, comment: null });
 document.addEventListener("keydown", (e) => {
-  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return;
-  const n = parseInt(e.key, 10);
+  const a = document.activeElement;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(a?.tagName) || a?.isContentEditable) return;
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || document.querySelector("dialog[open]")) return; // Ctrl+1 is the browser's
+  const key = e.key.toLowerCase(); // Caps Lock / Shift should not break shortcuts
+  const n = parseInt(key, 10);
   if (n >= 1 && n <= LAYOUTS.length) setScene(editScene, { layout: LAYOUTS[n - 1][0] });
-  if (e.key === "c") setState({ banner: null, comment: null });
-  if (e.key === "s") setState({ stageMuted: !state.stageMuted });
-  if (e.key === "b" && state.banners?.length) setState({ banner: state.banner ? null : state.banners[0] });
+  if (key === "c") setState({ banner: null, comment: null });
+  if (key === "s") setState({ stageMuted: !state.stageMuted });
+  if (key === "b" && state.banners?.length) setState({ banner: state.banner ? null : state.banners[0] });
 });
 
 // ---------- chat ----------
@@ -491,12 +530,14 @@ $("#destAdd").onclick = () => {
   $("#destKey").value = "";
   saveDests();
 };
+// Show the server, never the stream key (RTMP path or SRT ?streamid=/passphrase).
+const maskURL = (u) => { const m = /^(\w+:\/\/[^/?#]+)(.*)$/.exec(u); return m ? m[1] + (m[2] ? "/••••" : "") : "••••"; };
 function renderDests() {
   const box = $("#destList");
   box.replaceChildren();
   dests.forEach((d, i) => box.append(el("div", { class: "item" },
     el("input", { type: "checkbox", checked: d.enabled, onchange: (e) => { d.enabled = e.target.checked; saveDests(); } }),
-    el("span", { class: "grow", text: `${d.name} · ${d.url.replace(/\/[^/]{6,}$/, "/••••")}` }),
+    el("span", { class: "grow", text: `${d.name} · ${maskURL(d.url)}` }),
     el("button", { class: "small", onclick: () => { dests.splice(i, 1); saveDests(); }, text: "✕" }))));
   if (!dests.length) box.append(el("p", { class: "muted", text: "Sin destinos. También puedes capturar el programa en OBS desde la pestaña OBS." }));
 }
@@ -568,7 +609,8 @@ function renderObs() {
     linkRow("Servidor WHIP", `${origin()}/whip/${r}/obs`),
     linkRow("Bearer Token", keys.pushKey));
 }
-setInterval(() => { if ($('[data-pane="obs"]').classList.contains("active")) renderObs(); }, 3000);
+// Refresh while visible, but not while the user is selecting or copying a link.
+setInterval(() => { const p = $('[data-pane="obs"]'); if (p.classList.contains("active") && !p.contains(document.activeElement)) renderObs(); }, 3000);
 
 // ---------- tabs & misc ----------
 function activateTab(name) {
