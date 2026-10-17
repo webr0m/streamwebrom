@@ -42,7 +42,8 @@ public sealed class ServerProcess : IDisposable
         if (Running) return;
         var exe = ExtractServer();
         var args = new List<string> { "-addr", $":{s.Port}", "-data", Path.Combine(DataDir, "data") };
-        if (s.Https) args.Add("-self-signed");
+        if (s.ServeHttps) args.Add("-self-signed");
+        if (s.TunnelActive && !string.IsNullOrWhiteSpace(s.PublicHost)) { args.Add("-public-url"); args.Add("https://" + s.PublicHost.Trim()); }
         if (s.UdpPort > 0) { args.Add("-udp-port"); args.Add(s.UdpPort.ToString()); }
         if (!string.IsNullOrWhiteSpace(s.PublicIp)) { args.Add("-public-ip"); args.Add(s.PublicIp.Trim()); }
         var ffmpeg = FindFfmpeg();

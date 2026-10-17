@@ -43,6 +43,20 @@ o deja `ffmpeg.exe` junto al ejecutable.
 
 **Docker:** `docker compose up -d`
 
+**Go:** `go install github.com/webr0m/streamwebrom/cmd/streamwebrom@latest`
+
+**App web instalable (PWA):** abre el estudio en Chrome/Edge y usa *Instalar app*; funciona en PC y móvil igual que VDO.Ninja.
+
+### Publicarlo en tu dominio desde tu PC (Cloudflare Tunnel)
+
+Ideal cuando tu hosting es compartido (cPanel) y no puede correr servidores de video.
+
+1. En Cloudflare Zero Trust crea un túnel con hostname público (p. ej. `stream.webrom.lat`) → `http://localhost:8443`.
+2. En la app de Windows marca *Publicar en internet*, escribe el dominio y pega el token del túnel (se guarda cifrado con DPAPI). La app descarga `cloudflared` y lo ejecuta.
+3. Reenvía en tu router el puerto **UDP 50000** a tu PC: la web y la señalización pasan por Cloudflare, pero el video WebRTC viaja por UDP directo (Cloudflare Tunnel no transporta UDP). Opcional: `-turn` para redes muy restrictivas.
+
+En Linux/macOS: `streamwebrom -addr 127.0.0.1:8443 -public-url https://stream.tudominio.com -udp-port 50000` y `cloudflared tunnel run --token …`.
+
 ## Usarlo con OBS
 
 1. Abre el estudio → **Crear estudio** → invita gente con **🔗 Invitar**.
@@ -108,7 +122,3 @@ se graba el stream y se hace multistream VP8+Opus → H.264+AAC a un servidor RT
 ## Licencia
 
 AGPL-3.0-or-later. Si ofreces StreamWebRom como servicio a otras personas, debes ofrecerles su código fuente.
-
-```bash
-go install github.com/webr0m/streamwebrom/cmd/streamwebrom@latest
-```
