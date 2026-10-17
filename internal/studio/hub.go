@@ -482,6 +482,39 @@ func (h *Hub) subscribe(ctx context.Context, p *Peer, m Msg) error {
 	return nil
 }
 
+// RequestActions are the moderation requests a host may send to guests.
+var RequestActions = []string{"mute", "unmute", "camoff", "camon", "lowerhand", "screenoff"}
+
+// requestTargets resolves a request target: a peer id, "*" (every guest) or
+// "stage" (every guest that has a stream on stage).
+func (h *Hub) requestTargets(r *Room, host *Peer, target string) []*Peer {
+	if target != "*" && target != "stage" {
+		if p := h.peerByID(r, target); p != nil && p != host {
+			return []*Peer{p}
+		}
+		return nil
+	}
+	r.mu.RLock()
+	stage := slices.Clone(r.state.Stage)
+	peers := make([]*Peer, 0, len(r.peers))
+	for _, p := range r.peers {
+		if p != host && p.Role == RoleGuest {
+			peers = append(peers, p)
+		}
+	}
+	r.mu.RUnlock()
+	if target == "*" {
+		return peers
+	}
+	var out []*Peer
+	for _, p := range peers {
+		if p.Info(stage).Stage {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func (h *Hub) peerByID(r *Room, id string) *Peer {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -521,12 +554,23 @@ func (h *Hub) hostAction(host *Peer, m Msg) error {
 		p.Send(Msg{Type: "kicked"})
 		time.AfterFunc(200*time.Millisecond, p.close)
 		return nil
-	case "request": // ask a guest to mute/unmute, change camera, etc.
-		p := h.peerByID(r, m.Target)
-		if p == nil {
+	case "request": // remote moderation: mute/unmute mic, camera off/on, lower hand...
+		if !slices.Contains(RequestActions, m.Action) {
+			return fmt.Errorf("unknown request %q", m.Action)
+		}
+		targets := h.requestTargets(r, host, m.Target)
+		if len(targets) == 0 {
 			return errors.New("peer not found")
 		}
-		p.Send(Msg{Type: "request", Action: m.Action, Value: m.Value})
+		for _, p := range targets {
+			if m.Action == "lowerhand" {
+				p.mu.Lock()
+				p.hand = false
+				p.mu.Unlock()
+				h.peerUpdated(p)
+			}
+			p.Send(Msg{Type: "request", Action: m.Action, Value: m.Value})
+		}
 		return nil
 	case "state":
 		return h.setState(r, m)
@@ -633,6 +677,37 @@ func (h *Hub) setState(r *Room, m Msg) error {
 				}
 			case "countdown":
 				err = json.Unmarshal(v, &st.Countdown)
+			case "muted": // program-only mute per stream (guest's mic stays open for the backstage)
+				var mm map[string]bool
+				if err = json.Unmarshal(v, &mm); err == nil {
+					if len(mm) > 200 {
+						return errors.New("too many muted entries")
+					}
+					st.Muted = mm
+				}
+			case "volumes": // program volume per stream, 0..2 (0-200 %)
+				var vv map[string]float64
+				if err = json.Unmarshal(v, &vv); err == nil {
+					if len(vv) > 200 {
+						return errors.New("too many volume entries")
+					}
+					for k2, x := range vv {
+						if x != x || x < 0 || x > 2 {
+							return fmt.Errorf("volume for %s must be between 0 and 2", k2)
+						}
+					}
+					st.Volumes = vv
+				}
+			case "stageMuted": // mute the whole stage in the program
+				err = json.Unmarshal(v, &st.StageMuted)
+			case "hidden": // keep audio, hide video in the program
+				var hm map[string]bool
+				if err = json.Unmarshal(v, &hm); err == nil {
+					if len(hm) > 200 {
+						return errors.New("too many hidden entries")
+					}
+					st.Hidden = hm
+				}
 			default:
 				return fmt.Errorf("unknown state key %q", k)
 			}

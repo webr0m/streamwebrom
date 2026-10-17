@@ -401,3 +401,54 @@ func TestClientIPTrustsProxyOnlyFromLoopback(t *testing.T) {
 		t.Fatalf("spoofed header must be ignored from public peers, got %q", got)
 	}
 }
+
+func TestModeration(t *testing.T) {
+	e := newEnv(t)
+	k := e.createRoom(t, `{"room":"mod"}`)
+	host := e.dial(t)
+	host.send(map[string]any{"type": "join", "room": "mod", "role": "host", "key": k.HostKey})
+	host.expect("welcome")
+	join := func(name string) (*wsClient, studio.Msg) {
+		g := e.dial(t)
+		g.send(map[string]any{"type": "join", "room": "mod", "name": name})
+		w := g.expect("welcome")
+		host.expect("peer-joined")
+		return g, w
+	}
+	a, aw := join("Ana")
+	b, _ := join("Beto")
+
+	// unknown actions are rejected (no arbitrary payloads to guests)
+	host.send(map[string]any{"type": "request", "target": aw.PeerID, "action": "eval"})
+	if m := host.expect("error"); !strings.Contains(m.Error, "unknown request") {
+		t.Fatalf("expected unknown request error, got %+v", m)
+	}
+	// one guest
+	host.send(map[string]any{"type": "request", "target": aw.PeerID, "action": "camoff"})
+	if m := a.expect("request"); m.Action != "camoff" {
+		t.Fatalf("got %+v", m)
+	}
+	// everybody
+	host.send(map[string]any{"type": "request", "target": "*", "action": "mute"})
+	if m := a.expect("request"); m.Action != "mute" {
+		t.Fatalf("a got %+v", m)
+	}
+	if m := b.expect("request"); m.Action != "mute" {
+		t.Fatalf("b got %+v", m)
+	}
+	// guests cannot moderate
+	a.send(map[string]any{"type": "request", "target": "*", "action": "mute"})
+	a.expect("error")
+	// stage target with nobody on stage
+	host.send(map[string]any{"type": "request", "target": "stage", "action": "mute"})
+	host.expect("error")
+
+	// program moderation state is validated
+	host.send(map[string]any{"type": "state", "value": map[string]any{"volumes": map[string]any{"x": 5}}})
+	host.expect("error")
+	host.send(map[string]any{"type": "state", "value": map[string]any{"stageMuted": true, "muted": map[string]any{"s1": true}, "hidden": map[string]any{"s2": true}, "volumes": map[string]any{"s3": 1.5}}})
+	st := a.expect("state")
+	if !st.State.StageMuted || !st.State.Muted["s1"] || !st.State.Hidden["s2"] || st.State.Volumes["s3"] != 1.5 {
+		t.Fatalf("moderation state not broadcast: %+v", st.State)
+	}
+}

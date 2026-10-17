@@ -76,6 +76,12 @@ type State struct {
 	Scenes    map[string]Scene  `json:"scenes"`
 	Labels    map[string]string `json:"labels"`    // stream id -> display name / lower third
 	Countdown int64             `json:"countdown"` // unix ms target, 0 = none
+
+	// Program audio/video moderation (does not touch the guest's devices).
+	Muted      map[string]bool    `json:"muted"`      // stream id -> muted in the program mix
+	Volumes    map[string]float64 `json:"volumes"`    // stream id -> gain 0..2
+	StageMuted bool               `json:"stageMuted"` // whole stage muted
+	Hidden     map[string]bool    `json:"hidden"`     // stream id -> video hidden, audio kept
 }
 
 // Scene is a saved layout + stage combination (one-click switching).

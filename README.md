@@ -20,6 +20,9 @@ Ver [docs/AUDITORIA.md](docs/AUDITORIA.md).
 | ⏺️ **Grabación aislada** | Cada fuente se graba por separado, en calidad original, del lado del servidor (`.ivf/.ogg/.h264` → `.mkv`). |
 | 💬 **Comunidad** | Chat, reacciones, levantar la mano, indicador de quién habla, push-to-talk (Espacio), atajos M/V. |
 | ⚡ **Veloz** | SFU: cada invitado sube una sola vez. Reenvío RTP sin decodificar, PLI inmediato, jitter buffer mínimo. |
+| 🎧 **Dispositivos como VDO.Ninja** | Elige cámara, micrófono y audífonos dentro de la app (también en plena llamada, sin cortar). Resolución hasta 4K, FPS, ganancia, eco/ruido/AGC, estéreo HQ, códec, zoom/enfoque/exposición/linterna/desenfoque de fondo según lo que soporte la cámara. |
+| 🛡️ **Control del anfitrión** | Silenciar escenario, silenciar a todos, silenciar u ocultar a alguien solo en el programa, volumen por fuente, apagar cámaras, pedir audio/cámara, bajar manos, expulsar. |
+| 📺 **Pantalla virtual** | Ventana limpia del programa para proyector, segundo monitor, captura de ventana o Cámara Virtual de OBS (doble clic = pantalla completa). |
 | 🔐 **Seguro** | Roles validados en servidor, bcrypt, claves separadas (anfitrión / ver / publicar), CSP estricta, rate-limit. |
 
 ## Inicio rápido
@@ -72,6 +75,31 @@ En Linux/macOS: `streamwebrom -addr 127.0.0.1:8443 -public-url https://stream.tu
 | `POST /whep/R/program` + Bearer `viewKey` | Reproductores WHEP |
 
 Las claves viajan en el fragmento `#`, que el navegador nunca envía al servidor ni a los logs.
+
+## Opciones de URL (estilo VDO.Ninja)
+
+**Invitado** `/guest?room=R&…`
+
+| Parámetro | Efecto |
+|---|---|
+| `label=Ana` · `autostart` | Nombre precargado · entrar sin pantalla previa |
+| `password=` | Contraseña de la sala |
+| `videodevice=` · `audiodevice=` · `outputdevice=` | Dispositivo por número (1, 2…), parte del nombre (`obs`, `logitech`) o `0` para ninguno |
+| `quality=0/1/2` · `height=1080` · `fps=60` | Resolución y cuadros |
+| `bitrate=6000` · `codec=h264/vp8/vp9/av1` | Calidad de envío |
+| `stereo` · `denoise=0` · `echo=0` · `autogain=0` · `gain=150` | Audio profesional |
+| `novideo` · `noaudio` · `muted` · `videomute` | Solo audio, solo video, entrar silenciado |
+| `screenshare` | Entrar compartiendo pantalla |
+
+**Salida para OBS** `/view?room=R&…#key=VIEWKEY`
+
+| Parámetro | Efecto |
+|---|---|
+| `scene=1` | Programa completo · `transparent=1` fondo transparente |
+| `stream=ID` | Una sola cámara (cada fuente tiene su botón **🔗 OBS**) |
+| `cover=1` · `mirror=1` · `rotate=90` · `bg=000000` | Encuadre |
+| `mute=1` · `volume=50` · `audioonly=1` | Audio |
+| `label=1` · `stats=1` · `status=0` | Nombre, estadísticas, ocultar estado |
 
 ## Configuración
 

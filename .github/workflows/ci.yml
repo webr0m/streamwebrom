@@ -32,6 +32,9 @@ jobs:
       - name: check JS syntax
         if: runner.os == 'Linux'
         run: for f in web/js/*.js; do cp $f /tmp/$(basename $f).mjs; node --check /tmp/$(basename $f).mjs; done
+      - name: static check JS (undeclared identifiers, bad imports)
+        if: runner.os == 'Linux'
+        run: pip install esprima && python3 scripts/jslint.py web/js
 
   build:
     needs: test
