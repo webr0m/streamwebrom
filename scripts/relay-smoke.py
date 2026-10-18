@@ -17,16 +17,19 @@ args=parser.parse_args()
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required'])
     ctx=browser.new_context(permissions=['camera','microphone'],service_workers='block')
-    if args.expect_provider:
-        assert ctx.request.get(args.url+'/api/config').json().get('relay',{}).get('provider') == args.expect_provider
     ctx.add_init_script("""const NativePC=RTCPeerConnection;
       window.RTCPeerConnection=class extends NativePC {constructor(c){super({...c,iceTransportPolicy:'relay',
         iceServers:(c?.iceServers||[]).map(s=>({...s,urls:(Array.isArray(s.urls)?s.urls:[s.urls]).filter(u=>!TCP_ONLY||u.includes('transport=tcp'))})).filter(s=>s.urls.length)});}};""".replace('TCP_ONLY',str(args.tcp_only).lower()))
     errors=[]
     host=ctx.new_page();host.on('pageerror',lambda e:errors.append(str(e)))
-    host.goto(args.url+'/diagnostics');host.locator('#relay').click()
+    response=host.goto(args.url+'/diagnostics')
+    if not response.ok: raise RuntimeError(f'Diagnostics page returned HTTP {response.status}: {host.title()}')
+    if args.expect_provider:
+        actual=host.evaluate("fetch('/api/config').then(async r=>{if(!r.ok)throw Error('config HTTP '+r.status);return r.json()})").get('relay',{}).get('provider')
+        assert actual == args.expect_provider,{'expected':args.expect_provider,'actual':actual}
+    host.locator('#relay').click()
     expect(host.locator('#relayResult')).to_contain_text('Se obtuvo una ruta TURN',timeout=20000)
-    keys=ctx.request.post(args.url+'/api/rooms',data={'room':f'relay-{int(time.time())}','lobby':False}).json()
+    keys=host.evaluate("""async body=>{const r=await fetch('/api/rooms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error('room HTTP '+r.status);return r.json()}""",{'room':f'relay-{int(time.time())}','lobby':False})
     host.evaluate("""async keys=>{
       const rtc=await import('/js/rtc.js'); window.rtc=rtc;window.sig=new rtc.Signal();
       await sig.connect({type:'join',room:keys.room,role:'host',key:keys.hostKey});
