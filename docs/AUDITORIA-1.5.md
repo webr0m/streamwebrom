@@ -64,9 +64,9 @@ Las claves de anfitrión, aleatorias de 120 bits y sin persistencia en servidor,
 - Chromium real con media sintética: almacenamiento corrupto, cámara del anfitrión, admisión desde lobby, publicación del invitado, escenario, salida OBS, reconexión con nuevos cuadros decodificados y diagnóstico. Sin errores de página. WebKit verifica la página de diagnóstico.
 - APK compilado, firma de prueba verificada, instalación y arranque en emulador Android 15 sin excepción de `AndroidRuntime`.
 - Lanzador Windows compilado con .NET 8; servidores para Windows/Linux/macOS, amd64 y arm64.
-- `govulncheck`: cero vulnerabilidades alcanzables en la revisión local. Un aviso de módulo no alcanzable requiere seguimiento; no equivale a un análisis de toda dependencia nativa o del sistema.
-- El detector de carreras requiere compilador C. El equipo Windows de la auditoría carecía de él; se ejecuta en el CI Linux. Consultar el resultado de CI del commit entregado.
-- El proyecto iOS se compila en el workflow macOS. Una app firmada para dispositivos/TestFlight requiere equipo Apple, certificados y perfil del propietario; no se genera un IPA instalable desde Windows.
+- `govulncheck`: cero vulnerabilidades alcanzables. El aviso de módulo GO-2026-5932 corresponde a `x/crypto/openpgp`, paquete que esta aplicación no importa; no tiene versión corregida porque está sin mantenimiento. El análisis no cubre toda dependencia nativa ni el sistema operativo.
+- El detector de carreras pasó en Linux en [GitHub CI](https://github.com/webr0m/streamwebrom/actions/runs/39109201475), junto con tests en Windows y macOS y la prueba Chromium/WebKit. El equipo Windows local no tenía compilador C.
+- El proyecto iOS compiló correctamente con Xcode en [el workflow macOS](https://github.com/webr0m/streamwebrom/actions/runs/39109201483/job/117621469767), generando la app de simulador. Una app firmada para dispositivos/TestFlight requiere equipo Apple, certificados y perfil del propietario; no se genera un IPA instalable desde Windows.
 - Los APK entregados se distinguen expresamente: `debug` sirve para probar; `unsigned` requiere tu firma de distribución. No incluyen un servidor multimedia dentro del teléfono.
 - No se probó una llamada en dispositivos físicos iPhone/Android ni todas las combinaciones de OBS, codecs, NAT y TURN. Compartir pantalla móvil y ejecución en segundo plano no están implementados en los clientes nativos.
 
