@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.5.1:** corregida la pérdida de rutas ICE tardías y la espera indefinida de audio/video. Nuevo reintento en backstage, configuración TURN en Windows y prueba real de relé en Diagnóstico. Para redes 4G/5G restrictivas hace falta configurar TURN: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.5.2:** corregido el cierre inesperado del lanzador Windows al arrancar automáticamente el servidor y el túnel. Incluye las mejoras 1.5.1 de conexión móvil, reintento en backstage y diagnóstico TURN. Para redes 4G/5G restrictivas hace falta configurar TURN: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 

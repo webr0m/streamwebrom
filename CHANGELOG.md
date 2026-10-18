@@ -1,5 +1,11 @@
 # Cambios
 
+## v1.5.2 — arranque del lanzador Windows
+
+- El servidor y el túnel se inician después de crear la ventana. Antes, un registro recibido durante el constructor podía lanzar `InvalidOperationException` en `BeginInvoke`, cerrar el lanzador y dejar un servidor huérfano sin túnel.
+- Los callbacks del servidor y de Cloudflare comprueban que la ventana siga disponible antes de actualizarla, también durante el cierre.
+- Binarios y clientes móviles 1.5.2 (build móvil 10502); conserva las correcciones WebRTC y la configuración TURN de 1.5.1.
+
 ## v1.5.1 — conexión móvil y backstage
 
 - Trickle ICE bidireccional por WebSocket: los candidatos de conexión tardíos, incluidos los de TURN, ya no se descartan a los 2/3 segundos. Cada negociación queda vinculada a su conexión autenticada; no permite inyectar candidatos en otras conexiones ni reutilizar los de una cámara reemplazada.

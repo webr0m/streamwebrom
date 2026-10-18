@@ -141,13 +141,26 @@ public sealed class MainForm : Form
         _tray = new NotifyIcon { Icon = Icon, Text = "StreamWebRom", Visible = true, ContextMenuStrip = menu };
         _tray.DoubleClick += (_, _) => ShowWindow();
 
-        _tunnel.Output += line => BeginInvoke(() => AppendLog(line));
-        _server.Output += line => BeginInvoke(() => AppendLog(line));
-        _server.Exited += code => BeginInvoke(() => { if (!_quitting) SetStatus($"detenido (código {code})", Color.FromArgb(255, 107, 110)); _startStop.Text = "Iniciar"; });
+        _tunnel.Output += line => OnUI(() => AppendLog(line));
+        _server.Output += line => OnUI(() => AppendLog(line));
+        _server.Exited += code => OnUI(() => { if (!_quitting) SetStatus($"detenido (código {code})", Color.FromArgb(255, 107, 110)); _startStop.Text = "Iniciar"; });
 
         UpdateUrls();
-        if (_settings.AutoStart) StartServer();
-        if (args.Contains("--minimized")) { WindowState = FormWindowState.Minimized; ShowInTaskbar = false; }
+        // Server output may arrive immediately. Wait until WinForms has created
+        // the window handle before starting background processes or BeginInvoke
+        // would terminate the launcher and leave an orphaned server.
+        Shown += (_, _) =>
+        {
+            if (_settings.AutoStart) StartServer();
+            if (args.Contains("--minimized")) { WindowState = FormWindowState.Minimized; ShowInTaskbar = false; }
+        };
+    }
+
+    private void OnUI(Action action)
+    {
+        if (IsDisposed || Disposing || !IsHandleCreated) return;
+        try { BeginInvoke(new Action(() => { if (!IsDisposed && !Disposing) action(); })); }
+        catch (InvalidOperationException) { } // handle can disappear during shutdown
     }
 
     private void StartServer()
