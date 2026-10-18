@@ -19,9 +19,13 @@ with sync_playwright() as pw:
     ctx=browser.new_context(permissions=['camera','microphone'],service_workers='block')
     ctx.add_init_script("""const NativePC=RTCPeerConnection;
       window.RTCPeerConnection=class extends NativePC {constructor(c){super({...c,iceTransportPolicy:'relay',
-        iceServers:(c?.iceServers||[]).map(s=>({...s,urls:(Array.isArray(s.urls)?s.urls:[s.urls]).filter(u=>!TCP_ONLY||u.includes('transport=tcp'))})).filter(s=>s.urls.length)});}};""".replace('TCP_ONLY',str(args.tcp_only).lower()))
+        iceServers:(c?.iceServers||[]).map(s=>({...s,urls:(Array.isArray(s.urls)?s.urls:[s.urls]).filter(u=>!TCP_ONLY||u.includes('transport=tcp'))})).filter(s=>s.urls.length)});
+        this.addEventListener('icecandidate',({candidate:c})=>{if(c)console.info('[relay-check] local',c.type,c.protocol,c.relayProtocol||'');});
+        this.addEventListener('iceconnectionstatechange',()=>console.info('[relay-check] ICE',this.iceConnectionState));
+      }};""".replace('TCP_ONLY',str(args.tcp_only).lower()))
     errors=[]
     host=ctx.new_page();host.on('pageerror',lambda e:errors.append(str(e)))
+    host.on('console',lambda m:print(m.text,flush=True) if m.text.startswith('[relay-check]') else None)
     response=host.goto(args.url+'/diagnostics')
     if not response.ok: raise RuntimeError(f'Diagnostics page returned HTTP {response.status}: {host.title()}')
     if args.expect_provider:
@@ -32,6 +36,7 @@ with sync_playwright() as pw:
     keys=host.evaluate("""async body=>{const r=await fetch('/api/rooms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error('room HTTP '+r.status);return r.json()}""",{'room':f'relay-{int(time.time())}','lobby':False})
     host.evaluate("""async keys=>{
       const rtc=await import('/js/rtc.js'); window.rtc=rtc;window.sig=new rtc.Signal();
+      sig.on('ice',m=>{const c=m.candidate?.candidate||'';console.info('[relay-check] remote',c.split(' typ ')[1]?.split(' ')[0]||'',c.split(' ')[2]||'');});
       await sig.connect({type:'join',room:keys.room,role:'host',key:keys.hostKey});
       window.media=await navigator.mediaDevices.getUserMedia({audio:true,video:true});
       window.pub=await rtc.publish(sig,media,{name:'TURN host'});
