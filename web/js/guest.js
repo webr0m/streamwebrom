@@ -12,6 +12,7 @@
 import { $, el, toast, params, api, Signal, publish, subscribe, levelMeter } from "./rtc.js";
 import { listDevices, openScreen, loadPrefs, savePrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain } from "./devices.js";
 import { remoteSnapshot, remoteStats, CAMCTL } from "./remote.js";
+import { chatMessage, appendChat, mountComposer } from "./chat.js";
 
 const room = (params.get("room") || "").toLowerCase();
 if (!room) location.href = "/";
@@ -112,7 +113,8 @@ async function join() {
   localStorage.setItem("swr.name", name);
   $("#joinBtn").disabled = true;
   try {
-    const m = await sig.connect({ type: "join", room, role: "guest", name, password: $("#pw").value });
+    const invite = new URLSearchParams(location.hash.slice(1)).get("invite") || "";
+    const m = await sig.connect({ type: "join", room, role: "guest", name, password: $("#pw").value, invite });
     if (m.type === "waiting") { $("#pre").classList.add("hidden"); $("#waiting").classList.remove("hidden"); return; }
     await enter(m);
   } catch (e) {
@@ -147,6 +149,7 @@ async function resume(m) {
   for (const [id, x] of extraCams) { try { x.pub.pc.close(); } catch {} extraCams.delete(id); x.media.getTracks().forEach((t) => t.stop()); }
   for (const id of [...remotes.keys()]) unwatch(id);
   for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
+  $("#chatlog").replaceChildren(); for (const c of m.chat || []) addChat(c); // catch up on what we missed
   sendMedia();
 }
 
@@ -208,7 +211,7 @@ async function remoteControl(action, v) {
       remoteKbps = kbps >= 50 && kbps <= 50000 ? Math.round(kbps) : (v?.kbps === 0 ? 0 : remoteKbps);
       const t = camTrack();
       let ok = false;
-      if (t && t.applyConstraints && !media.getVideoTracks()[0]?.effect) {
+      if (t && t.applyConstraints) { // with effects this is the raw camera; the effect canvas follows its size
         try {
           await t.applyConstraints({ width: { ideal: Math.round(Number(prefs.quality) * 16 / 9) }, height: { ideal: Number(prefs.quality) }, frameRate: { ideal: Number(prefs.fps) } });
           ok = true;
@@ -410,14 +413,16 @@ document.addEventListener("keyup", (e) => { if (e.code === "Space" && ptt) { ptt
 
 // ---------- chat ----------
 function addChat(c) {
-  const box = $("#chatlog");
-  box.append(el("div", { class: "msg" }, el("b", { text: c.from }), " ", el("span", { text: c.text })));
-  box.scrollTop = box.scrollHeight;
-  if ($("#chat").classList.contains("hidden")) $("#chatBtn").classList.add("on");
+  const msg = chatMessage(c, { myId, myName: $("#name").value.trim() });
+  appendChat($("#chatlog"), msg);
+  if ($("#chat").classList.contains("hidden") && c.peerId !== myId) {
+    $("#chatBtn").classList.add("on");
+    if (msg.dataset.mention) toast(`${c.from} te mencionó en el chat`);
+  }
 }
-const send = () => { const i = $("#chatInput"); if (i.value.trim()) sig.send({ type: "chat", text: i.value }); i.value = ""; };
-$("#chatSend").onclick = send;
-$("#chatInput").addEventListener("keydown", (e) => e.key === "Enter" && send());
+const composer = mountComposer($("#chatInput").parentElement, $("#chatInput"), (x) => sig.send(x.sticker ? { type: "chat", kind: "sticker", text: x.sticker } : { type: "chat", text: x.text }));
+$("#chatSend").onclick = composer.send;
+$("#chatInput").addEventListener("keydown", (e) => e.key === "Enter" && !e.isComposing && composer.send());
 
 function fly(e) {
   const n = el("div", { class: "reaction-fly", text: e });

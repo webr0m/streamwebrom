@@ -33,7 +33,7 @@ const off = (...names) => names.some((n) => params.has(n) && ["0", "false", "off
 export function loadPrefs() {
   let p = {};
   try { p = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch {}
-  p = { camera: "", mic: "", speaker: "", quality: "720", fps: "30", echo: true, denoise: true, autogain: true, stereo: false, mirror: true, gain: 100, codec: "", effect: "none", effectPreset: "", ...p };
+  p = { camera: "", mic: "", speaker: "", quality: "720", fps: "30", echo: true, denoise: true, autogain: true, stereo: false, mirror: true, gain: 100, codec: "", effect: "none", effectPreset: "", flipH: false, flipV: false, ...p };
   const g = (n) => params.get(n);
   // &quality=0/1/2 (VDO) or a height
   if (params.has("quality")) p.quality = ({ 0: "1080", 1: "720", 2: "360" })[g("quality")] || g("quality");
@@ -45,6 +45,9 @@ export function loadPrefs() {
   if (flag("stereo", "proaudio")) { p.stereo = true; p.echo = p.denoise = p.autogain = false; }
   if (off("mirror")) p.mirror = false;
   if (flag("flip", "mirror")) p.mirror = true;
+  // &fliph / &flipv: turn the camera that everyone sees (upside-down or mirrored cameras)
+  if (flag("fliph", "flipx")) p.flipH = true;
+  if (flag("flipv", "flipy")) p.flipV = true;
   if (g("codec")) p.codec = g("codec").toLowerCase();
   if (g("videodevice") || g("vdevice") || g("vd")) p.cameraHint = g("videodevice") || g("vdevice") || g("vd");
   if (g("audiodevice") || g("adevice") || g("ad")) p.micHint = g("audiodevice") || g("adevice") || g("ad");
@@ -128,7 +131,7 @@ function gum(c) {
  */
 export async function openMedia(p) {
   const r = await openRaw(effectActive(p) && !needsCamera(p) ? { ...p, camera: "none" } : p);
-  if (!effectActive(p)) return r;
+  if (!effectActive(p) && !p.flipH && !p.flipV) return r;
   const cam = r.stream.getVideoTracks()[0];
   if (!cam && needsCamera(p)) return r;
   try {
@@ -273,6 +276,8 @@ export async function renderPanel(root, prefs, onChange, opts = {}) {
   root.replaceChildren(
     el("div", {}, el("label", { for: "dev-cam", text: "📷 Cámara" }), cam),
     el("div", { class: "row" }, el("div", { class: "grow" }, el("label", { text: "Resolución" }), q), el("div", {}, el("label", { text: "FPS" }), fps)),
+    el("div", { class: "row wrap fliprow" }, el("span", { class: "muted", text: "Voltear la cámara (lo ven todos):" }),
+      chk("dev-fliph", "↔ Horizontal", !!prefs.flipH), chk("dev-flipv", "↕ Vertical", !!prefs.flipV)),
     el("div", {}, el("label", { for: "dev-mic", text: "🎙️ Micrófono" }), mic),
     el("div", {}, el("label", { text: "Ganancia del micrófono " }, gainLbl), gain),
     spk ? el("div", {}, el("label", { for: "dev-spk", text: "🎧 Audífonos / parlantes" }), el("div", { class: "row" }, spk, test)) :
@@ -292,6 +297,7 @@ export async function renderPanel(root, prefs, onChange, opts = {}) {
     ...prefs, camera: cam.value, mic: mic.value, speaker: spk ? spk.value : prefs.speaker, quality: q.value, fps: fps.value,
     echo: $("#dev-echo", root).checked, denoise: $("#dev-denoise", root).checked, autogain: $("#dev-agc", root).checked,
     stereo: $("#dev-stereo", root).checked, mirror: $("#dev-mirror", root).checked, gain: Number(gain.value), codec: codec.value,
+    flipH: $("#dev-fliph", root).checked, flipV: $("#dev-flipv", root).checked,
   });
   const fire = (what) => { const p = read(); Object.assign(prefs, p); savePrefs(prefs); onChange(prefs, what); };
   cam.onchange = q.onchange = fps.onchange = () => fire("video");
@@ -305,6 +311,7 @@ export async function renderPanel(root, prefs, onChange, opts = {}) {
   };
   for (const id of ["dev-echo", "dev-denoise", "dev-agc"]) $("#" + id, root).onchange = () => fire("audio");
   $("#dev-mirror", root).onchange = () => fire("other");
+  $("#dev-fliph", root).onchange = $("#dev-flipv", root).onchange = () => fire("video");
   codec.onchange = () => fire("other");
   return { read };
 }

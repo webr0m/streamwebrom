@@ -126,11 +126,15 @@ function paintPreset(ctx, id, W, H) {
  * `raw` is kept on the result for camera controls and device info.
  */
 export async function applyEffect(track, p) {
-  const mode = p.effect;
+  const mode = p.effect && p.effect !== "none" ? p.effect : "none";
+  const flipH = !!p.flipH, flipV = !!p.flipV;
   const fps = Math.min(60, Number(p.fps) || 30);
   const set = track?.getSettings?.() || {};
-  const H = Number(set.height) || Math.min(Number(p.quality) || 720, 1080);
-  const W = Number(set.width) || Math.round(H * 16 / 9);
+  // Start from the reported settings, then follow the real frame size: phones
+  // report landscape settings for portrait frames, and the quality can change
+  // later. Drawing a frame into a canvas of another shape squashed faces.
+  let H = Number(set.height) || Math.min(Number(p.quality) || 720, 1080);
+  let W = Number(set.width) || Math.round(H * 16 / 9);
   const canvas = el("canvas"); canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
 
@@ -147,17 +151,28 @@ export async function applyEffect(track, p) {
     try { seg = await loadSegmenter(); }
     catch (e) { console.warn("segmenter", e); toast("Este navegador no pudo cargar el recorte de fondo; envío la cámara normal.", "err"); return track; }
   }
-  const SW = 256, SH = Math.max(2, Math.round(SW * H / W));
-  const small = el("canvas"); small.width = SW; small.height = SH;
+  const SW = 256;
+  let SH = 2;
+  const small = el("canvas");
   const sctx = small.getContext("2d", { willReadFrequently: true });
-  const maskC = el("canvas"); maskC.width = SW; maskC.height = SH;
+  // The mask canvas follows the mask's own size (MediaPipe may hand back a
+  // different size than the input); copying it row by row into a canvas of
+  // another width slid the person down the frame.
+  const maskC = el("canvas"); maskC.width = 2; maskC.height = 2;
   const mctx = maskC.getContext("2d");
-  const maskData = mctx.createImageData(SW, SH);
+  let maskData = null, haveMask = false;
   const blurC = el("canvas"); const blurPx = mode === "blur-strong" ? 16 : 40;
-  blurC.width = Math.max(2, Math.round(W / blurPx)); blurC.height = Math.max(2, Math.round(H / blurPx));
   const bctx = blurC.getContext("2d");
-  const fg = el("canvas"); fg.width = W; fg.height = H;
+  const fg = el("canvas");
   const fctx = fg.getContext("2d");
+  function resize(w, h) {
+    W = w; H = h;
+    canvas.width = fg.width = W; canvas.height = fg.height = H;
+    SH = Math.max(2, Math.round(SW * H / W));
+    small.width = SW; small.height = SH;
+    blurC.width = Math.max(2, Math.round(W / blurPx)); blurC.height = Math.max(2, Math.round(H / blurPx));
+  }
+  resize(W, H);
   let busy = false, stopped = false, errors = 0;
   // Adaptive budget: never use more than ~half of the main thread, so chat,
   // signalling and the UI stay responsive on slow machines. Ticks that arrive
@@ -176,17 +191,24 @@ export async function applyEffect(track, p) {
     ctx.drawImage(blurC, 0, 0, W, H);
   }
 
+  // Flip what everyone sees (whole output: camera and background).
+  const flip = () => ctx.setTransform(flipH ? -1 : 1, 0, 0, flipV ? -1 : 1, flipH ? W : 0, flipV ? H : 0);
   function frame() {
     if (stopped || busy) return;
     const t0 = performance.now();
     if (t0 - lastRun < Math.max(1000 / fps - 4, cost * 2)) return;
     lastRun = t0;
+    try { flip(); draw(t0); } finally { ctx.setTransform(1, 0, 0, 1, 0, 0); }
+  }
+  function draw(t0) {
     if (mode === "replace") {
       ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
       if (ready(replaceAsset)) cover(ctx, replaceAsset, W, H);
       return;
     }
     if (!cam || cam.readyState < 2) return;
+    if (cam.videoWidth && cam.videoHeight && (cam.videoWidth !== W || cam.videoHeight !== H)) { resize(cam.videoWidth, cam.videoHeight); flip(); }
+    if (mode === "none") { ctx.drawImage(cam, 0, 0, W, H); return; } // flip only
     busy = true;
     try {
       if (t0 - lastSeg >= Math.max(1000 / 30, segCost * 3)) {
@@ -195,12 +217,18 @@ export async function applyEffect(track, p) {
       seg.segmentForVideo(small, nextTs(), (res) => {
         const m = res.confidenceMasks?.[0];
         if (!m) return;
-        const f = m.getAsFloat32Array(), d = maskData.data;
+        const mw = m.width || SW, mh = m.height || SH;
+        const f = m.getAsFloat32Array();
+        if (f.length !== mw * mh) return;
+        if (!maskData || maskData.width !== mw || maskData.height !== mh) { maskC.width = mw; maskC.height = mh; maskData = mctx.createImageData(mw, mh); }
+        const d = maskData.data;
         for (let i = 0, j = 3; i < f.length; i++, j += 4) d[j] = f[i] < 0.25 ? 0 : f[i] > 0.75 ? 255 : (f[i] - 0.25) * 510;
         mctx.putImageData(maskData, 0, 0);
+        haveMask = true;
       });
       segCost = segCost * 0.8 + (performance.now() - t0) * 0.2;
       }
+      if (!haveMask) { ctx.drawImage(cam, 0, 0, W, H); busy = false; return; } // first frames: plain camera, not an empty background
       // person = camera masked by the (smoothed, up-scaled) mask
       fctx.globalCompositeOperation = "copy";
       fctx.imageSmoothingEnabled = true; fctx.imageSmoothingQuality = "high";

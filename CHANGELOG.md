@@ -1,5 +1,14 @@
 # Cambios
 
+## v1.4.0
+- **Efectos de video sin deformar:** el desenfoque y los fondos virtuales asumían siempre 16:9 y una máscara del mismo tamaño que la cámara; con cámaras 4:3, verticales o celulares la cabeza se veía achatada o la persona “se caía”/desplazaba. Ahora el lienzo sigue el tamaño real de la cámara, la máscara se adapta al tamaño que entrega MediaPipe y los primeros cuadros muestran la cámara normal en vez de un fondo vacío. El anfitrión puede cambiar la calidad de un invitado con efectos sin reabrir su cámara.
+- **Voltear la cámara horizontal y vertical** (lo ven todos, también en el programa y OBS), en Ajustes de cámara del estudio y del invitado. Funciona con y sin efectos. Parámetros de URL `&fliph` y `&flipv`.
+- **Los links de invitación entran directo al backstage** aunque la sala de espera esté activa: llevan una clave de invitación en el `#` (no viaja a servidores ni logs). Quien entra con el link sin clave sigue esperando. Test `TestInviteLinkSkipsLobby`.
+- **Invitados que se reconectan conservan su lugar en el escenario:** su cámara vuelve con el mismo id (derivado del pase de reingreso) y el servidor espera 30 s antes de sacarlos de las escenas.
+- **Chat potenciado:** hora y autor, insignia de Anfitrión, mensajes propios destacados, links clicables, menciones `@nombre` resaltadas (y aviso al invitado), mensajes de solo emojis en grande, contador de no leídos en la pestaña Chat, auto-scroll inteligente, el historial se recupera tras reconectar sin duplicarse, y atajos `:) :D <3 ;)`.
+- **Emojis y stickers:** selector con 5 categorías y recientes, y 16 stickers propios (dibujados, sin descargas). Los stickers se pueden mostrar en pantalla con 📺 y se dibujan en el programa. El servidor solo acepta stickers conocidos.
+- **Cámaras y micrófonos de todos, rápido:** botón 👥 en las opciones de cada cámara con *Silenciar a todos*, *Pedir audio a todos*, *Apagar cámaras de todos* y *Pedir cámaras a todos* (con conteo de micrófonos/cámaras encendidos). También *Pedir cámaras a todos* en Producción. Encender siempre pide permiso al invitado (el navegador no permite forzarlo).
+
 ## v1.3.1
 - **Sala de espera arreglada:** había invitados que se quedaban “Esperando al anfitrión…” para siempre.
   - Si la conexión del invitado se cortaba mientras esperaba, la página no reconectaba y el anfitrión perdía su aviso. Ahora reconecta sola y vuelve a tocar la puerta.

@@ -82,7 +82,7 @@ func run() error {
 	hub := studio.NewHub(ctx, studio.Options{
 		Engine: engine, Recorder: record.New(cfg.DataDir, cfg.FFmpeg), FFmpeg: cfg.FFmpeg, ICE: ice,
 		MaxRooms: cfg.MaxRooms, MaxPeers: cfg.MaxPeers, MaxMsgBytes: cfg.MaxMsgBytes,
-		MsgRate: cfg.MsgRate, MsgBurst: cfg.MsgBurst, RoomTTL: cfg.IdleRoomTTL,
+		MsgRate: cfg.MsgRate, MsgBurst: cfg.MsgBurst, RoomTTL: cfg.IdleRoomTTL, RejoinGrace: 30 * time.Second,
 		CheckOrigin: server.CheckOrigin(cfg), Logger: log,
 	})
 

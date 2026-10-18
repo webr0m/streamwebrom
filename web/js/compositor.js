@@ -3,6 +3,8 @@
 // code renders the studio preview, the OBS "scene" output and the program
 // sent to YouTube/Twitch, so what you see is exactly what goes out.
 
+import { stickerById } from "./stickers.js";
+
 export const W = 1920, H = 1080;
 
 /** Returns rectangles [{x,y,w,h}] for n tiles. */
@@ -270,6 +272,8 @@ export class Compositor {
 
   drawComment(c, accent) {
     const ctx = this.ctx;
+    const st = c.sticker ? stickerById(c.sticker) : null;
+    if (st) return this.drawSticker(c, st);
     ctx.save();
     ctx.font = "500 34px Inter, system-ui, sans-serif";
     const lines = this.wrap(c.text, 900);
@@ -279,6 +283,25 @@ export class Compositor {
     ctx.fillText(c.from + (c.source && c.source !== "chat" ? "  · " + c.source : ""), x + 32, y + 24);
     ctx.fillStyle = "#111"; ctx.font = "500 34px Inter, system-ui, sans-serif";
     lines.forEach((l, i) => ctx.fillText(l, x + 32, y + 68 + i * 44));
+    ctx.restore();
+  }
+
+  drawSticker(c, st) {
+    const ctx = this.ctx, w = 520, h = 300, x = 60, y = H - h - 150;
+    ctx.save();
+    const g = ctx.createLinearGradient(x, y, x + w, y + h);
+    g.addColorStop(0, st.c[0]); g.addColorStop(1, st.c[1]);
+    ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = 30; ctx.shadowOffsetY = 8;
+    ctx.fillStyle = g; roundRect(ctx, x, y, w, h, 36); ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = 8; roundRect(ctx, x, y, w, h, 36); ctx.stroke();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#fff";
+    ctx.font = "120px 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif";
+    ctx.fillText(st.emoji, x + w / 2, y + 115);
+    ctx.font = "800 46px Inter, system-ui, sans-serif";
+    ctx.fillText(st.text, x + w / 2, y + 215, w - 40);
+    ctx.font = "600 26px Inter, system-ui, sans-serif"; ctx.globalAlpha = .9;
+    ctx.fillText(c.from || "", x + w / 2, y + 265, w - 40);
     ctx.restore();
   }
 

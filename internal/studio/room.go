@@ -5,8 +5,10 @@ package studio
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base32"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -47,6 +49,10 @@ type Comment struct {
 	Text   string `json:"text"`
 	Source string `json:"source"` // chat | youtube | twitch | ...
 	TS     int64  `json:"ts"`
+	// Sticker is a built-in sticker id (web/js/stickers.js) instead of text.
+	Sticker string `json:"sticker,omitempty"`
+	PeerID  string `json:"peerId,omitempty"` // author, so clients can tell their own messages
+	Role    Role   `json:"role,omitempty"`   // author's role ("host" gets a badge)
 }
 
 // Brand controls the look of the program output.
@@ -109,6 +115,7 @@ type Room struct {
 	guestHash []byte
 	viewKey   string
 	pushKey   string
+	inviteKey string // carried by the host's invite links: those guests skip the waiting room
 
 	mu       sync.RWMutex
 	peers    map[string]*Peer
@@ -128,6 +135,9 @@ type Keys struct {
 	HostKey string `json:"hostKey"`
 	ViewKey string `json:"viewKey"`
 	PushKey string `json:"pushKey"`
+	// InviteKey goes in the invite links the studio hands out (#invite=…):
+	// guests who come with it go straight to the backstage.
+	InviteKey string `json:"inviteKey,omitempty"`
 }
 
 // NewRoomID makes an unguessable, URL-friendly id (50 bits).
@@ -150,7 +160,7 @@ func newRoom(id, guestPassword string, lobby bool, title string) (*Room, Keys, e
 	}
 	r := &Room{
 		ID: id, Created: time.Now(), hostHash: hh,
-		viewKey: token(16), pushKey: token(20),
+		viewKey: token(16), pushKey: token(20), inviteKey: token(16),
 		peers: map[string]*Peer{}, waiting: map[string]*Peer{}, passes: map[string]bool{}, streams: map[string]*sfu.Stream{},
 		emptyAt: time.Now(),
 		state: State{Title: title, Layout: "grid", Lobby: lobby, Scenes: map[string]Scene{},
@@ -164,7 +174,7 @@ func newRoom(id, guestPassword string, lobby bool, title string) (*Room, Keys, e
 		}
 		r.guestHash = gh
 	}
-	return r, Keys{Room: id, HostKey: hostKey, ViewKey: r.viewKey, PushKey: r.pushKey}, nil
+	return r, Keys{Room: id, HostKey: hostKey, ViewKey: r.viewKey, PushKey: r.pushKey, InviteKey: r.inviteKey}, nil
 }
 
 // CheckHost verifies a host key.
@@ -188,6 +198,11 @@ func (r *Room) CheckView(k string) bool {
 // CheckPush verifies a WHIP push key (constant time).
 func (r *Room) CheckPush(k string) bool {
 	return subtle.ConstantTimeCompare([]byte(k), []byte(r.pushKey)) == 1
+}
+
+// CheckInvite verifies the invite key of the studio's invite links.
+func (r *Room) CheckInvite(k string) bool {
+	return k != "" && subtle.ConstantTimeCompare([]byte(k), []byte(r.inviteKey)) == 1
 }
 
 // Stream returns a published stream.
@@ -406,4 +421,11 @@ func (r *Room) revokePass(p *Peer) {
 	delete(r.passes, p.pass)
 	p.pass = ""
 	r.mu.Unlock()
+}
+
+// passStreamID is a guest's stable stream id derived from their rejoin pass
+// (hashed, since stream ids are visible to everyone in the room).
+func passStreamID(pass, kind string) string {
+	sum := sha256.Sum256([]byte("stream:" + pass))
+	return "g" + hex.EncodeToString(sum[:6]) + "-" + kind
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -73,5 +74,18 @@ func TestUpdateIsAllOrNothing(t *testing.T) {
 	}
 	if st := r.Snapshot(); st.Title != "T" || st.Labels["x"] != "" {
 		t.Fatalf("failed update leaked into state: %+v", st)
+	}
+}
+
+func TestPassStreamIDIsStableAndOpaque(t *testing.T) {
+	a, b := passStreamID("secret-pass", "camera"), passStreamID("secret-pass", "camera")
+	if a != b || !streamIDRe.MatchString(a) || strings.Contains(a, "secret") {
+		t.Fatalf("bad stream id %q / %q", a, b)
+	}
+	if passStreamID("other", "camera") == a || passStreamID("secret-pass", "screen") == a {
+		t.Fatal("stream ids collide")
+	}
+	if !validSticker("hola") || validSticker("<script>") {
+		t.Fatal("sticker validation")
 	}
 }

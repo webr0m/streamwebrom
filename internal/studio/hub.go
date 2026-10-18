@@ -35,6 +35,8 @@ type Options struct {
 	MsgRate     float64
 	MsgBurst    int
 	RoomTTL     time.Duration
+	// RejoinGrace keeps a reconnecting guest's place on stage (0 = drop at once).
+	RejoinGrace time.Duration
 	CheckOrigin func(*http.Request) bool
 	Logger      *slog.Logger
 }
@@ -258,14 +260,18 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 		}
 		return nil
 	case "chat":
-		text := strings.TrimSpace(m.Text)
-		if text == "" {
-			return nil
+		c := Comment{ID: token(8), From: p.Name, Source: "chat", TS: time.Now().UnixMilli(), PeerID: p.ID, Role: role}
+		if m.Kind == "sticker" {
+			if !validSticker(m.Text) {
+				return errors.New("unknown sticker")
+			}
+			c.Sticker = m.Text
+		} else {
+			c.Text = limit(strings.TrimSpace(m.Text), 500)
+			if c.Text == "" {
+				return nil
+			}
 		}
-		if utf8.RuneCountInString(text) > 500 {
-			text = string([]rune(text)[:500])
-		}
-		c := Comment{ID: token(8), From: p.Name, Text: text, Source: "chat", TS: time.Now().UnixMilli()}
 		r.addChat(c)
 		r.broadcast(Msg{Type: "chat", Comment: &c, PeerID: p.ID}, "")
 		return nil
@@ -346,7 +352,7 @@ func (h *Hub) join(p *Peer, m Msg) error {
 	if rejoin {
 		p.pass = m.Rejoin
 	}
-	lobby := role == RoleGuest && r.state.Lobby && !rejoin
+	lobby := role == RoleGuest && r.state.Lobby && !rejoin && !r.CheckInvite(m.Invite)
 	if lobby {
 		r.waiting[p.ID] = p
 	} else {
@@ -400,7 +406,7 @@ func (h *Hub) welcome(p *Peer) {
 		w.Rejoin = r.issuePass(p)
 	}
 	if role == RoleHost {
-		w.Keys = &Keys{Room: r.ID, ViewKey: r.viewKey, PushKey: r.pushKey}
+		w.Keys = &Keys{Room: r.ID, ViewKey: r.viewKey, PushKey: r.pushKey, InviteKey: r.inviteKey}
 		r.mu.RLock()
 		for _, wp := range r.waiting {
 			defer p.Send(Msg{Type: "knock", PeerID: wp.ID, Name: wp.Name})
@@ -454,8 +460,36 @@ func (h *Hub) leave(p *Peer) {
 	}
 	// Drop departed streams from the program and every extra scene, and
 	// refresh the recording list (their recordings stopped with them).
-	if len(pubs) > 0 {
-		gone := func(id string) bool { _, ok := pubs[id]; return ok }
+	// A guest with a rejoin pass gets a grace period: if they reconnect and
+	// publish the same stream again, they keep their place on stage.
+	if len(pubs) == 0 {
+		return
+	}
+	r.mu.RLock()
+	hasPass := p.pass != ""
+	r.mu.RUnlock()
+	if hasPass && h.o.RejoinGrace > 0 {
+		h.dropStreams(r, pubs, false)
+		time.AfterFunc(h.o.RejoinGrace, func() { h.dropStreams(r, pubs, true) })
+		return
+	}
+	h.dropStreams(r, pubs, true)
+}
+
+// dropStreams removes departed streams from the stage, the featured slot and
+// every extra scene (only those that were not published again when
+// skipLive), and refreshes the recording list.
+func (h *Hub) dropStreams(r *Room, pubs map[string]*sfu.Stream, fromStage bool) {
+	{
+		gone := func(id string) bool {
+			if _, ok := pubs[id]; !ok {
+				return false
+			}
+			return r.Stream(id) == nil
+		}
+		if !fromStage {
+			gone = func(string) bool { return false }
+		}
 		_ = r.Update(func(st *State) error {
 			st.Stage = slices.DeleteFunc(st.Stage, gone)
 			if gone(st.Featured) {
@@ -497,6 +531,14 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 	id := m.Stream
 	if id == "" {
 		id = p.ID + "-" + kind
+		// Guests with a rejoin pass keep the same stream id across reconnects,
+		// so they come back to the same spot on stage.
+		p.room.mu.RLock()
+		pass := p.pass
+		p.room.mu.RUnlock()
+		if pass != "" {
+			id = passStreamID(pass, kind)
+		}
 	}
 	if !streamIDRe.MatchString(id) {
 		return errors.New("bad stream id")
@@ -739,6 +781,10 @@ func (h *Hub) setState(r *Room, m Msg) error {
 					if c != nil {
 						c.Text = limit(c.Text, 500)
 						c.From = limit(c.From, 60)
+						c.Source = limit(c.Source, 30)
+						if c.Sticker != "" && !validSticker(c.Sticker) {
+							return errors.New("unknown sticker")
+						}
 					}
 					st.Comment = c
 				}

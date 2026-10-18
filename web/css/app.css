@@ -235,9 +235,40 @@ label.row { color: var(--text); font-size: 13px; margin-bottom: 0; }
 .tabpane h3 { margin: 6px 0 0; }
 .chatlog { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; min-height: 200px; }
 .composer { padding-top: 4px; }
-.msg { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; word-wrap: break-word; }
+.msg { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; word-wrap: break-word; overflow-wrap: anywhere; }
 .msg b { color: var(--accent-2); }
 .msg .act { float: right; margin-left: 6px; }
+.msg .meta { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-bottom: 3px; }
+.msg .meta .time { color: var(--muted); font-size: 11px; margin-left: auto; }
+.msg .badge { background: var(--accent); color: #fff; border-radius: 6px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+.msg .badge.src { background: var(--panel); color: var(--muted); border: 1px solid var(--line); }
+.msg .body { font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+.msg .body a { color: var(--accent-2); text-decoration: underline; }
+.msg .body mark { background: rgba(255, 200, 0, .3); color: inherit; border-radius: 4px; padding: 0 2px; }
+.msg .body.bigemoji { font-size: 30px; line-height: 1.2; }
+.msg.mine { border-color: var(--accent-soft); background: linear-gradient(0deg, var(--accent-soft), var(--accent-soft)), var(--panel-2); }
+.msg.mention { border-color: #f7b500; box-shadow: inset 3px 0 0 #f7b500; }
+.msg.hassticker { background: transparent; border-color: transparent; padding: 4px 2px; }
+.sticker { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 132px; height: 92px; border-radius: 16px; border: 3px solid rgba(255,255,255,.85); color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.35); text-align: center; padding: 4px; }
+.sticker .se { font-size: 34px; line-height: 1; }
+.sticker .st { font-weight: 800; font-size: 13px; line-height: 1.1; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+.chatcomposer { position: relative; gap: 6px; }
+.chatcomposer input { flex: 1; min-width: 0; }
+.chatcomposer .chattool { padding: 6px 8px; font-size: 16px; line-height: 1; }
+.chatpicker { background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; padding: 8px; max-height: 300px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.chatpicker .pickertabs { display: flex; gap: 6px; }
+.chatpicker .pickertabs button { flex: 1; padding: 6px; font-size: 12px; }
+.chatpicker .pickertabs button.on { background: var(--accent-soft); border-color: var(--accent); }
+.emojigrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 2px; overflow: auto; }
+.emojigrid .grouptitle { grid-column: 1 / -1; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
+.emojigrid .emo { border: 0; background: transparent; font-size: 22px; padding: 4px 0; border-radius: 8px; }
+.emojigrid .emo:hover { background: var(--panel-2); }
+.stickergrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; overflow: auto; justify-items: center; }
+.stickergrid .stk { border: 0; background: transparent; padding: 2px; border-radius: 18px; }
+.stickergrid .stk:hover { background: var(--panel-2); }
+.tabs button { position: relative; }
+.tabs button[data-unread]::after { content: attr(data-unread); position: absolute; top: 4px; right: 8px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #e5484d; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+.fliprow { align-items: center; gap: 12px; font-size: 13px; }
 .list { display: flex; flex-direction: column; gap: 8px; }
 .list .item { display: flex; gap: 8px; align-items: center; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; flex-wrap: wrap; }
 .list .item .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -274,7 +305,7 @@ label.row { color: var(--text); font-size: 13px; margin-bottom: 0; }
 .meter { height: 6px; background: var(--panel-2); border-radius: 6px; overflow: hidden; }
 .meter i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--ok), var(--warn), var(--bad)); transition: width .08s; }
 @media (max-width: 760px) { .prejoin { grid-template-columns: 1fr; margin-top: 20px; } }
-.drawer { position: fixed; right: 12px; bottom: 84px; width: 340px; max-height: 60vh; display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.drawer { position: fixed; right: 12px; bottom: 84px; width: 360px; max-height: 60vh; display: flex; flex-direction: column; gap: 8px; padding: 12px; }
 .reaction-fly { position: fixed; bottom: 90px; font-size: 34px; animation: fly 2.4s ease-out forwards; pointer-events: none; z-index: 50; }
 @keyframes fly { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-60vh); opacity: 0; } }
 .call .tile > .tilevol { position: absolute; right: 8px; bottom: 8px; width: 110px; opacity: 0; transition: opacity .15s; }
@@ -339,3 +370,6 @@ body.view .viewstats { position: fixed; right: 12px; top: 12px; font: 12px ui-mo
 .golive.live { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='5' width='14' height='14' rx='2' fill='black'/%3E%3C/svg%3E"); }
 #record.recording { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='5' width='14' height='14' rx='2' fill='black'/%3E%3C/svg%3E"); }
 
+
+.allmenu { position: fixed; z-index: 60; display: flex; flex-direction: column; gap: 6px; padding: 10px; width: 250px; box-shadow: 0 12px 34px rgba(0,0,0,.5); }
+.allmenu button { text-align: left; justify-content: flex-start; }

@@ -586,3 +586,28 @@ func TestLobbyAdmitAllAndRejoin(t *testing.T) {
 	host.send(map[string]any{"type": "state", "value": map[string]any{"lobby": false}})
 	c.expect("welcome")
 }
+
+func TestInviteLinkSkipsLobby(t *testing.T) {
+	e := newEnv(t)
+	k := e.createRoom(t, `{"room":"invite-room","lobby":true}`)
+	if k.InviteKey == "" {
+		t.Fatal("no invite key on room creation")
+	}
+	host := e.dial(t)
+	host.send(map[string]any{"type": "join", "room": "invite-room", "role": "host", "key": k.HostKey})
+	if w := host.expect("welcome"); w.Keys == nil || w.Keys.InviteKey != k.InviteKey {
+		t.Fatal("host welcome lacks the invite key")
+	}
+	g := e.dial(t)
+	g.send(map[string]any{"type": "join", "room": "invite-room", "name": "Ana", "invite": k.InviteKey})
+	if w := g.expect("welcome"); w.Rejoin == "" {
+		t.Fatal("invited guest got no rejoin pass")
+	}
+	g.send(map[string]any{"type": "chat", "kind": "sticker", "text": "hola"})
+	if m := host.expect("chat"); m.Comment == nil || m.Comment.Sticker != "hola" || m.Comment.PeerID == "" {
+		t.Fatalf("sticker chat: %+v", m.Comment)
+	}
+	bad := e.dial(t)
+	bad.send(map[string]any{"type": "join", "room": "invite-room", "name": "Beto", "invite": "wrong"})
+	bad.expect("waiting")
+}

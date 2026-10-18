@@ -1,5 +1,6 @@
 import { $, $$, el, toast, copy, params, hashParams, api, Signal, publish, subscribe, levelMeter, fmtTime } from "./rtc.js";
 import { Compositor, AudioMixer } from "./compositor.js";
+import { chatMessage, appendChat, mountComposer } from "./chat.js";
 import { listDevices, openScreen, loadPrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain, QUALITIES, FPS } from "./devices.js";
 
 const prefs = loadPrefs();
@@ -24,6 +25,7 @@ const LAYOUTS = [["solo", "Solo"], ["split", "Dividido"], ["grid", "Cuadrícula"
 
 let state = {};
 let keys = {};
+let myId = "";
 let peers = new Map();       // peerId -> info
 const sources = new Map();   // streamId -> { video, stream, name, kind, level, owner, sub }
 const local = new Map();     // streamId -> publication (host's own)
@@ -95,7 +97,9 @@ sig.on("reconnected", async (m) => {
 });
 
 function onWelcome(m) {
-  state = m.state; keys = m.keys || keys;
+  state = m.state; keys = m.keys || keys; myId = m.peerId || myId;
+  renderInvite();
+  $("#chatlog").replaceChildren();
   peers = new Map((m.peers || []).map((p) => [p.id, p]));
   for (const s of m.streams || []) addRemote(s.id, s.kind, s.owner);
   for (const c of m.chat || []) addChat(c);
@@ -357,6 +361,7 @@ function renderBackstage() {
       el("button", { title: owner?.mic === false ? "Pedir que active el micrófono" : "Silenciar su micrófono", onclick: () => sig.send({ type: "request", target: s.owner, action: owner?.mic === false ? "unmute" : "mute" }), text: owner?.mic === false ? "🎙️✕" : "🎙️" }),
       el("button", { title: owner?.cam === false ? "Pedir que encienda la cámara" : "Apagar su cámara", onclick: () => sig.send({ type: "request", target: s.owner, action: owner?.cam === false ? "camon" : (s.kind === "screen" ? "screenoff" : "camoff") }), text: owner?.cam === false ? "📷✕" : "📷" }),
       el("button", { title: "Control remoto: calidad, cámara, micrófono, estadísticas", onclick: () => owner && openRemote(owner.id), text: "🎛️" }),
+      el("button", { title: "Cámaras y micrófonos de todos", onclick: (e) => allMenu(e.currentTarget), text: "👥" }),
       el("button", { title: "Expulsar", onclick: () => owner && confirm(`¿Expulsar a ${owner.name}?`) && sig.send({ type: "kick", target: owner.id }), text: "🚫" }),
     ];
     const tile = el("div", { class: "tile" + (onStage(id) ? " stage" : "") + (progMuted ? " progmuted" : ""), "data-id": id },
@@ -439,7 +444,36 @@ LAYOUTS.forEach(([l, label], i) => $("#layouts").append(el("button", { "data-l":
 $("#muteStage").onclick = () => setState({ stageMuted: !state.stageMuted });
 $("#muteAll").onclick = () => { sig.send({ type: "request", target: "*", action: "mute" }); toast("Silenciando a todos los invitados"); };
 $("#askUnmuteAll").onclick = () => { sig.send({ type: "request", target: "*", action: "unmute" }); toast("Pedí a todos activar el micrófono"); };
-$("#camsOff").onclick = () => confirm("¿Apagar la cámara de todos los invitados?") && sig.send({ type: "request", target: "*", action: "camoff" });
+$("#camsOff").onclick = () => confirm("¿Apagar la cámara de todos los invitados?") && allGuests("camoff");
+$("#askCamsOn").onclick = () => allGuests("camon");
+
+// Quick "everyone" controls, also reachable from every camera's 👥 menu.
+const ALL_ACTIONS = {
+  mute: ["🔇 Silenciar a todos", "Silenciando a todos los invitados"],
+  unmute: ["🎙️ Pedir audio a todos", "Pedí a todos activar el micrófono"],
+  camoff: ["📷✕ Apagar cámaras de todos", "Apagando las cámaras de todos los invitados"],
+  camon: ["📷 Pedir cámaras a todos", "Pedí a todos encender la cámara"],
+};
+function allGuests(action) {
+  if (![...peers.values()].some((p) => p.role !== "host")) return toast("No hay invitados conectados", "err");
+  sig.send({ type: "request", target: "*", action });
+  toast(ALL_ACTIONS[action][1]);
+}
+let allMenuEl;
+function allMenu(anchor) {
+  allMenuEl?.remove();
+  const guests = [...peers.values()].filter((p) => p.role !== "host");
+  const micsOn = guests.filter((p) => p.mic !== false).length, camsOn = guests.filter((p) => p.cam !== false).length;
+  allMenuEl = el("div", { class: "allmenu card", role: "menu" },
+    el("div", { class: "muted", text: `Todos los invitados (${guests.length}) · 🎙️ ${micsOn} · 📷 ${camsOn}` }),
+    ...Object.entries(ALL_ACTIONS).map(([a, [label]]) => el("button", { class: "small", role: "menuitem", onclick: () => { allMenuEl.remove(); allGuests(a); }, text: label })),
+    el("p", { class: "muted", style: "margin:0;font-size:11px", text: "Encender pide permiso al invitado: el navegador no deja activar su cámara o micrófono sin que acepte." }));
+  document.body.append(allMenuEl);
+  const r = anchor.getBoundingClientRect();
+  allMenuEl.style.left = Math.max(8, Math.min(window.innerWidth - allMenuEl.offsetWidth - 8, r.left)) + "px";
+  allMenuEl.style.top = (r.bottom + allMenuEl.offsetHeight + 8 > window.innerHeight ? r.top - allMenuEl.offsetHeight - 6 : r.bottom + 6) + "px";
+  setTimeout(() => document.addEventListener("pointerdown", function off(e) { if (!allMenuEl?.contains(e.target)) { allMenuEl?.remove(); document.removeEventListener("pointerdown", off); } }), 0);
+}
 $("#lowerHands").onclick = () => sig.send({ type: "request", target: "*", action: "lowerhand" });
 $("#clearStage").onclick = () => setScene(editScene, { stage: [] });
 $("#allStage").onclick = () => setScene(editScene, { stage: [...sources.keys()].slice(0, 25) });
@@ -469,17 +503,17 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---------- chat ----------
+let unread = 0;
 function addChat(c) {
-  const box = $("#chatlog");
-  const msg = el("div", { class: "msg" },
-    el("button", { class: "small act", title: "Mostrar en pantalla", onclick: () => setState({ comment: state.comment?.id === c.id ? null : c }), text: "📺" }),
-    el("b", { text: c.from }), " ", el("span", { text: c.text }));
-  box.append(msg);
-  box.scrollTop = box.scrollHeight;
+  const show = el("button", { class: "small act", title: "Mostrar en pantalla", onclick: () => setState({ comment: state.comment?.id === c.id ? null : c }), text: "📺" });
+  appendChat($("#chatlog"), chatMessage(c, { myId, actions: [show] }));
+  const chatTab = $('#tabs [data-tab="chat"]');
+  if (chatTab && !chatTab.classList.contains("active") && c.peerId !== myId) { unread++; chatTab.dataset.unread = unread > 99 ? "99+" : String(unread); }
 }
-const sendChat = () => { const i = $("#chatInput"); if (i.value.trim()) sig.send({ type: "chat", text: i.value }); i.value = ""; };
-$("#chatSend").onclick = sendChat;
-$("#chatInput").addEventListener("keydown", (e) => e.key === "Enter" && sendChat());
+const chatSend = (x) => sig.send(x.sticker ? { type: "chat", kind: "sticker", text: x.sticker } : { type: "chat", text: x.text });
+const composer = mountComposer($("#chatInput").parentElement, $("#chatInput"), chatSend);
+$("#chatSend").onclick = composer.send;
+$("#chatInput").addEventListener("keydown", (e) => e.key === "Enter" && !e.isComposing && composer.send());
 
 // ---------- banners ----------
 $("#bannerAdd").onclick = () => {
@@ -619,7 +653,7 @@ function renderObs() {
   box.replaceChildren(
     linkRow("Programa completo (escena, con banners y marca)", `${origin()}/view?room=${r}&scene=1#key=${vk}`),
     linkRow("Programa con fondo transparente (para tus propias escenas)", `${origin()}/view?room=${r}&scene=1&transparent=1#key=${vk}`),
-    linkRow("Invitación para invitados", `${origin()}/guest?room=${r}`),
+    linkRow("Invitación para invitados (entran directo al backstage)", inviteURL()),
     linkRow("WHEP del programa (reproductores WHEP / OBS 31+)", `${origin()}/whep/${r}/program`),
     linkRow("Clave WHEP (Bearer)", keys.viewKey),
   );
@@ -637,6 +671,7 @@ setInterval(() => { const p = $('[data-pane="obs"]'); if (p.classList.contains("
 // ---------- tabs & misc ----------
 function activateTab(name) {
   $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  if (name === "chat") { unread = 0; delete $('#tabs [data-tab="chat"]').dataset.unread; const l = $("#chatlog"); l.scrollTop = l.scrollHeight; }
   $$(".tabpane").forEach((p) => p.classList.toggle("active", p.dataset.pane === name));
   if (name === "obs") renderObs();
 }
@@ -785,7 +820,9 @@ function inviteURL() {
   if ($("#invVideoMute")?.checked) q.set("videomute", "1");
   if ($("#invStereo")?.checked) q.set("stereo", "1");
   if ($("#invAudioOnly")?.checked) q.set("novideo", "1");
-  return `${origin()}/guest?${q}`;
+  // The invite key (in the #hash, never sent to servers or logs) lets these
+  // guests skip the waiting room and land straight in the backstage.
+  return `${origin()}/guest?${q}` + (keys.inviteKey ? `#invite=${encodeURIComponent(keys.inviteKey)}` : "");
 }
 function renderInvite() { const i = $("#invURL"); if (i) i.value = inviteURL(); }
 $$("#inviteOpts select, #inviteOpts input[type=checkbox], #inviteOpts input[type=number]").forEach((x) => x.addEventListener("change", renderInvite));

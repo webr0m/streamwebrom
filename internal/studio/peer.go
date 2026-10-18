@@ -24,6 +24,7 @@ type Msg struct {
 	Key      string `json:"key,omitempty"`      // host key or view key
 	Password string `json:"password,omitempty"` // guest password
 	PeerID   string `json:"peerId,omitempty"`
+	Invite   string `json:"invite,omitempty"` // invite key from the host's invite link: skips the lobby
 	Rejoin   string `json:"rejoin,omitempty"` // pass given to an admitted guest so a reconnect skips the lobby
 
 	// media
