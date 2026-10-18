@@ -28,6 +28,7 @@ import (
 
 // Options configures the media engine.
 type Options struct {
+	RecordTraffic    func(int)
 	ICEServers       []webrtc.ICEServer
 	ICEConfiguration func() webrtc.Configuration
 	PublicIPs        []string
@@ -162,13 +163,27 @@ type Sink interface {
 	WriteRTP(*rtp.Packet) error
 }
 
+type meteredSink struct {
+	Sink
+	record func(int)
+}
+
+func (s *meteredSink) WriteRTP(p *rtp.Packet) error {
+	err := s.Sink.WriteRTP(p)
+	if err == nil {
+		s.record(p.MarshalSize())
+	}
+	return err
+}
+
 // Forwarder fans one incoming track out to many sinks.
 type Forwarder struct {
-	ID       string
-	StreamID string
-	Kind     webrtc.RTPCodecType
-	Codec    webrtc.RTPCodecCapability
-	PT       uint8
+	recordTraffic func(int)
+	ID            string
+	StreamID      string
+	Kind          webrtc.RTPCodecType
+	Codec         webrtc.RTPCodecCapability
+	PT            uint8
 
 	remote *webrtc.TrackRemote
 	pc     *webrtc.PeerConnection
@@ -232,6 +247,9 @@ func (f *Forwarder) run(log *slog.Logger) {
 		}
 		f.packets.Add(1)
 		f.bytes.Add(uint64(n))
+		if f.recordTraffic != nil {
+			f.recordTraffic(n)
+		}
 		f.mu.RLock()
 		for _, s := range f.sinks {
 			// Each sink rewrites SSRC/PT as needed; give each its own copy of
@@ -282,7 +300,8 @@ func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webr
 
 	pc.OnTrack(func(tr *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		f := &Forwarder{
-			ID: tr.ID(), StreamID: id, Kind: tr.Kind(), Codec: tr.Codec().RTPCodecCapability,
+			recordTraffic: e.opts.RecordTraffic,
+			ID:            tr.ID(), StreamID: id, Kind: tr.Kind(), Codec: tr.Codec().RTPCodecCapability,
 			PT: uint8(tr.PayloadType()), remote: tr, pc: pc,
 		}
 		s.mu.Lock()
@@ -484,7 +503,11 @@ func (e *Engine) attach(s *Stream, pc *webrtc.PeerConnection) (*Subscriber, erro
 				}
 			}
 		}()
-		sub.removes = append(sub.removes, f.AddSink(local))
+		var sink Sink = local
+		if e.opts.RecordTraffic != nil {
+			sink = &meteredSink{Sink: local, record: e.opts.RecordTraffic}
+		}
+		sub.removes = append(sub.removes, f.AddSink(sink))
 	}
 	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
 		if st == webrtc.PeerConnectionStateFailed || st == webrtc.PeerConnectionStateClosed {

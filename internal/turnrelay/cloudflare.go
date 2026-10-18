@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -37,10 +38,11 @@ type lease struct {
 	Expires time.Time
 }
 type quotaState struct {
-	Month     string
-	HighWater uint64
-	Blocked   bool
-	Leases    []lease
+	Month          string
+	HighWater      uint64
+	EstimatedUsage uint64
+	Blocked        bool
+	Leases         []lease
 }
 type RelayStatus struct {
 	Provider    string    `json:"provider"`
@@ -58,6 +60,17 @@ type Cloudflare struct {
 	status    RelayStatus
 	ice       []webrtc.ICEServer
 	refreshAt time.Time
+	active    atomic.Bool
+	traffic   atomic.Uint64
+}
+
+// RecordMedia provides a conservative local guard while account analytics lag.
+// Count both SFU directions with a 2x margin and 64 bytes per RTP packet for
+// transport overhead. This is an estimate, never an authoritative bill.
+func (c *Cloudflare) RecordMedia(n int) {
+	if n > 0 && c.active.Load() {
+		c.traffic.Add(2 * (uint64(n) + 64))
+	}
 }
 
 var identifier = regexp.MustCompile(`^[a-fA-F0-9]{32}$`)
@@ -132,21 +145,23 @@ func (c *Cloudflare) Check(ctx context.Context, now time.Time) bool {
 	w := &Cloudflare{o: c.o, state: c.state, status: c.status, ice: cloneICE(c.ice), refreshAt: c.refreshAt}
 	w.state.Leases = append([]lease(nil), c.state.Leases...)
 	c.mu.RUnlock()
-	changed := w.check(ctx, now)
+	changed := w.check(ctx, now, c.traffic.Swap(0))
 	c.mu.Lock()
 	c.state = w.state
 	c.status = w.status
 	c.ice = w.ice
 	c.refreshAt = w.refreshAt
+	c.active.Store(c.status.Provider == "cloudflare")
 	c.mu.Unlock()
 	return changed
 }
-func (c *Cloudflare) check(ctx context.Context, now time.Time) bool {
+func (c *Cloudflare) check(ctx context.Context, now time.Time, traffic uint64) bool {
 	previous := c.status.Provider
 	month := now.UTC().Format("2006-01")
 	if c.state.Month != month {
 		c.state.Month = month
 		c.state.HighWater = 0
+		c.state.EstimatedUsage = 0
 		c.state.Blocked = false
 	}
 	c.status.Month = month
@@ -160,9 +175,17 @@ func (c *Cloudflare) check(ctx context.Context, now time.Time) bool {
 		}
 		c.status.UsageBytes = c.state.HighWater
 		c.status.CheckedAt = now
-		if c.state.HighWater >= c.o.BudgetBytes {
-			c.state.Blocked = true
-		}
+	}
+	if c.state.EstimatedUsage < c.state.HighWater {
+		c.state.EstimatedUsage = c.state.HighWater
+	}
+	if ^uint64(0)-c.state.EstimatedUsage < traffic {
+		c.state.EstimatedUsage = ^uint64(0)
+	} else {
+		c.state.EstimatedUsage += traffic
+	}
+	if c.state.EstimatedUsage >= c.o.BudgetBytes {
+		c.state.Blocked = true
 	}
 	if err != nil || c.state.Blocked {
 		c.disable(reason)

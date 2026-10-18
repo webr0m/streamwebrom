@@ -125,7 +125,11 @@ func run() error {
 		}
 		return out
 	}
-	engine, err := sfu.NewEngine(sfu.Options{ICEServers: ice, ICEConfiguration: serverICE, PublicIPs: cfg.PublicIPs, UDPPort: cfg.UDPPort,
+	var recordTraffic func(int)
+	if cloudRelay != nil {
+		recordTraffic = cloudRelay.RecordMedia
+	}
+	engine, err := sfu.NewEngine(sfu.Options{RecordTraffic: recordTraffic, ICEServers: ice, ICEConfiguration: serverICE, PublicIPs: cfg.PublicIPs, UDPPort: cfg.UDPPort,
 		UDPPortMin: uint16(cfg.UDPPortMin), UDPPortMax: uint16(cfg.UDPPortMax), Logger: log})
 	if err != nil {
 		return err

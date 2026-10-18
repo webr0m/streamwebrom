@@ -79,6 +79,18 @@ func TestCloudflareQuotaFailoverRevokesAndSurvivesRestart(t *testing.T) {
 	if !c.Check(ctx, next.Add(time.Second)) || c.Status().Reason != "analytics-unavailable" || revoked != 2 {
 		t.Fatal("unknown usage did not fail closed", c.Status(), revoked)
 	}
+	fail = false
+	c.Check(ctx, next.Add(2*time.Second))
+	c.RecordMedia(40)
+	if !c.Check(ctx, next.Add(3*time.Second)) || c.Status().Provider != "local" || revoked != 3 {
+		t.Fatal("lagging analytics bypassed the local media guard")
+	}
+	estimate := c.state.EstimatedUsage
+	c.RecordMedia(5000)
+	c.Check(ctx, next.Add(4*time.Second))
+	if c.state.EstimatedUsage != estimate {
+		t.Fatal("local fallback traffic consumed the Cloudflare estimate")
+	}
 }
 
 func TestCloudflareRestoredLeaseRevokedWhenAnalyticsFails(t *testing.T) {
