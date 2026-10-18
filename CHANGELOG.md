@@ -2,6 +2,7 @@
 
 ## v1.6.0 — Cloudflare TURN y respaldo local
 
+- Corrige el anuncio SDP de trickle ICE en ofertas y respuestas: el navegador debe esperar los candidatos TURN tardíos, incluso cuando las primeras rutas directas fallan.
 - TURN nativo con autenticación temporal, rango de asignación acotado y destinos restringidos al puerto de medios del propio SFU.
 - Cloudflare: claves maestras solo en backend, credenciales de 24 horas, renovación a las 12 horas y consulta de consumo TURN de toda la cuenta cada 30 segundos.
 - Corte mensual preventivo persistente (900 GB por defecto); si falla la analítica o la API, se elige el local y se intenta revocar las credenciales emitidas. No es un límite de facturación: hay retraso/muestreo y la cuota se comparte con otros servicios Realtime.

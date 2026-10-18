@@ -8,6 +8,8 @@ Antes se enviaba una única descripción SDP, tras un máximo de 2 segundos en e
 
 El invitado ve «Conectando audio y video» hasta que WebRTC conecta de verdad. Si no hay ruta en 30 segundos aparece un error y puede pulsar **Reintentar audio y video**. La señalización tiene su propio límite de espera de 20 segundos. Perderla cancela la negociación y permite reconectar sin dejar operaciones pendientes.
 
+En 1.6.0 el SFU anuncia también `a=ice-options:trickle` en las ofertas y respuestas de WebSocket. Enviar candidatos por mensajes sin anunciar esta capacidad en SDP podía hacer que el navegador declarase fallo cuando las primeras rutas privadas eran inaccesibles, antes de recibir el candidato TURN. WHIP/WHEP conservan su negociación sin trickle.
+
 ## El requisito de infraestructura
 
 **STUN descubre direcciones; TURN retransmite el tráfico cuando no existe una conexión directa.** Algunas redes móviles usan NAT o filtros que impiden la ruta directa. Cambiar los tiempos de espera o añadir más STUN no sustituye un relé.
@@ -47,6 +49,8 @@ Estas pruebas no representan una comprobación con cada operadora móvil.
 En Windows, **Red → TURN local / Cloudflare** configura ambos. Los tokens se guardan con DPAPI en `relay-credentials.json`, dentro de la carpeta de datos del usuario. No copies este archivo a otro usuario ni publiques los tokens. El lanzador los pasa al servidor por entorno, sin incluirlos en argumentos o registros. Linux/macOS usan las variables indicadas abajo y un almacén de secretos del servicio.
 
 Cloudflare necesita una suscripción Realtime aceptada por el titular, una app TURN dedicada y un token **Account Analytics Read** limitado a su cuenta. La clave TURN maestra solo se utiliza en el backend. Los navegadores reciben credenciales temporales; no reciben los tokens maestros.
+
+Cuando Cloudflare está activo, el SFU usa candidatos relay públicos de ese proveedor. Así funciona también si el router del equipo no admite redirecciones válidas; evita que las primeras rutas privadas provoquen un fallo antes de llegar el candidato relay. Al cambiar al local se restaura la política que permite rutas directas al SFU. Esto cuenta tráfico de la parte del servidor dentro del consumo TURN.
 
 El servidor consulta cada 30 segundos los bytes de salida TURN de **todas las claves de la cuenta**. El valor máximo observado y el corte mensual se guardan en `data/turn-quota.json`, incluyendo los nombres de credenciales emitidas para poder revocarlas después de reiniciar. No borres ese estado para reiniciar el contador. El primer chequeo ocurre antes de aceptar clientes. Un error de analítica, generación de credenciales o escritura del estado selecciona el relé local. El corte persiste hasta el siguiente mes UTC, aunque una lectura posterior dé un valor menor.
 

@@ -28,12 +28,12 @@ import (
 
 // Options configures the media engine.
 type Options struct {
-	ICEServers  []webrtc.ICEServer
-	ICEProvider func() []webrtc.ICEServer
-	PublicIPs   []string
-	UDPPort     int
-	UDPPortMin  uint16
-	UDPPortMax  uint16
+	ICEServers       []webrtc.ICEServer
+	ICEConfiguration func() webrtc.Configuration
+	PublicIPs        []string
+	UDPPort          int
+	UDPPortMin       uint16
+	UDPPortMax       uint16
 	// GatherTimeout bounds how long we wait for ICE gathering when building
 	// non-trickle SDP (WHIP/WHEP style).
 	GatherTimeout time.Duration
@@ -108,15 +108,13 @@ func (e *Engine) Close() error {
 }
 
 func (e *Engine) newPC() (*webrtc.PeerConnection, error) {
-	ice := e.opts.ICEServers
-	if e.opts.ICEProvider != nil {
-		ice = e.opts.ICEProvider()
+	configuration := webrtc.Configuration{ICEServers: e.opts.ICEServers}
+	if e.opts.ICEConfiguration != nil {
+		configuration = e.opts.ICEConfiguration()
 	}
-	return e.api.NewPeerConnection(webrtc.Configuration{
-		ICEServers:   ice,
-		BundlePolicy: webrtc.BundlePolicyMaxBundle,
-		SDPSemantics: webrtc.SDPSemanticsUnifiedPlan,
-	})
+	configuration.BundlePolicy = webrtc.BundlePolicyMaxBundle
+	configuration.SDPSemantics = webrtc.SDPSemanticsUnifiedPlan
+	return e.api.NewPeerConnection(configuration)
 }
 
 // complete waits (bounded) for ICE gathering so the SDP carries candidates.
@@ -317,7 +315,7 @@ func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webr
 		_ = pc.Close()
 		return nil, nil, fmt.Errorf("remote description: %w", err)
 	}
-	answer, err := pc.CreateAnswer(nil)
+	answer, err := pc.CreateAnswer(&webrtc.AnswerOptions{OfferAnswerOptions: webrtc.OfferAnswerOptions{ICETricklingSupported: len(onICE) > 0}})
 	if err != nil {
 		_ = pc.Close()
 		return nil, nil, err
@@ -513,7 +511,7 @@ func (e *Engine) SubscribeOffer(ctx context.Context, s *Stream, onICE ...func(we
 		return nil, nil, err
 	}
 	trickle(pc, onICE)
-	offer, err := pc.CreateOffer(nil)
+	offer, err := pc.CreateOffer(&webrtc.OfferOptions{OfferAnswerOptions: webrtc.OfferAnswerOptions{ICETricklingSupported: len(onICE) > 0}})
 	if err != nil {
 		sub.Close()
 		return nil, nil, err

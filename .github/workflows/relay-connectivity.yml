@@ -11,6 +11,10 @@ on:
         type: choice
         options: [cloudflare, local]
         required: true
+      exercise_cutoff:
+        description: Require automatic quota cutoff and decoded video after local reconnection (configure a temporary test budget first)
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -27,4 +31,5 @@ jobs:
         env:
           EXPECT_PROVIDER: ${{ inputs.provider }}
           STUDIO_URL: ${{ inputs.url }}
+          EXPECT_CUTOFF: ${{ inputs.exercise_cutoff }}
         run: python scripts/relay-smoke.py --url "$STUDIO_URL" --tcp-only --expect-provider "$EXPECT_PROVIDER"

@@ -98,12 +98,20 @@ func run() error {
 		cloudRelay.Check(ctx, time.Now().UTC())
 		log.Info("TURN provider", "provider", cloudRelay.Status().Provider, "reason", cloudRelay.Status().Reason)
 	}
-	serverICE := func() []webrtc.ICEServer {
+	serverICE := func() webrtc.Configuration {
 		out := append([]webrtc.ICEServer(nil), ice...)
+		policy := webrtc.ICETransportPolicyAll
 		if cloudRelay != nil {
-			out = append(out, cloudRelay.ICE()...)
+			cloud := cloudRelay.ICE()
+			out = append(out, cloud...)
+			// This installation can be behind NAT without usable port forwarding.
+			// A Cloudflare relay on the SFU side guarantees a public media route;
+			// early private host candidates must not race late relay candidates.
+			if len(cloud) > 0 {
+				policy = webrtc.ICETransportPolicyRelay
+			}
 		}
-		return out
+		return webrtc.Configuration{ICEServers: out, ICETransportPolicy: policy}
 	}
 	clientICE := func() []webrtc.ICEServer {
 		out := append([]webrtc.ICEServer(nil), ice...)
@@ -117,7 +125,7 @@ func run() error {
 		}
 		return out
 	}
-	engine, err := sfu.NewEngine(sfu.Options{ICEServers: ice, ICEProvider: serverICE, PublicIPs: cfg.PublicIPs, UDPPort: cfg.UDPPort,
+	engine, err := sfu.NewEngine(sfu.Options{ICEServers: ice, ICEConfiguration: serverICE, PublicIPs: cfg.PublicIPs, UDPPort: cfg.UDPPort,
 		UDPPortMin: uint16(cfg.UDPPortMin), UDPPortMax: uint16(cfg.UDPPortMax), Logger: log})
 	if err != nil {
 		return err

@@ -3,8 +3,64 @@ package sfu
 import (
 	"context"
 	"github.com/pion/webrtc/v4"
+	"strings"
 	"testing"
 )
+
+func TestTrickleAnswersAdvertiseLateCandidates(t *testing.T) {
+	for _, incremental := range []bool{false, true} {
+		e, err := NewEngine(Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		client, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = client.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		offer, err := client.CreateOffer(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var callbacks []func(webrtc.ICECandidateInit)
+		if incremental {
+			callbacks = append(callbacks, func(webrtc.ICECandidateInit) {})
+		}
+		stream, answer, err := e.Publish(context.Background(), "capability", "test", "camera", offer, callbacks...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(answer.SDP, "a=ice-options:trickle") != incremental {
+			t.Fatalf("trickle advertisement mismatch: incremental=%v", incremental)
+		}
+		stream.Close()
+		client.Close()
+		e.Close()
+	}
+}
+
+func TestProviderChangeRestoresDirectPolicyForLocalFallback(t *testing.T) {
+	policy := webrtc.ICETransportPolicyRelay
+	e, err := NewEngine(Options{ICEConfiguration: func() webrtc.Configuration { return webrtc.Configuration{ICETransportPolicy: policy} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	for _, want := range []webrtc.ICETransportPolicy{webrtc.ICETransportPolicyRelay, webrtc.ICETransportPolicyAll} {
+		policy = want
+		pc, err := e.newPC()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pc.GetConfiguration().ICETransportPolicy != want {
+			t.Fatal("media provider policy did not change")
+		}
+		pc.Close()
+	}
+}
 
 func TestCancelledGatheringReturnsNoAnswer(t *testing.T) {
 	e, err := NewEngine(Options{})
