@@ -342,7 +342,11 @@ func (h *Hub) join(p *Peer, m Msg) error {
 		return errFull
 	}
 	p.room = r
-	lobby := role == RoleGuest && r.state.Lobby
+	rejoin := role == RoleGuest && m.Rejoin != "" && r.passes[m.Rejoin]
+	if rejoin {
+		p.pass = m.Rejoin
+	}
+	lobby := role == RoleGuest && r.state.Lobby && !rejoin
 	if lobby {
 		r.waiting[p.ID] = p
 	} else {
@@ -362,12 +366,39 @@ func (h *Hub) join(p *Peer, m Msg) error {
 	return nil
 }
 
+// admit moves one waiting guest (or all of them when id is "") into the
+// room's backstage and welcomes them. It returns how many got in.
+func (h *Hub) admit(r *Room, id string) int {
+	r.mu.Lock()
+	var in []*Peer
+	for wid, p := range r.waiting {
+		if id != "" && wid != id {
+			continue
+		}
+		delete(r.waiting, wid)
+		p.mu.Lock()
+		p.Role = RoleGuest
+		p.mu.Unlock()
+		r.peers[wid] = p
+		in = append(in, p)
+	}
+	r.mu.Unlock()
+	for _, p := range in {
+		r.toHosts(Msg{Type: "knock-cancel", PeerID: p.ID, Action: "admitted"})
+		h.welcome(p)
+	}
+	return len(in)
+}
+
 func (h *Hub) welcome(p *Peer) {
 	r := p.room
 	st := r.Snapshot()
 	role := p.role()
 	w := Msg{Type: "welcome", PeerID: p.ID, Role: role, Room: r.ID, State: &st,
 		Peers: r.Peers(), Streams: r.Streams(), Chat: r.history(), ICE: h.o.ICE}
+	if role == RoleGuest {
+		w.Rejoin = r.issuePass(p)
+	}
 	if role == RoleHost {
 		w.Keys = &Keys{Room: r.ID, ViewKey: r.viewKey, PushKey: r.pushKey}
 		r.mu.RLock()
@@ -571,31 +602,31 @@ func (h *Hub) hostAction(host *Peer, m Msg) error {
 	r := host.room
 	switch m.Type {
 	case "admit", "deny":
+		if m.Type == "admit" {
+			if h.admit(r, m.Target) == 0 {
+				return errors.New("nobody waiting with that id")
+			}
+			return nil
+		}
 		r.mu.Lock()
 		p := r.waiting[m.Target]
 		delete(r.waiting, m.Target)
-		if p != nil && m.Type == "admit" {
-			p.mu.Lock()
-			p.Role = RoleGuest
-			p.mu.Unlock()
-			r.peers[p.ID] = p
-		}
 		r.mu.Unlock()
 		if p == nil {
 			return errors.New("nobody waiting with that id")
 		}
-		if m.Type == "deny" {
-			p.Send(Msg{Type: "denied"})
-			p.close()
-			return nil
-		}
-		h.welcome(p)
+		p.Send(Msg{Type: "denied"})
+		p.close()
+		return nil
+	case "admit-all":
+		h.admit(r, "")
 		return nil
 	case "kick":
 		p := h.peerByID(r, m.Target)
 		if p == nil {
 			return errors.New("peer not found")
 		}
+		r.revokePass(p)
 		p.Send(Msg{Type: "kicked"})
 		time.AfterFunc(200*time.Millisecond, p.close)
 		return nil
@@ -649,6 +680,14 @@ func (h *Hub) setState(r *Room, m Msg) error {
 	var patch map[string]json.RawMessage
 	if err := json.Unmarshal(m.Value, &patch); err != nil {
 		return errors.New("state value must be an object")
+	}
+	if _, ok := patch["lobby"]; ok {
+		// Turning the waiting room off must not strand whoever is in it.
+		defer func() {
+			if !r.Snapshot().Lobby {
+				h.admit(r, "")
+			}
+		}()
 	}
 	return r.Update(func(st *State) error {
 		for k, v := range patch {

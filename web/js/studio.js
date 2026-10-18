@@ -114,7 +114,7 @@ sig.on("stream-added", (m) => addRemote(m.info.id, m.info.kind, m.info.owner, m.
 sig.on("stream-removed", (m) => removeSource(m.stream));
 sig.on("chat", (m) => addChat(m.comment));
 sig.on("knock", (m) => addKnock(m));
-sig.on("knock-cancel", (m) => { const it = $(`#knocks [data-peer="${CSS.escape(m.peerId)}"]`); if (it) { it.remove(); toast("Un invitado dejó la sala de espera"); } });
+sig.on("knock-cancel", (m) => { if (knocks.delete(m.peerId)) { renderKnocks(); if (m.action !== "admitted") toast("Un invitado dejó la sala de espera"); } });
 sig.on("reaction", (m) => flyReaction(m.text));
 sig.on("restream", (m) => { const r = m.state.restream; $("#restreamStats").textContent = r ? (r.stats || "") + (r.lastError ? " · " + r.lastError : "") : ""; });
 sig.on("error", (m) => toast(m.error, "err"));
@@ -401,14 +401,36 @@ function renderPeople() {
   if (!box.children.length) box.append(el("p", { class: "muted", text: "Nadie más todavía." }));
 }
 
+// Guests in the waiting room: shown over the backstage and in the People tab,
+// with a button to pass each one (or everyone) to the backstage.
+const knocks = new Map(); // peerId -> name
 function addKnock(m) {
-  toast(`${m.name} quiere entrar`);
-  if ($(`#knocks [data-peer="${CSS.escape(m.peerId)}"]`)) return; // re-sent on reconnect
-  const it = el("div", { class: "item", "data-peer": m.peerId }, el("span", { class: "grow", text: "🚪 " + m.name }),
-    el("button", { class: "small primary", onclick: () => { sig.send({ type: "admit", target: m.peerId }); it.remove(); }, text: "Admitir" }),
-    el("button", { class: "small", onclick: () => { sig.send({ type: "deny", target: m.peerId }); it.remove(); }, text: "Rechazar" }));
-  $("#knocks").append(it);
-  activateTab("people");
+  if (knocks.has(m.peerId)) return; // re-sent on reconnect
+  knocks.set(m.peerId, m.name);
+  toast(`${m.name} está en la sala de espera`);
+  renderKnocks();
+}
+function letIn(id) {
+  const name = knocks.get(id);
+  knocks.delete(id); renderKnocks();
+  sig.send({ type: "admit", target: id });
+  toast(`${name} pasó al backstage`);
+}
+function letOut(id) { knocks.delete(id); renderKnocks(); sig.send({ type: "deny", target: id }); }
+function letAllIn() { knocks.clear(); renderKnocks(); sig.send({ type: "admit-all" }); toast("Todos pasaron al backstage"); }
+function renderKnocks() {
+  const row = (id, name) => el("div", { class: "item knock", "data-peer": id },
+    el("span", { class: "grow", text: "🚪 " + name }),
+    el("button", { class: "small primary", onclick: () => letIn(id), text: "Pasar al backstage" }),
+    el("button", { class: "small", onclick: () => letOut(id), text: "Rechazar" }));
+  const list = [...knocks];
+  $("#knocks").replaceChildren(...list.map(([id, n]) => row(id, n)));
+  const wr = $("#waitroom");
+  wr.classList.toggle("hidden", !list.length);
+  wr.replaceChildren(
+    el("div", { class: "waithead" }, el("b", { text: `Sala de espera · ${list.length}` }), el("span", { class: "grow" }),
+      list.length > 1 ? el("button", { class: "small primary", onclick: letAllIn, text: "Pasar a todos" }) : null),
+    ...list.map(([id, n]) => row(id, n)));
 }
 
 // ---------- layouts ----------

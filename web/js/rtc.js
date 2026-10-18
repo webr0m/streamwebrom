@@ -55,6 +55,12 @@ export class Signal extends EventTarget {
   }
 
   connect(joinMsg) {
+    // An admitted guest gets a rejoin pass so reconnects (and reloads in the
+    // same tab) skip the waiting room instead of getting stuck in it.
+    const passKey = joinMsg.room ? `swr.rejoin.${joinMsg.room}` : "";
+    if (joinMsg.role === "guest" && !joinMsg.rejoin && passKey) {
+      try { const p = sessionStorage.getItem(passKey); if (p) joinMsg = { ...joinMsg, rejoin: p }; } catch {}
+    }
     this.joinMsg = joinMsg;
     return new Promise((resolve, reject) => {
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -64,8 +70,13 @@ export class Signal extends EventTarget {
       ws.onopen = () => { this.retry = 0; ws.send(JSON.stringify(joinMsg)); };
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
-        if (m.type === "welcome") { welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.flush(); resolve(m); }
-        if (m.type === "waiting") resolve(m);
+        if (m.type === "welcome") {
+          welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.flush(); resolve(m);
+          if (m.rejoin) { this.joinMsg = { ...this.joinMsg, rejoin: m.rejoin }; try { passKey && sessionStorage.setItem(passKey, m.rejoin); } catch {} }
+        }
+        // Waiting in the lobby counts as connected: if the socket drops while
+        // waiting, reconnect and knock again instead of leaving a dead page.
+        if (m.type === "waiting") { welcomed = true; this.everWelcomed = true; resolve(m); }
         if (m.type === "error" && !welcomed && !m.reqId) { reject(new Error(m.error)); }
         if (m.reqId && this.pending.has(m.reqId)) {
           const p = this.pending.get(m.reqId);

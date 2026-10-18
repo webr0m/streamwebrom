@@ -547,3 +547,42 @@ func TestRecordAllWithoutSources(t *testing.T) {
 		t.Fatalf("unexpected error %q", m.Error)
 	}
 }
+
+// The host can pass everyone waiting to the backstage at once, turning the
+// waiting room off lets everyone in, and an admitted guest who reconnects
+// with their rejoin pass skips the waiting room.
+func TestLobbyAdmitAllAndRejoin(t *testing.T) {
+	e := newEnv(t)
+	k := e.createRoom(t, `{"room":"wait-room","lobby":true}`)
+	host := e.dial(t)
+	host.send(map[string]any{"type": "join", "room": "wait-room", "role": "host", "key": k.HostKey})
+	host.expect("welcome")
+
+	a, b := e.dial(t), e.dial(t)
+	a.send(map[string]any{"type": "join", "room": "wait-room", "name": "Ana"})
+	a.expect("waiting")
+	host.expect("knock")
+	b.send(map[string]any{"type": "join", "room": "wait-room", "name": "Beto"})
+	b.expect("waiting")
+	host.expect("knock")
+	host.send(map[string]any{"type": "admit-all"})
+	wa := a.expect("welcome")
+	b.expect("welcome")
+	if wa.Rejoin == "" {
+		t.Fatal("admitted guest got no rejoin pass")
+	}
+
+	// Reconnect with the pass: straight in, no knock.
+	_ = a.c.Close()
+	a2 := e.dial(t)
+	a2.send(map[string]any{"type": "join", "room": "wait-room", "name": "Ana", "rejoin": wa.Rejoin})
+	a2.expect("welcome")
+	// A made-up pass still waits.
+	c := e.dial(t)
+	c.send(map[string]any{"type": "join", "room": "wait-room", "name": "Caro", "rejoin": "nope"})
+	c.expect("waiting")
+	host.expect("knock")
+	// Turning the waiting room off lets Caro in.
+	host.send(map[string]any{"type": "state", "value": map[string]any{"lobby": false}})
+	c.expect("welcome")
+}

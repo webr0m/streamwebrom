@@ -183,6 +183,9 @@ label.row { color: var(--text); font-size: 13px; margin-bottom: 0; }
 .modmenu .modbar button:hover { background: var(--panel-3); }
 .modbar button.off { background: var(--bad) !important; color: #fff; }
 
+.waitroom { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin-bottom: 10px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); flex-shrink: 0; }
+.waitroom .waithead { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.waitroom .item { display: flex; align-items: center; gap: 8px; }
 .backstage { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 236px)); gap: 10px; flex-shrink: 0; padding-bottom: 4px; }
 .backstage .empty { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 18px; border: 1px dashed var(--line-2); border-radius: 10px; font-size: 13px; }
 .tile { position: relative; background: #000; border-radius: 10px; overflow: hidden; aspect-ratio: 16/9; border: 2px solid var(--line); transition: border-color .15s, box-shadow .15s; }

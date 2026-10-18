@@ -122,10 +122,23 @@ async function join() {
 }
 if ((params.has("autostart") || params.has("autojoin") || params.has("aj")) && $("#name").value) setTimeout(join, 800);
 
-sig.on("welcome", (m) => { if (!$("#waiting").classList.contains("hidden")) enter(m); });
+let entered = false, rewait = false;
+sig.on("welcome", (m) => {
+  if (rewait) { rewait = false; $("#waiting").classList.add("hidden"); $("#call").classList.remove("hidden"); resume(m); return; }
+  if (!entered && !$("#waiting").classList.contains("hidden")) enter(m);
+});
 sig.on("denied", () => { document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card" }, el("h2", { text: "El anfitrión no aprobó tu ingreso." })))); });
 sig.on("kicked", () => { sig.close(); leave("El anfitrión te retiró de la sala."); });
-sig.on("reconnected", async (m) => {
+sig.on("reconnected", (m) => {
+  if (!entered) return; // still in the waiting room: the server re-sent "waiting" and the host sees the knock again
+  if (m.type === "waiting") { // the server forgot us (e.g. it restarted): wait to be let back in
+    rewait = true;
+    $("#call").classList.add("hidden"); $("#waiting").classList.remove("hidden");
+    return;
+  }
+  resume(m);
+});
+async function resume(m) {
   // The server forgot our old publications: publish fresh ones.
   myId = m.peerId;
   try { pub?.pc.close(); } catch {}
@@ -135,9 +148,11 @@ sig.on("reconnected", async (m) => {
   for (const id of [...remotes.keys()]) unwatch(id);
   for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
   sendMedia();
-});
+}
 
 async function enter(m) {
+  if (entered) return;
+  entered = true;
   myId = m.peerId;
   state = m.state || {};
   $("#pre").classList.add("hidden"); $("#waiting").classList.add("hidden"); $("#call").classList.remove("hidden");

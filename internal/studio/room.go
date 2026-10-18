@@ -113,6 +113,7 @@ type Room struct {
 	mu       sync.RWMutex
 	peers    map[string]*Peer
 	waiting  map[string]*Peer
+	passes   map[string]bool // rejoin passes of admitted guests (reconnects skip the lobby)
 	streams  map[string]*sfu.Stream
 	state    State
 	chat     []Comment
@@ -150,7 +151,7 @@ func newRoom(id, guestPassword string, lobby bool, title string) (*Room, Keys, e
 	r := &Room{
 		ID: id, Created: time.Now(), hostHash: hh,
 		viewKey: token(16), pushKey: token(20),
-		peers: map[string]*Peer{}, waiting: map[string]*Peer{}, streams: map[string]*sfu.Stream{},
+		peers: map[string]*Peer{}, waiting: map[string]*Peer{}, passes: map[string]bool{}, streams: map[string]*sfu.Stream{},
 		emptyAt: time.Now(),
 		state: State{Title: title, Layout: "grid", Lobby: lobby, Scenes: map[string]Scene{},
 			Labels: map[string]string{},
@@ -381,3 +382,28 @@ func (r *Room) history() []Comment {
 }
 
 var errFull = errors.New("room is full")
+
+// maxPasses bounds the rejoin passes a room remembers.
+const maxPasses = 1000
+
+// issuePass returns the guest's rejoin pass, minting one on first welcome.
+func (r *Room) issuePass(p *Peer) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p.pass == "" || !r.passes[p.pass] {
+		if len(r.passes) >= maxPasses {
+			r.passes = map[string]bool{}
+		}
+		p.pass = token(24)
+		r.passes[p.pass] = true
+	}
+	return p.pass
+}
+
+// revokePass makes a kicked guest go through the lobby again.
+func (r *Room) revokePass(p *Peer) {
+	r.mu.Lock()
+	delete(r.passes, p.pass)
+	p.pass = ""
+	r.mu.Unlock()
+}

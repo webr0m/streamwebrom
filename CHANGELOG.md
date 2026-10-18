@@ -1,5 +1,13 @@
 # Cambios
 
+## v1.3.1
+- **Sala de espera arreglada:** había invitados que se quedaban “Esperando al anfitrión…” para siempre.
+  - Si la conexión del invitado se cortaba mientras esperaba, la página no reconectaba y el anfitrión perdía su aviso. Ahora reconecta sola y vuelve a tocar la puerta.
+  - Un invitado ya admitido que se reconectaba (Wi-Fi, túnel, recargar la pestaña) volvía a caer en la sala de espera. Ahora recibe un pase de reingreso y vuelve directo al backstage (expulsar lo revoca).
+  - Desactivar la sala de espera ahora deja pasar a todos los que estaban esperando.
+- **Sala de espera visible en el estudio:** recuadro sobre el backstage con cada invitado en espera, botones *Pasar al backstage* / *Rechazar* y *Pasar a todos*. También sigue en la pestaña Gente.
+- Nuevo mensaje `admit-all` y test `TestLobbyAdmitAllAndRejoin`.
+
 ## v1.3.0
 - **Nueva interfaz estilo StreamYard** (solo cambia el aspecto; todas las opciones, botones, atajos e IDs se mantienen): barra superior con título, *Grabar* y *Transmitir*; columna izquierda de escenas (Programa + escenas 2–8) con vista previa; lienzo central con tira de layouts dibujados; backstage con botón “Al escenario” al pasar el cursor; barra inferior de botones redondos (Monitor, Cámara, Pantalla, Medio, Pantalla virtual, Ajustes, Invitar); panel derecho con riel vertical de íconos (Chat, Banners, Marca, Destinos, Escenas, OBS, Gente); menú *Producción* con la moderación. Invitado, portada y diálogos con el mismo tema. Íconos Feather (MIT) como máscaras CSS, sin CDN.
 - **App de Windows (.NET 8)** rediseñada con el mismo estilo: barra superior con estado y *Abrir estudio*, secciones en tarjetas (Enlaces, Servidor, Red, Publicar en internet, Registro).

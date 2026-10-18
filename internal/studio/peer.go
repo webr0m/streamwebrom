@@ -24,6 +24,7 @@ type Msg struct {
 	Key      string `json:"key,omitempty"`      // host key or view key
 	Password string `json:"password,omitempty"` // guest password
 	PeerID   string `json:"peerId,omitempty"`
+	Rejoin   string `json:"rejoin,omitempty"` // pass given to an admitted guest so a reconnect skips the lobby
 
 	// media
 	Stream string                     `json:"stream,omitempty"`
@@ -62,6 +63,7 @@ type Peer struct {
 	Role Role
 
 	room *Room
+	pass string // rejoin pass (guests), guarded by room.mu
 	conn *websocket.Conn
 	out  chan []byte
 	lim  *rate.Limiter
