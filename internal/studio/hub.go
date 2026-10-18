@@ -487,6 +487,21 @@ func (h *Hub) leave(p *Peer) {
 	routeRefresh := p.routeRefresh
 	p.pubs, p.subs = map[string]*sfu.Stream{}, map[string]*sfu.Subscriber{}
 	p.mu.Unlock()
+	// Network teardown can block on pending TURN dials. Release every owned
+	// stream ID first so an authenticated reconnect can immediately republish.
+	// Pointer checks keep a delayed old OnClose from removing a replacement.
+	var removed []string
+	r.mu.Lock()
+	for id, s := range pubs {
+		if r.streams[id] == s {
+			delete(r.streams, id)
+			removed = append(removed, id)
+		}
+	}
+	r.mu.Unlock()
+	for _, id := range removed {
+		r.broadcast(Msg{Type: "stream-removed", Stream: id}, "")
+	}
 	for _, s := range pubs {
 		s.Close()
 	}

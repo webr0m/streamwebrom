@@ -8,6 +8,7 @@
 - Estimación local conservadora del tráfico de medios, persistente y activa solo con Cloudflare, para anticipar el corte cuando la analítica del proveedor lleva retraso.
 - Corte mensual preventivo persistente (900 GB por defecto); si falla la analítica o la API, se elige el local y se intenta revocar las credenciales emitidas. No es un límite de facturación: hay retraso/muestreo y la cuota se comparte con otros servicios Realtime.
 - Reconexión de sesiones WebSocket y cierre de WHIP/WHEP para retirar asignaciones del proveedor anterior. Las fuentes del navegador conservan sus posiciones durante la gracia de reconexión; grabaciones y salidas pueden necesitar reanudación.
+- Libera los identificadores de las fuentes antes del cierre de conexiones TURN lentas, evitando «stream id in use» al reconectar un invitado.
 - Panel Windows para ambos relés con secretos cifrados por usuario, soporte de proxy TLS externo y diagnóstico del proveedor activo.
 - Binarios de escritorio y clientes móviles 1.6.0 (build 10600); iOS continúa como build de simulador sin firma para dispositivos.
 
