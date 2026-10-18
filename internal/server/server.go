@@ -31,11 +31,13 @@ import (
 
 // Server is the HTTP front.
 type Server struct {
-	cfg    config.Config
-	hub    *studio.Hub
-	static fs.FS
-	log    *slog.Logger
-	start  time.Time
+	cfg         config.Config
+	hub         *studio.Hub
+	static      fs.FS
+	log         *slog.Logger
+	start       time.Time
+	iceProvider func() []webrtc.ICEServer
+	RelayStatus func() map[string]string
 
 	mu       sync.Mutex
 	sessions map[string]session // WHIP/WHEP resource id -> scoped resource
@@ -121,9 +123,13 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // New creates the server.
-func New(cfg config.Config, hub *studio.Hub, static fs.FS, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, hub: hub, static: static, log: log, start: time.Now(), sessions: map[string]session{},
+func New(cfg config.Config, hub *studio.Hub, static fs.FS, log *slog.Logger, iceProvider ...func() []webrtc.ICEServer) *Server {
+	s := &Server{cfg: cfg, hub: hub, static: static, log: log, start: time.Now(), sessions: map[string]session{},
 		ipRate: map[string]*rate.Limiter{}, ipConns: map[string]int{}}
+	if len(iceProvider) > 0 {
+		s.iceProvider = iceProvider[0]
+	}
+	return s
 }
 
 // CheckOrigin returns the WebSocket origin policy for cfg.
@@ -237,6 +243,9 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) iceServers() []webrtc.ICEServer {
+	if s.iceProvider != nil {
+		return s.iceProvider()
+	}
 	var out []webrtc.ICEServer
 	if len(s.cfg.STUN) > 0 {
 		out = append(out, webrtc.ICEServer{URLs: s.cfg.STUN})
@@ -248,9 +257,26 @@ func (s *Server) iceServers() []webrtc.ICEServer {
 }
 
 func (s *Server) clientConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	_, ffmpegErr := exec.LookPath(s.cfg.FFmpeg)
+	var relay map[string]string
+	if s.RelayStatus != nil {
+		relay = s.RelayStatus()
+	}
 	writeJSON(w, 200, map[string]any{"ice": s.iceServers(), "publicURL": s.cfg.PublicURL, "version": s.cfg.Version, "layouts": studio.Layouts,
-		"capabilities": map[string]bool{"multistream": ffmpegErr == nil, "recording": true, "trickleICE": true}})
+		"relay": relay, "capabilities": map[string]bool{"multistream": ffmpegErr == nil, "recording": true, "trickleICE": true}})
+}
+
+// WHIP/WHEP transports must also release allocations on a provider cutoff.
+// Their clients reconnect according to their own retry policy.
+func (s *Server) RefreshRoutes() {
+	s.mu.Lock()
+	sessions := s.sessions
+	s.sessions = map[string]session{}
+	s.mu.Unlock()
+	for _, session := range sessions {
+		session.close()
+	}
 }
 
 type createReq struct {

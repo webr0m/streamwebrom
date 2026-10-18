@@ -10,13 +10,18 @@ from playwright.sync_api import sync_playwright, expect
 parser=argparse.ArgumentParser()
 parser.add_argument('--url',default='http://localhost:18444')
 parser.add_argument('--browser')
+parser.add_argument('--tcp-only', action='store_true', help='Filter native relay URLs to test TURN/TCP explicitly')
+parser.add_argument('--expect-provider', choices=['cloudflare','local'])
 args=parser.parse_args()
 
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required'])
     ctx=browser.new_context(permissions=['camera','microphone'],service_workers='block')
+    if args.expect_provider:
+        assert ctx.request.get(args.url+'/api/config').json().get('relay',{}).get('provider') == args.expect_provider
     ctx.add_init_script("""const NativePC=RTCPeerConnection;
-      window.RTCPeerConnection=class extends NativePC {constructor(c){super({...c,iceTransportPolicy:'relay'});}};""")
+      window.RTCPeerConnection=class extends NativePC {constructor(c){super({...c,iceTransportPolicy:'relay',
+        iceServers:(c?.iceServers||[]).map(s=>({...s,urls:(Array.isArray(s.urls)?s.urls:[s.urls]).filter(u=>!TCP_ONLY||u.includes('transport=tcp'))})).filter(s=>s.urls.length)});}};""".replace('TCP_ONLY',str(args.tcp_only).lower()))
     errors=[]
     host=ctx.new_page();host.on('pageerror',lambda e:errors.append(str(e)))
     host.goto(args.url+'/diagnostics');host.locator('#relay').click()
@@ -43,7 +48,7 @@ with sync_playwright() as pw:
       const pair=stats.get(t.selectedCandidatePairId),local=stats.get(pair.localCandidateId);
       return {type:local.candidateType,relayProtocol:local.relayProtocol};
     }""")
-    assert relay['type']=='relay' and relay['relayProtocol']=='tcp',relay
+    assert relay['type']=='relay' and relay['relayProtocol'] in ('tcp','tls'),relay
     assert not errors,errors
     print(json.dumps({'ok':True,'checks':['TURN allocation','relay-only publish','relay-only subscribe','decoded video over TURN/TCP'],'selectedCandidate':relay,'pageErrors':errors}))
     for page in [host,guest]:page.evaluate('pub.stop();media.getTracks().forEach(t=>t.stop());sig.close()')

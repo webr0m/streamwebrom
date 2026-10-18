@@ -145,6 +145,31 @@ func TestPagesAndHeaders(t *testing.T) {
 	}
 }
 
+func TestProviderChangeReconnectsAuthenticatedPeers(t *testing.T) {
+	e := newEnv(t)
+	k := e.createRoom(t, `{"room":"relay-refresh","lobby":false}`)
+	host := e.dial(t)
+	host.send(map[string]any{"type": "join", "room": k.Room, "role": "host", "key": k.HostKey})
+	host.expect("welcome")
+	guest := e.dial(t)
+	guest.send(map[string]any{"type": "join", "room": k.Room, "role": "guest", "name": "mobile"})
+	welcome := guest.expect("welcome")
+	e.hub.RefreshRoutes()
+	for _, peer := range []*wsClient{host, guest} {
+		_ = peer.c.SetReadDeadline(time.Now().Add(time.Second))
+		for {
+			if _, _, err := peer.c.ReadMessage(); err != nil {
+				break
+			}
+		}
+	}
+	resumed := e.dial(t)
+	resumed.send(map[string]any{"type": "join", "room": k.Room, "role": "guest", "name": "mobile", "rejoin": welcome.Rejoin})
+	if resumed.expect("welcome").Role != studio.RoleGuest {
+		t.Fatal("route change lost admission")
+	}
+}
+
 func TestRoomValidation(t *testing.T) {
 	e := newEnv(t)
 	for _, bad := range []string{`{"room":"A B"}`, `{"room":"../etc"}`, `{"room":"x"}`} {

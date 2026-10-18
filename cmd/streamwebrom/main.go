@@ -28,6 +28,7 @@ import (
 	"github.com/webr0m/streamwebrom/internal/sfu"
 	"github.com/webr0m/streamwebrom/internal/studio"
 	"github.com/webr0m/streamwebrom/internal/tlsutil"
+	"github.com/webr0m/streamwebrom/internal/turnrelay"
 	"github.com/webr0m/streamwebrom/web"
 )
 
@@ -61,6 +62,8 @@ func run() error {
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	ice := []webrtc.ICEServer{}
 	if len(cfg.STUN) > 0 {
@@ -69,18 +72,60 @@ func run() error {
 	if len(cfg.TURN) > 0 {
 		ice = append(ice, webrtc.ICEServer{URLs: cfg.TURN, Username: cfg.TURNUser, Credential: cfg.TURNPass})
 	}
-	engine, err := sfu.NewEngine(sfu.Options{ICEServers: ice, PublicIPs: cfg.PublicIPs, UDPPort: cfg.UDPPort,
+	var localRelay *turnrelay.Server
+	if cfg.RelayListen != "" {
+		peers := []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP(cfg.RelayPublicIP)}
+		if addrs, e := net.InterfaceAddrs(); e == nil {
+			for _, addr := range addrs {
+				if ip, _, e := net.ParseCIDR(addr.String()); e == nil && ip.To4() != nil {
+					peers = append(peers, ip)
+				}
+			}
+		}
+		localRelay, err = turnrelay.Start(turnrelay.Options{Listen: cfg.RelayListen, URLs: cfg.RelayURLs, TCPAlternate: cfg.RelayTCPAlternate, PublicIP: cfg.RelayPublicIP, Secret: cfg.RelaySecret, MinPort: cfg.RelayMin, MaxPort: cfg.RelayMax, SFUPort: cfg.UDPPort, PeerIPs: peers})
+		if err != nil {
+			return fmt.Errorf("local TURN: %w", err)
+		}
+		defer localRelay.Close()
+		log.Info("local TURN ready", "listen", cfg.RelayListen, "relay_min", cfg.RelayMin, "relay_max", cfg.RelayMax)
+	}
+	var cloudRelay *turnrelay.Cloudflare
+	if cfg.CFAccount != "" {
+		cloudRelay, err = turnrelay.NewCloudflare(turnrelay.CloudflareOptions{AccountID: cfg.CFAccount, KeyID: cfg.CFKeyID, KeyToken: cfg.CFKeyToken, AnalyticsToken: cfg.CFAnalyticsToken, BudgetBytes: cfg.CFBudget, StateFile: filepath.Join(cfg.DataDir, "turn-quota.json")})
+		if err != nil {
+			return err
+		}
+		cloudRelay.Check(ctx, time.Now().UTC())
+		log.Info("TURN provider", "provider", cloudRelay.Status().Provider, "reason", cloudRelay.Status().Reason)
+	}
+	serverICE := func() []webrtc.ICEServer {
+		out := append([]webrtc.ICEServer(nil), ice...)
+		if cloudRelay != nil {
+			out = append(out, cloudRelay.ICE()...)
+		}
+		return out
+	}
+	clientICE := func() []webrtc.ICEServer {
+		out := append([]webrtc.ICEServer(nil), ice...)
+		var cloud []webrtc.ICEServer
+		if cloudRelay != nil {
+			cloud = cloudRelay.ICE()
+			out = append(out, cloud...)
+		}
+		if localRelay != nil && len(cloud) == 0 {
+			out = append(out, localRelay.ICE()...)
+		}
+		return out
+	}
+	engine, err := sfu.NewEngine(sfu.Options{ICEServers: ice, ICEProvider: serverICE, PublicIPs: cfg.PublicIPs, UDPPort: cfg.UDPPort,
 		UDPPortMin: uint16(cfg.UDPPortMin), UDPPortMax: uint16(cfg.UDPPortMax), Logger: log})
 	if err != nil {
 		return err
 	}
 	defer engine.Close()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	hub := studio.NewHub(ctx, studio.Options{
-		Engine: engine, Recorder: record.New(cfg.DataDir, cfg.FFmpeg), FFmpeg: cfg.FFmpeg, ICE: ice,
+		Engine: engine, Recorder: record.New(cfg.DataDir, cfg.FFmpeg), FFmpeg: cfg.FFmpeg, ICE: ice, ICEProvider: clientICE,
 		MaxRooms: cfg.MaxRooms, MaxPeers: cfg.MaxPeers, MaxMsgBytes: cfg.MaxMsgBytes,
 		MsgRate: cfg.MsgRate, MsgBurst: cfg.MsgBurst, RoomTTL: cfg.IdleRoomTTL, RejoinGrace: 30 * time.Second,
 		CheckOrigin: server.CheckOrigin(cfg), Logger: log,
@@ -90,9 +135,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	front := server.New(cfg, hub, static, log, clientICE)
+	if cloudRelay != nil {
+		front.RelayStatus = func() map[string]string {
+			st := cloudRelay.Status()
+			return map[string]string{"provider": st.Provider, "reason": st.Reason}
+		}
+		go cloudRelay.Run(ctx, func() {
+			log.Info("TURN route changed", "provider", cloudRelay.Status().Provider, "reason", cloudRelay.Status().Reason)
+			hub.RefreshRoutes()
+			front.RefreshRoutes()
+		})
+	} else if localRelay != nil {
+		front.RelayStatus = func() map[string]string { return map[string]string{"provider": "local", "reason": "configured"} }
+	}
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           server.New(cfg, hub, static, log).Handler(),
+		Handler:           front.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    64 << 10,

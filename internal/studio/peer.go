@@ -73,15 +73,16 @@ type Peer struct {
 	out  chan []byte
 	lim  *rate.Limiter
 
-	mu     sync.Mutex
-	mic    bool
-	cam    bool
-	hand   bool
-	subs   map[string]*sfu.Subscriber
-	pubs   map[string]*sfu.Stream
-	icePCs map[string]*webrtc.PeerConnection
-	once   sync.Once
-	gone   chan struct{}
+	mu           sync.Mutex
+	mic          bool
+	cam          bool
+	routeRefresh bool
+	hand         bool
+	subs         map[string]*sfu.Subscriber
+	pubs         map[string]*sfu.Stream
+	icePCs       map[string]*webrtc.PeerConnection
+	once         sync.Once
+	gone         chan struct{}
 }
 
 func newPeer(conn *websocket.Conn, lim *rate.Limiter) *Peer {

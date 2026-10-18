@@ -1,0 +1,24 @@
+name: relay-connectivity
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        type: choice
+        options: [cloudflare, local]
+        required: true
+permissions:
+  contents: read
+jobs:
+  remote-relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install playwright==1.64.0
+      - run: playwright install --with-deps chromium
+      - name: actual video from an external network through the configured relay
+        env:
+          EXPECT_PROVIDER: ${{ inputs.provider }}
+        run: python scripts/relay-smoke.py --url https://stream.webrom.lat --tcp-only --expect-provider "$EXPECT_PROVIDER"

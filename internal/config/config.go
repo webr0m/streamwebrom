@@ -19,33 +19,44 @@ import (
 
 // Config holds every runtime setting.
 type Config struct {
-	Addr           string        // HTTP(S) listen address
-	PublicURL      string        // URL advertised in OBS links (optional)
-	TLSCert        string        // PEM certificate path
-	TLSKey         string        // PEM key path
-	SelfSigned     bool          // generate a self-signed cert for LAN use
-	AutocertDomain string        // Let's Encrypt domain (requires :443)
-	DataDir        string        // recordings, certs
-	STUN           []string      // STUN URLs handed to clients and server
-	TURN           []string      // TURN URLs (turn:host:port)
-	TURNUser       string        // TURN username
-	TURNPass       string        // TURN credential
-	PublicIPs      []string      // NAT 1:1 public IPs for the SFU
-	UDPPort        int           // single UDP port for all media (0 = ephemeral range)
-	UDPPortMin     int           // ephemeral range min
-	UDPPortMax     int           // ephemeral range max
-	FFmpeg         string        // ffmpeg binary for restreaming
-	AdminToken     string        // protects /api/admin/*
-	AllowedOrigins []string      // WebSocket origins allowed ("*" = any)
-	MaxRooms       int           // hard cap on concurrent rooms
-	MaxPeers       int           // per room
-	MaxMsgBytes    int64         // max signalling message size
-	MsgRate        float64       // signalling messages per second per peer
-	MsgBurst       int           // burst for MsgRate
-	IdleRoomTTL    time.Duration // empty rooms are reaped after this long
-	OpenBrowser    bool          // open the studio in the default browser at start
-	LogJSON        bool          // structured JSON logs
-	Version        string
+	Addr               string   // HTTP(S) listen address
+	PublicURL          string   // URL advertised in OBS links (optional)
+	TLSCert            string   // PEM certificate path
+	TLSKey             string   // PEM key path
+	SelfSigned         bool     // generate a self-signed cert for LAN use
+	AutocertDomain     string   // Let's Encrypt domain (requires :443)
+	DataDir            string   // recordings, certs
+	STUN               []string // STUN URLs handed to clients and server
+	TURN               []string // TURN URLs (turn:host:port)
+	TURNUser           string   // TURN username
+	TURNPass           string   // TURN credential
+	RelayListen        string   // optional native local TURN listener
+	RelayTCPAlternate  string
+	RelayPublicIP      string
+	RelaySecret        string
+	RelayURLs          []string
+	RelayMin, RelayMax int
+	CFAccount          string
+	CFKeyID            string
+	CFKeyToken         string
+	CFAnalyticsToken   string
+	CFBudget           uint64
+	PublicIPs          []string      // NAT 1:1 public IPs for the SFU
+	UDPPort            int           // single UDP port for all media (0 = ephemeral range)
+	UDPPortMin         int           // ephemeral range min
+	UDPPortMax         int           // ephemeral range max
+	FFmpeg             string        // ffmpeg binary for restreaming
+	AdminToken         string        // protects /api/admin/*
+	AllowedOrigins     []string      // WebSocket origins allowed ("*" = any)
+	MaxRooms           int           // hard cap on concurrent rooms
+	MaxPeers           int           // per room
+	MaxMsgBytes        int64         // max signalling message size
+	MsgRate            float64       // signalling messages per second per peer
+	MsgBurst           int           // burst for MsgRate
+	IdleRoomTTL        time.Duration // empty rooms are reaped after this long
+	OpenBrowser        bool          // open the studio in the default browser at start
+	LogJSON            bool          // structured JSON logs
+	Version            string
 }
 
 // Default returns a configuration that is safe to run on a desktop.
@@ -70,7 +81,7 @@ func Default() Config {
 func Load(args []string, getenv func(string) string) (Config, error) {
 	c := Default()
 	fs := flag.NewFlagSet("streamwebrom", flag.ContinueOnError)
-	var stun, turn, pubIPs, origins string
+	var stun, turn, pubIPs, origins, relayURLs string
 	fs.StringVar(&c.Addr, "addr", c.Addr, "listen address")
 	fs.StringVar(&c.PublicURL, "public-url", "", "public base URL used in generated links, e.g. https://live.example.com")
 	fs.StringVar(&c.TLSCert, "tls-cert", "", "TLS certificate (PEM)")
@@ -82,6 +93,18 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.StringVar(&turn, "turn", "", "comma separated TURN URLs")
 	fs.StringVar(&c.TURNUser, "turn-user", "", "TURN username")
 	fs.StringVar(&c.TURNPass, "turn-pass", "", "TURN password")
+	fs.StringVar(&c.RelayListen, "relay-listen", "", "native local TURN listen address (empty disables it)")
+	fs.StringVar(&c.RelayTCPAlternate, "relay-tcp-alternate", "", "optional additional local TURN TCP listener")
+	fs.StringVar(&c.RelayPublicIP, "relay-public-ip", "", "public IPv4 announced by the local TURN server")
+	fs.StringVar(&c.RelaySecret, "relay-secret", "", "local TURN shared secret (use SWR_RELAY_SECRET)")
+	fs.IntVar(&c.RelayMin, "relay-min", 49160, "first local TURN relay UDP port")
+	fs.IntVar(&c.RelayMax, "relay-max", 49223, "last local TURN relay UDP port")
+	fs.StringVar(&relayURLs, "relay-urls", "", "optional advertised TURN URLs for an external TCP/TLS proxy")
+	fs.StringVar(&c.CFAccount, "cf-account", "", "Cloudflare account ID for guarded TURN")
+	fs.StringVar(&c.CFKeyID, "cf-turn-key-id", "", "Cloudflare TURN key ID")
+	fs.StringVar(&c.CFKeyToken, "cf-turn-key-token", "", "Cloudflare TURN API token (use SWR_CF_TURN_KEY_TOKEN)")
+	fs.StringVar(&c.CFAnalyticsToken, "cf-analytics-token", "", "Cloudflare Account Analytics Read token (use SWR_CF_ANALYTICS_TOKEN)")
+	fs.Uint64Var(&c.CFBudget, "cf-turn-budget", 900000000000, "preventive monthly account TURN cutoff in bytes (not a billing cap)")
 	fs.StringVar(&pubIPs, "public-ip", "", "comma separated public IPs announced by the SFU (NAT 1:1)")
 	fs.IntVar(&c.UDPPort, "udp-port", 0, "single UDP port for all WebRTC media (recommended behind firewalls/Docker)")
 	fs.IntVar(&c.UDPPortMin, "udp-min", 0, "minimum ephemeral UDP port")
@@ -115,6 +138,7 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 		return c, err
 	}
 	c.STUN = splitList(stun)
+	c.RelayURLs = splitList(relayURLs)
 	c.TURN = splitList(turn)
 	c.PublicIPs = splitList(pubIPs)
 	c.AllowedOrigins = splitList(origins)
@@ -124,6 +148,16 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 // Validate checks the configuration for contradictions.
 func (c Config) Validate() error {
 	var errs []error
+	if c.CFAccount != "" || c.CFKeyID != "" || c.CFKeyToken != "" || c.CFAnalyticsToken != "" {
+		if c.CFAccount == "" || c.CFKeyID == "" || c.CFKeyToken == "" || c.CFAnalyticsToken == "" || c.CFBudget == 0 || c.RelayListen == "" {
+			errs = append(errs, errors.New("guarded Cloudflare TURN requires all Cloudflare settings and an enabled local relay"))
+		}
+	}
+	if c.RelayListen != "" {
+		if net.ParseIP(c.RelayPublicIP).To4() == nil || len(c.RelaySecret) < 32 || c.UDPPort == 0 || c.RelayMin < 1024 || c.RelayMax > 65534 || c.RelayMax < c.RelayMin || c.RelayMax-c.RelayMin > 1023 {
+			errs = append(errs, errors.New("local TURN requires public IPv4, secret >=32 bytes, fixed udp-port and a valid relay port range"))
+		}
+	}
 	if (c.TLSCert == "") != (c.TLSKey == "") {
 		errs = append(errs, errors.New("tls-cert and tls-key must be set together"))
 	}
@@ -175,7 +209,7 @@ func (c Config) Validate() error {
 			errs = append(errs, errors.New("public-url must be an http(s) origin without credentials, path, query or fragment"))
 		}
 	}
-	for _, u := range c.TURN {
+	for _, u := range append(append([]string(nil), c.TURN...), c.RelayURLs...) {
 		if !strings.HasPrefix(u, "turn:") && !strings.HasPrefix(u, "turns:") {
 			errs = append(errs, fmt.Errorf("TURN url %q must start with turn: or turns:", u))
 		}

@@ -7,8 +7,8 @@ android {
         applicationId 'lat.webrom.streamwebrom'
         minSdk 26
         targetSdk 35
-        versionCode 10502
-        versionName '1.5.2'
+        versionCode 10600
+        versionName '1.6.0'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17

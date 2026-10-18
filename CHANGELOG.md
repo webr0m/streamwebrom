@@ -1,5 +1,14 @@
 # Cambios
 
+## v1.6.0 — Cloudflare TURN y respaldo local
+
+- TURN nativo con autenticación temporal, rango de asignación acotado y destinos restringidos al puerto de medios del propio SFU.
+- Cloudflare: claves maestras solo en backend, credenciales de 24 horas, renovación a las 12 horas y consulta de consumo TURN de toda la cuenta cada 30 segundos.
+- Corte mensual preventivo persistente (900 GB por defecto); si falla la analítica o la API, se elige el local y se intenta revocar las credenciales emitidas. No es un límite de facturación: hay retraso/muestreo y la cuota se comparte con otros servicios Realtime.
+- Reconexión de sesiones WebSocket y cierre de WHIP/WHEP para retirar asignaciones del proveedor anterior. Las fuentes del navegador conservan sus posiciones durante la gracia de reconexión; grabaciones y salidas pueden necesitar reanudación.
+- Panel Windows para ambos relés con secretos cifrados por usuario, soporte de proxy TLS externo y diagnóstico del proveedor activo.
+- Binarios de escritorio y clientes móviles 1.6.0 (build 10600); iOS continúa como build de simulador sin firma para dispositivos.
+
 ## v1.5.2 — arranque del lanzador Windows
 
 - El servidor y el túnel se inician después de crear la ventana. Antes, un registro recibido durante el constructor podía lanzar `InvalidOperationException` en `BeginInvoke`, cerrar el lanzador y dejar un servidor huérfano sin túnel.

@@ -28,11 +28,12 @@ import (
 
 // Options configures the media engine.
 type Options struct {
-	ICEServers []webrtc.ICEServer
-	PublicIPs  []string
-	UDPPort    int
-	UDPPortMin uint16
-	UDPPortMax uint16
+	ICEServers  []webrtc.ICEServer
+	ICEProvider func() []webrtc.ICEServer
+	PublicIPs   []string
+	UDPPort     int
+	UDPPortMin  uint16
+	UDPPortMax  uint16
 	// GatherTimeout bounds how long we wait for ICE gathering when building
 	// non-trickle SDP (WHIP/WHEP style).
 	GatherTimeout time.Duration
@@ -107,8 +108,12 @@ func (e *Engine) Close() error {
 }
 
 func (e *Engine) newPC() (*webrtc.PeerConnection, error) {
+	ice := e.opts.ICEServers
+	if e.opts.ICEProvider != nil {
+		ice = e.opts.ICEProvider()
+	}
 	return e.api.NewPeerConnection(webrtc.Configuration{
-		ICEServers:   e.opts.ICEServers,
+		ICEServers:   ice,
 		BundlePolicy: webrtc.BundlePolicyMaxBundle,
 		SDPSemantics: webrtc.SDPSemanticsUnifiedPlan,
 	})

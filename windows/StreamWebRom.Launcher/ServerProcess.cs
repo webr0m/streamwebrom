@@ -81,6 +81,7 @@ public sealed class ServerProcess : IDisposable
             psi.Environment["SWR_TURN_USER"] = s.TurnUser;
             psi.Environment["SWR_TURN_PASS"] = s.TurnPassword;
         }
+        RelaySettings.Load().Apply(psi, s.UdpPort);
         var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
         proc.OutputDataReceived += (_, e) => { if (e.Data != null) Output?.Invoke(e.Data); };
         proc.ErrorDataReceived += (_, e) => { if (e.Data != null) Output?.Invoke(e.Data); };

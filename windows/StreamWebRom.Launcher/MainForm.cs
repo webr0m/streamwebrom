@@ -105,6 +105,9 @@ public sealed class MainForm : Form
         var diagnose = Btn("Probar conexión");
         diagnose.Click += (_, _) => OpenUrl((_settings.TunnelActive ? _publicUrl.Text : _localUrl.Text) + "/diagnostics");
         opts.Controls.Add(diagnose);
+        var relays = Btn("TURN local / Cloudflare");
+        relays.Click += (_, _) => { try { using var form = new RelayForm(); if (form.ShowDialog(this) == DialogResult.OK) { SaveSettings(); StopServer(); StartServer(); } } catch (Exception ex) { MessageBox.Show(this, ex.Message, "TURN"); } };
+        opts.Controls.Add(relays);
         var apply = Btn("Aplicar y reiniciar", true);
         apply.Click += (_, _) => { SaveSettings(); StopServer(); StartServer(); };
         opts.Controls.Add(apply);

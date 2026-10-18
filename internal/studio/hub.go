@@ -29,6 +29,7 @@ type Options struct {
 	Recorder    *record.Recorder
 	FFmpeg      string
 	ICE         []webrtc.ICEServer
+	ICEProvider func() []webrtc.ICEServer
 	MaxRooms    int
 	MaxPeers    int
 	MaxMsgBytes int64
@@ -67,6 +68,30 @@ func NewHub(ctx context.Context, o Options) *Hub {
 }
 
 var roomIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{2,47}$`)
+
+// RefreshRoutes reconnects browsers so active sessions leave an exhausted
+// provider, while preserving stage slots for the normal rejoin grace period.
+func (h *Hub) RefreshRoutes() {
+	h.mu.RLock()
+	var peers []*Peer
+	for _, r := range h.rooms {
+		r.mu.RLock()
+		for _, p := range r.peers {
+			peers = append(peers, p)
+		}
+		for _, p := range r.waiting {
+			peers = append(peers, p)
+		}
+		r.mu.RUnlock()
+	}
+	h.mu.RUnlock()
+	for _, p := range peers {
+		p.mu.Lock()
+		p.routeRefresh = true
+		p.mu.Unlock()
+		p.close()
+	}
+}
 
 // ValidRoomID reports whether id is an acceptable room name.
 func ValidRoomID(id string) bool { return roomIDRe.MatchString(id) }
@@ -411,6 +436,9 @@ func (h *Hub) welcome(p *Peer) {
 	role := p.role()
 	w := Msg{Type: "welcome", PeerID: p.ID, Role: role, Room: r.ID, State: &st,
 		Peers: r.Peers(), Streams: r.Streams(), Chat: r.history(), ICE: h.o.ICE, Trickle: true}
+	if h.o.ICEProvider != nil {
+		w.ICE = h.o.ICEProvider()
+	}
 	if role == RoleGuest {
 		w.Rejoin = r.issuePass(p)
 	}
@@ -456,6 +484,7 @@ func (h *Hub) leave(p *Peer) {
 	p.mu.Lock()
 	pubs := p.pubs
 	subs := p.subs
+	routeRefresh := p.routeRefresh
 	p.pubs, p.subs = map[string]*sfu.Stream{}, map[string]*sfu.Subscriber{}
 	p.mu.Unlock()
 	for _, s := range pubs {
@@ -477,7 +506,7 @@ func (h *Hub) leave(p *Peer) {
 	r.mu.RLock()
 	hasPass := p.pass != ""
 	r.mu.RUnlock()
-	if hasPass && h.o.RejoinGrace > 0 {
+	if (hasPass || routeRefresh) && h.o.RejoinGrace > 0 {
 		h.dropStreams(r, pubs, false)
 		time.AfterFunc(h.o.RejoinGrace, func() { h.dropStreams(r, pubs, true) })
 		return

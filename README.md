@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.5.2:** corregido el cierre inesperado del lanzador Windows al arrancar automáticamente el servidor y el túnel. Incluye las mejoras 1.5.1 de conexión móvil, reintento en backstage y diagnóstico TURN. Para redes 4G/5G restrictivas hace falta configurar TURN: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.6.0:** relé TURN local autenticado, integración Cloudflare con credenciales temporales y cambio al respaldo local por corte preventivo de consumo o fallo de API. Configuración cifrada en Windows y diagnóstico del proveedor activo. Requiere configurar la infraestructura: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 
