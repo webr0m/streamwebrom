@@ -2,6 +2,11 @@ name: relay-connectivity
 on:
   workflow_dispatch:
     inputs:
+      url:
+        description: HTTPS address of the installation to test
+        type: string
+        default: https://stream.webrom.lat
+        required: true
       provider:
         type: choice
         options: [cloudflare, local]
@@ -21,4 +26,5 @@ jobs:
       - name: actual video from an external network through the configured relay
         env:
           EXPECT_PROVIDER: ${{ inputs.provider }}
-        run: python scripts/relay-smoke.py --url https://stream.webrom.lat --tcp-only --expect-provider "$EXPECT_PROVIDER"
+          STUDIO_URL: ${{ inputs.url }}
+        run: python scripts/relay-smoke.py --url "$STUDIO_URL" --tcp-only --expect-provider "$EXPECT_PROVIDER"
