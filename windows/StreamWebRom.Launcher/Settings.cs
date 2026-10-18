@@ -14,8 +14,8 @@ public sealed class Settings
     public bool AutoStart { get; set; } = true;
 
     /// <summary>Publish through a Cloudflare Tunnel (Cloudflare provides HTTPS).</summary>
-    public bool TunnelEnabled { get; set; } = true;
-    public string PublicHost { get; set; } = "stream.webrom.lat";
+    public bool TunnelEnabled { get; set; } = false;
+    public string PublicHost { get; set; } = "";
     /// <summary>Tunnel token encrypted with Windows DPAPI (current user only).</summary>
     public string TunnelTokenProtected { get; set; } = "";
 
@@ -44,7 +44,7 @@ public sealed class Settings
     public bool ServeHttps => Https && !TunnelActive;
 
     [JsonIgnore]
-    public bool TunnelActive => TunnelEnabled && !string.IsNullOrEmpty(TunnelTokenProtected);
+    public bool TunnelActive => TunnelEnabled && !string.IsNullOrWhiteSpace(TunnelToken);
 
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("StreamWebRom.Tunnel.v1");
     private static string File => Path.Combine(ServerProcess.DataDir, "launcher.json");

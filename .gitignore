@@ -5,3 +5,12 @@
 *.exe
 *.test
 *.out
+/mobile/android/.gradle/
+/mobile/android/**/build/
+/mobile/android/local.properties
+/mobile/ios/*.xcodeproj/
+/mobile/ios/build/
+*.keystore
+*.jks
+/.tools/
+/.cache/

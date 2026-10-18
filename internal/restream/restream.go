@@ -49,7 +49,7 @@ func (d Destination) Validate() error {
 	if u.Host == "" {
 		return fmt.Errorf("destination %q: missing host", d.Name)
 	}
-	if strings.ContainsAny(d.URL, "|[]\n\r") {
+	if strings.ContainsAny(d.URL, "|[]\n\r\\'\x00") || len(d.URL) > 4096 || len(d.Name) > 100 {
 		return fmt.Errorf("destination %q: invalid characters", d.Name)
 	}
 	return nil
@@ -163,7 +163,7 @@ func BuildArgs(videoMime string, dests []Destination, st Settings) []string {
 		st.FPS = 30
 	}
 	args := []string{"-hide_banner", "-loglevel", "warning", "-stats_period", "2", "-progress", "pipe:2",
-		"-protocol_whitelist", "pipe,udp,rtp", "-fflags", "+genpts+nobuffer", "-flags", "low_delay",
+		"-protocol_whitelist", "pipe,udp,rtp", "-fflags", "+genpts", "-flags", "low_delay",
 		"-reorder_queue_size", "256", "-analyzeduration", "2000000", "-probesize", "2000000",
 		"-f", "sdp", "-i", "pipe:0"}
 	if strings.EqualFold(videoMime, webrtc.MimeTypeH264) {
@@ -189,8 +189,11 @@ func BuildArgs(videoMime string, dests []Destination, st Settings) []string {
 
 // Start launches the restream for stream s.
 func Start(ffmpeg string, s *sfu.Stream, dests []Destination, st Settings, log *slog.Logger) (*Session, error) {
-	if len(dests) == 0 {
-		return nil, errors.New("no destinations")
+	if len(dests) == 0 || len(dests) > 16 {
+		return nil, errors.New("expected 1-16 destinations")
+	}
+	if st.VideoKbps < 0 || st.VideoKbps > 100000 || st.AudioKbps < 0 || st.AudioKbps > 512 || st.FPS < 0 || st.FPS > 120 {
+		return nil, errors.New("encoder settings out of range")
 	}
 	for _, d := range dests {
 		if err := d.Validate(); err != nil {
@@ -207,17 +210,32 @@ func Start(ffmpeg string, s *sfu.Stream, dests []Destination, st Settings, log *
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	sess := &Session{cancel: cancel, done: make(chan struct{})}
+	started := false
+	defer func() {
+		if !started {
+			cancel()
+			for _, c := range sess.conns {
+				_ = c.Close()
+			}
+		}
+	}()
 	var descs []TrackDesc
 	videoMime := ""
+	var reservations []*net.UDPConn
+	defer func() {
+		for _, c := range reservations {
+			_ = c.Close()
+		}
+	}()
 	for _, f := range fwd {
-		// Reserve a free port, then release it for ffmpeg and connect to it.
-		l, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+		// ffmpeg binds RTP and the adjacent RTCP port. Keep both reserved
+		// while allocating all tracks and sender sockets (Windows allocates
+		// sequential ephemeral ports, which otherwise collide).
+		pair, port, err := reserveRTPPorts()
 		if err != nil {
-			cancel()
 			return nil, err
 		}
-		port := l.LocalAddr().(*net.UDPAddr).Port
-		_ = l.Close()
+		reservations = append(reservations, pair...)
 		conn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
 		if err != nil {
 			cancel()
@@ -238,6 +256,9 @@ func Start(ffmpeg string, s *sfu.Stream, dests []Destination, st Settings, log *
 	cmd := exec.CommandContext(ctx, bin, BuildArgs(videoMime, dests, st)...)
 	cmd.Stdin = strings.NewReader(BuildSDP(descs))
 	stderr, _ := cmd.StderrPipe()
+	for _, c := range reservations {
+		_ = c.Close()
+	}
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, err
@@ -271,6 +292,7 @@ func Start(ffmpeg string, s *sfu.Stream, dests []Destination, st Settings, log *
 		close(sess.done)
 	}()
 	s.OnClose(func() { cancel() })
+	started = true
 	return sess, nil
 }
 
@@ -285,11 +307,17 @@ func (s *Session) readStats(r io.Reader) {
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
 			s.mu.Lock()
-			s.status.LastError = trim(line, 200)
+			// ffmpeg diagnostics can contain complete RTMP URLs and stream keys.
+			s.status.LastError = "ffmpeg reported an error; check the destination and connection"
 			s.mu.Unlock()
 			continue
 		}
-		stats[k] = v
+		switch k {
+		case "fps", "bitrate", "out_time", "progress":
+			stats[k] = trim(v, 100)
+		default:
+			continue
+		}
 		if k == "progress" {
 			s.mu.Lock()
 			s.status.Stats = fmt.Sprintf("%s fps · %s · %s", stats["fps"], stats["bitrate"], stats["out_time"])
@@ -303,4 +331,25 @@ func trim(s string, n int) string {
 		return s[:n]
 	}
 	return s
+}
+
+func reserveRTPPorts() ([]*net.UDPConn, int, error) {
+	for attempt := 0; attempt < 100; attempt++ {
+		rtp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+		if err != nil {
+			return nil, 0, err
+		}
+		port := rtp.LocalAddr().(*net.UDPAddr).Port
+		if port%2 != 0 || port == 65535 {
+			_ = rtp.Close()
+			continue
+		}
+		rtcp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port + 1})
+		if err != nil {
+			_ = rtp.Close()
+			continue
+		}
+		return []*net.UDPConn{rtp, rtcp}, port, nil
+	}
+	return nil, 0, errors.New("could not reserve an RTP/RTCP port pair")
 }

@@ -12,6 +12,7 @@ test:
 	go test -count=1 ./...
 	for f in web/js/*.js; do cp $$f /tmp/$$(basename $$f).mjs && node --check /tmp/$$(basename $$f).mjs || exit 1; done
 	python3 scripts/jslint.py web/js
+	node --test tests/*.test.mjs
 
 test-race:
 	CGO_ENABLED=1 go test -race -count=1 ./...

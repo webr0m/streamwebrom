@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Diagnóstico · StreamWebRom</title>
+  <link rel="stylesheet" href="/css/app.css"><link rel="manifest" href="/manifest.webmanifest">
+  <script type="module" src="/js/diagnostics.js"></script>
+</head>
+<body>
+  <main style="max-width:760px;margin:40px auto;padding:20px">
+    <a href="/">← StreamWebRom</a>
+    <h1>Comprueba tu equipo antes de entrar</h1>
+    <p>Revisa el navegador y la conexión con tu servidor. La prueba de cámara y micrófono es opcional y termina al detectar los dispositivos.</p>
+    <div id="checks" role="status" aria-live="polite"></div>
+    <p><button id="media" class="btn primary">Probar cámara y micrófono</button> <button id="refresh" class="btn">Revisar de nuevo</button></p>
+    <p id="mediaResult" role="status" aria-live="polite"></p>
+    <h2>Desde Android, iPhone o iPad</h2>
+    <p>Abre la URL HTTPS de tu servidor. También puedes instalar la app web desde el menú del navegador; en Safari usa Compartir → Añadir a pantalla de inicio. Los clientes móviles aceptan el mismo enlace del estudio o de invitación.</p>
+    <p>Para conexiones desde otras redes, configura una IP pública y un puerto UDP, o un servidor TURN. Esta revisión no verifica por sí sola el paso de video a través de tu firewall.</p>
+  </main>
+</body>
+</html>

@@ -36,6 +36,9 @@ const say = (t) => { status.textContent = t; status.classList.toggle("hidden", !
 let state = {};
 const sources = new Map();
 const audios = new Map();
+const available = new Map();
+const retries = new Map();
+let statsTimer;
 const sig = new Signal();
 
 function playAudio(id, stream) {
@@ -56,6 +59,7 @@ function syncAudio() {
 }
 
 async function watch(info) {
+  if (!available.has(info.id)) return;
   if (info.kind === "program" && scene) return;
   if (only && info.id !== only) return;
   if (sources.has(info.id)) return;
@@ -65,6 +69,7 @@ async function watch(info) {
   sources.set(info.id, entry);
   try {
     const sub = await subscribe(sig, info.id);
+    if (sources.get(info.id) !== entry) { sub.pc.close(); return; }
     entry.stream = sub.stream; entry.sub = sub; entry.name = sub.name || info.id;
     v.srcObject = sub.stream;
     await v.play().catch(() => {});
@@ -77,14 +82,35 @@ async function watch(info) {
     } else playAudio(info.id, sub.stream);
     syncAudio();
     say("");
-  } catch (e) { sources.delete(info.id); say("esperando señal…"); setTimeout(() => watch(info), 2000); }
+  } catch (e) {
+    if (sources.get(info.id) !== entry) return;
+    sources.delete(info.id); say("esperando señal…");
+    clearTimeout(retries.get(info.id));
+    retries.set(info.id, setTimeout(() => { retries.delete(info.id); if (available.has(info.id)) watch(available.get(info.id)); }, 2000));
+  }
 }
 
+function resetMedia() {
+  clearInterval(statsTimer);
+  for (const timer of retries.values()) clearTimeout(timer);
+  retries.clear(); available.clear();
+  for (const source of sources.values()) { source.sub?.pc.close(); source.video.srcObject = null; }
+  sources.clear();
+  for (const audio of audios.values()) { audio.pause(); audio.srcObject = null; audio.remove(); }
+  audios.clear(); single.srcObject = null;
+}
+function discover(streams) { for (const info of streams || []) { available.set(info.id, info); watch(info); } }
+
 sig.on("state", (m) => { state = m.state; syncAudio(); });
-sig.on("stream-added", (m) => watch(m.info));
-sig.on("stream-removed", (m) => { const s = sources.get(m.stream); s?.sub?.close(); sources.delete(m.stream); audios.get(m.stream)?.remove(); audios.delete(m.stream); if (only === m.stream) say("señal perdida, reintentando…"); });
-sig.on("disconnected", () => say("reconectando…"));
-sig.on("reconnected", (m) => { state = m.state; (m.streams || []).forEach(watch); });
+sig.on("stream-added", (m) => discover([m.info]));
+sig.on("stream-removed", (m) => {
+  available.delete(m.stream); clearTimeout(retries.get(m.stream)); retries.delete(m.stream);
+  const s = sources.get(m.stream); s?.sub?.pc.close(); if (s) s.video.srcObject = null; sources.delete(m.stream);
+  const audio = audios.get(m.stream); if (audio) { audio.pause(); audio.srcObject = null; audio.remove(); } audios.delete(m.stream);
+  if (only === m.stream) { clearInterval(statsTimer); single.srcObject = null; say("señal perdida, reintentando…"); }
+});
+sig.on("disconnected", () => { resetMedia(); say("reconectando…"); });
+sig.on("reconnected", (m) => { state = m.state; discover(m.streams); });
 
 sig.connect({ type: "join", room, role: "viewer", key, name: "OBS" })
   .then((m) => {
@@ -94,16 +120,18 @@ sig.connect({ type: "join", room, role: "viewer", key, name: "OBS" })
       c.classList.remove("hidden");
       new Compositor(c, sources, view, { transparent: params.get("transparent") === "1" }).start();
     }
-    (m.streams || []).forEach(watch);
+    discover(m.streams);
     say(only ? "esperando señal…" : "");
   })
   .catch((e) => say("error: " + e.message));
 
 function startStats(pc) {
+  clearInterval(statsTimer);
   const box = $("#stats");
   box.classList.remove("hidden");
   let last = null;
-  setInterval(async () => {
+  statsTimer = setInterval(async () => {
+    if (pc.connectionState === "closed") return;
     const r = await pc.getStats();
     r.forEach((x) => {
       if (x.type !== "inbound-rtp" || x.kind !== "video") return;
@@ -113,6 +141,8 @@ function startStats(pc) {
     });
   }, 1000);
 }
+
+window.addEventListener("pagehide", () => { sig.close(); resetMedia(); });
 
 // Double-click = full screen (handy for the "pantalla virtual" window on a projector or second monitor).
 document.addEventListener("dblclick", () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {}); else document.exitFullscreen(); });

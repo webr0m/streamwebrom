@@ -1,0 +1,56 @@
+name: mobile
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - run: gradle -p mobile/android :app:assembleDebug :app:assembleRelease :app:lint
+      - name: package
+        run: |
+          mkdir -p dist
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk dist/StreamWebRom-Android-debug.apk
+          cp mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk dist/StreamWebRom-Android-unsigned.apk
+          cd dist && sha256sum *.apk > SHA256SUMS-Android.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: dist/*
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: cd mobile/ios && xcodegen generate
+      - name: build iPhone/iPad simulator app without signing
+        run: xcodebuild -project mobile/ios/StreamWebRom.xcodeproj -scheme StreamWebRom -sdk iphonesimulator -configuration Release -derivedDataPath mobile/ios/build CODE_SIGNING_ALLOWED=NO build
+      - name: package simulator app
+        run: |
+          mkdir -p dist
+          cd mobile/ios/build/Build/Products/Release-iphonesimulator
+          zip -qry "$GITHUB_WORKSPACE/dist/StreamWebRom-iOS-simulator.zip" StreamWebRom.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator
+          path: dist/StreamWebRom-iOS-simulator.zip

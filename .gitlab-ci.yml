@@ -1,28 +1,35 @@
 stages: [test, build]
-
+default:
+  image: golang:1.27-bookworm
+  cache:
+    key: go-modules
+    paths: [.cache/go]
 variables:
-  GOFLAGS: "-mod=mod"
-
+  GOPATH: '$CI_PROJECT_DIR/.cache/go'
 test:
   stage: test
-  image: golang:1.26
   before_script:
-    - apt-get update && apt-get install -y ffmpeg nodejs
+    - apt-get update && apt-get install -y ffmpeg python3-esprima
   script:
     - go vet ./...
-    - go test -count=1 ./...
     - go test -race -count=1 ./...
-    - for f in web/js/*.js; do cp $f /tmp/$(basename $f).mjs; node --check /tmp/$(basename $f).mjs; done
-
+    - python3 scripts/jslint.py web/js
+    - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+test-js:
+  stage: test
+  image: node:22-bookworm
+  script:
+    - node --test tests/*.test.mjs
+    - for f in web/js/*.js; do node --input-type=module --check < "$f"; done
+    - node --check web/sw.js
 binaries:
   stage: build
-  image: golang:1.26
   script:
     - make all
+    - cd dist && sha256sum * > SHA256SUMS.txt
   artifacts:
     paths: [dist/]
     expire_in: 30 days
-
 windows-launcher:
   stage: build
   image: mcr.microsoft.com/dotnet/sdk:8.0

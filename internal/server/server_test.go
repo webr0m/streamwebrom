@@ -381,6 +381,7 @@ func TestWHIPtoWHEPandRecording(t *testing.T) {
 	// DELETE ends the WHEP session
 	loc := res.Header.Get("Location")
 	dr, _ := http.NewRequest("DELETE", e.ts.URL+loc, nil)
+	dr.Header.Set("Authorization", "Bearer "+k.ViewKey)
 	if res, _ := http.DefaultClient.Do(dr); res.StatusCode != 200 {
 		t.Fatalf("delete session: %d", res.StatusCode)
 	}

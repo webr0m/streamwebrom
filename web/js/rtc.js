@@ -34,6 +34,18 @@ export async function copy(text) {
 export const params = new URLSearchParams(location.search);
 export const hashParams = new URLSearchParams(location.hash.slice(1));
 
+export function readStored(key, fallback, session = false) {
+  try {
+    const value = JSON.parse((session ? sessionStorage : localStorage).getItem(key));
+    if (value === null || typeof value !== typeof fallback || Array.isArray(value) !== Array.isArray(fallback)) return fallback;
+    return value;
+  } catch { return fallback; }
+}
+export function writeStored(key, value, session = false) {
+  try { (session ? sessionStorage : localStorage).setItem(key, JSON.stringify(value)); return true; }
+  catch { return false; }
+}
+
 export async function api(path, body) {
   const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   const data = await r.json().catch(() => ({}));
@@ -41,7 +53,7 @@ export async function api(path, body) {
   return data;
 }
 
-const rid = () => Math.random().toString(36).slice(2, 10);
+const rid = () => crypto.randomUUID();
 
 export class Signal extends EventTarget {
   constructor() {
@@ -55,6 +67,7 @@ export class Signal extends EventTarget {
   }
 
   connect(joinMsg) {
+	if (this.closed) return Promise.reject(new Error("connection closed"));
     // An admitted guest gets a rejoin pass so reconnects (and reloads in the
     // same tab) skip the waiting room instead of getting stuck in it.
     const passKey = joinMsg.room ? `swr.rejoin.${joinMsg.room}` : "";
@@ -66,21 +79,31 @@ export class Signal extends EventTarget {
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${proto}//${location.host}/ws`);
       this.ws = ws;
-      let welcomed = false;
-      ws.onopen = () => { this.retry = 0; ws.send(JSON.stringify(joinMsg)); };
+      let welcomed = false, terminal = false;
+      ws.onopen = () => { ws.send(JSON.stringify(joinMsg)); };
       ws.onmessage = (ev) => {
+        if (this.ws !== ws) return;
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === "welcome") {
-          welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.flush(); resolve(m);
+          this.retry = 0; welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.flush(); resolve(m);
           if (m.rejoin) { this.joinMsg = { ...this.joinMsg, rejoin: m.rejoin }; try { passKey && sessionStorage.setItem(passKey, m.rejoin); } catch {} }
         }
         // Waiting in the lobby counts as connected: if the socket drops while
         // waiting, reconnect and knock again instead of leaving a dead page.
         if (m.type === "waiting") { welcomed = true; this.everWelcomed = true; resolve(m); }
-        if (m.type === "error" && !welcomed && !m.reqId) { reject(new Error(m.error)); }
+        if (m.type === "error" && !welcomed && !m.reqId) {
+          // Authentication failure is terminal, including after a reconnect.
+          terminal = true; reject(new Error(m.error)); ws.close();
+        }
+        if (m.type === "kicked" || m.type === "denied") {
+          this.closed = true;
+          try { passKey && sessionStorage.removeItem(passKey); } catch {}
+          clearInterval(this.keepalive);
+        }
         if (m.reqId && this.pending.has(m.reqId)) {
           const p = this.pending.get(m.reqId);
           this.pending.delete(m.reqId);
+          clearTimeout(p.timer);
           m.type === "error" ? p.reject(new Error(m.error)) : p.resolve(m);
           if (m.type !== "offer") return;
         }
@@ -88,15 +111,20 @@ export class Signal extends EventTarget {
         this.dispatchEvent(new CustomEvent("*", { detail: m }));
       };
       ws.onclose = () => {
-        for (const p of this.pending.values()) p.reject(new Error("disconnected"));
+        if (this.ws !== ws) return;
+        clearInterval(this.keepalive);
+        this.queue = [];
+        for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error("disconnected")); }
         this.pending.clear();
         this.dispatchEvent(new CustomEvent("disconnected"));
         if (!welcomed) reject(new Error("no se pudo conectar al servidor"));
         // Retry while the server is down: a failed reconnect attempt used to
         // end the loop (it was never "welcomed"), leaving the page dead.
-        if (!this.closed && (welcomed || this.everWelcomed)) {
+        if (!terminal && !this.closed && (welcomed || this.everWelcomed)) {
           const wait = Math.min(10000, 500 * 2 ** this.retry++);
-          setTimeout(() => this.connect(this.joinMsg).then((m) => this.dispatchEvent(new CustomEvent("reconnected", { detail: m }))).catch(() => {}), wait);
+          this.reconnectTimer = setTimeout(() => {
+            if (!this.closed) this.connect(this.joinMsg).then((m) => this.dispatchEvent(new CustomEvent("reconnected", { detail: m }))).catch(() => {});
+          }, wait);
         }
       };
       this.keepalive && clearInterval(this.keepalive);
@@ -108,31 +136,37 @@ export class Signal extends EventTarget {
   on(type, fn) { this.addEventListener(type, (e) => fn(e.detail)); return this; }
 
   send(m) {
+    if (this.closed) return;
     if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(m));
-    else this.queue.push(m);
+    else if (this.queue.length < 100 && !m.reqId) this.queue.push(m);
   }
 
   flush() { const q = this.queue; this.queue = []; q.forEach((m) => this.send(m)); }
 
   request(m, timeout = 15000) {
+    if (this.closed || this.ws?.readyState !== 1) return Promise.reject(new Error("disconnected"));
     const reqId = rid();
     return new Promise((resolve, reject) => {
-      this.pending.set(reqId, { resolve, reject });
+      const timer = setTimeout(() => { if (this.pending.delete(reqId)) reject(new Error("timeout: " + m.type)); }, timeout);
+      this.pending.set(reqId, { resolve, reject, timer });
       this.send({ ...m, reqId });
-      setTimeout(() => { if (this.pending.delete(reqId)) reject(new Error("timeout: " + m.type)); }, timeout);
     });
   }
 
-  close() { this.closed = true; clearInterval(this.keepalive); this.ws && this.ws.close(); }
+  close() {
+    this.closed = true; clearInterval(this.keepalive); clearTimeout(this.reconnectTimer); this.queue = [];
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error("connection closed")); }
+    this.pending.clear(); this.ws && this.ws.close();
+  }
 }
 
 function gathered(pc, ms = 2000) {
   if (pc.iceGatheringState === "complete") return Promise.resolve();
   return new Promise((res) => {
-    const t = setTimeout(res, ms);
-    pc.addEventListener("icegatheringstatechange", () => {
-      if (pc.iceGatheringState === "complete") { clearTimeout(t); res(); }
-    });
+    const finish = () => { clearTimeout(t); pc.removeEventListener("icegatheringstatechange", changed); res(); };
+    const changed = () => { if (pc.iceGatheringState === "complete") finish(); };
+    const t = setTimeout(finish, ms);
+    pc.addEventListener("icegatheringstatechange", changed);
   });
 }
 
@@ -252,12 +286,15 @@ export function levelMeter(stream) {
   an.fftSize = 512;
   src.connect(an);
   const buf = new Uint8Array(an.fftSize);
-  return () => {
+  const meter = () => {
     an.getByteTimeDomainData(buf);
     let peak = 0;
     for (const b of buf) peak = Math.max(peak, Math.abs(b - 128));
     return Math.min(1, peak / 90);
   };
+  meter.close = () => { src.disconnect(); an.disconnect(); };
+  track.addEventListener("ended", meter.close, { once: true });
+  return meter;
 }
 
 export function escapeHTML(s) {

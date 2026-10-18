@@ -1,5 +1,15 @@
 # Cambios
 
+## v1.5.0 — auditoría y clientes móviles
+
+- Corregidos bloqueo al desconectar invitados, retirada de cámaras reemplazadas, reservas concurrentes de IDs, reconexión de salidas OBS y carreras en el estado de restream.
+- Sesiones WHIP/WHEP autenticadas y vinculadas a su ruta; validación estricta de cuerpos, configuración, escenas, colores y límites de publicación. `program` queda reservado al anfitrión. PATCH ICE devuelve 501 explícito.
+- Copia directa del estado, sin serialización JSON: benchmark local aproximadamente 104 veces más rápido en esa operación. Claves aleatorias de anfitrión verificadas en tiempo constante; contraseñas humanas siguen con bcrypt.
+- Restream con reserva de puertos RTP/RTCP y diagnósticos que no divulgan claves. Grabaciones con nombres de mayor precisión y mux limitado en tiempo.
+- Mejoras de almacenamiento, limpieza de timers/media y caché PWA restringida. Nuevo diagnóstico de navegador, dispositivos, servidor, ffmpeg y TURN.
+- Clientes Android y iOS conectados a tu servidor HTTPS. APK de prueba instalable, APK sin firma de distribución y proyecto iOS con compilación de simulador en CI. Un IPA para iPhone requiere firma Apple.
+- Scripts de compilación para Windows, Linux y macOS, regresiones Node/Go, pruebas reales Chromium/WebKit y workflows móviles. Informe y límites: `docs/AUDITORIA-1.5.md`.
+
 ## v1.4.0
 - **Efectos de video sin deformar:** el desenfoque y los fondos virtuales asumían siempre 16:9 y una máscara del mismo tamaño que la cámara; con cámaras 4:3, verticales o celulares la cabeza se veía achatada o la persona “se caía”/desplazaba. Ahora el lienzo sigue el tamaño real de la cámara, la máscara se adapta al tamaño que entrega MediaPipe y los primeros cuadros muestran la cámara normal en vez de un fondo vacío. El anfitrión puede cambiar la calidad de un invitado con efectos sin reabrir su cámara.
 - **Voltear la cámara horizontal y vertical** (lo ven todos, también en el programa y OBS), en Ajustes de cámara del estudio y del invitado. Funciona con y sin efectos. Parámetros de URL `&fliph` y `&flipv`.

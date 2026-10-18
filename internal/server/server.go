@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,7 +38,7 @@ type Server struct {
 	start  time.Time
 
 	mu       sync.Mutex
-	sessions map[string]func() // WHIP/WHEP resource id -> close
+	sessions map[string]session // WHIP/WHEP resource id -> scoped resource
 	reqs     atomic.Uint64
 
 	ipMu    sync.Mutex
@@ -47,6 +48,11 @@ type Server struct {
 
 // MaxWSPerIP bounds simultaneous signalling connections from one address.
 const MaxWSPerIP = 30
+
+type session struct {
+	path  string
+	close func()
+}
 
 // ClientIP returns the caller address. Proxy headers (Cloudflare Tunnel,
 // a local reverse proxy) are trusted only when the TCP peer is loopback,
@@ -116,7 +122,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 
 // New creates the server.
 func New(cfg config.Config, hub *studio.Hub, static fs.FS, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, hub: hub, static: static, log: log, start: time.Now(), sessions: map[string]func(){},
+	return &Server{cfg: cfg, hub: hub, static: static, log: log, start: time.Now(), sessions: map[string]session{},
 		ipRate: map[string]*rate.Limiter{}, ipConns: map[string]int{}}
 }
 
@@ -133,7 +139,7 @@ func CheckOrigin(cfg config.Config) func(*http.Request) bool {
 			}
 		}
 		u, err := url.Parse(origin)
-		if err != nil {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 			return false
 		}
 		return strings.EqualFold(u.Host, r.Host)
@@ -174,6 +180,9 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/whip/") || strings.HasPrefix(r.URL.Path, "/whep/") {
+			h.Set("Cache-Control", "no-store")
+		}
 		h.Set("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self), autoplay=(self)")
 		// Pages are embeddable by OBS (which is not a browser frame), but
 		// not by arbitrary websites: protects against clickjacking.
@@ -199,7 +208,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 // pages maps pretty URLs (/studio, /guest, /view) to their HTML files.
 func (s *Server) pages(files http.Handler) http.Handler {
-	routes := map[string]string{"/": "/index.html", "/studio": "/studio.html", "/guest": "/guest.html", "/view": "/view.html", "/join": "/guest.html"}
+	routes := map[string]string{"/": "/index.html", "/studio": "/studio.html", "/guest": "/guest.html", "/view": "/view.html", "/join": "/guest.html", "/diagnostics": "/diagnostics.html"}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if p, ok := routes[r.URL.Path]; ok {
 			w.Header().Set("Cache-Control", "no-cache")
@@ -239,7 +248,9 @@ func (s *Server) iceServers() []webrtc.ICEServer {
 }
 
 func (s *Server) clientConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"ice": s.iceServers(), "publicURL": s.cfg.PublicURL, "version": s.cfg.Version, "layouts": studio.Layouts})
+	_, ffmpegErr := exec.LookPath(s.cfg.FFmpeg)
+	writeJSON(w, 200, map[string]any{"ice": s.iceServers(), "publicURL": s.cfg.PublicURL, "version": s.cfg.Version, "layouts": studio.Layouts,
+		"capabilities": map[string]bool{"multistream": ffmpegErr == nil, "recording": true, "trickleICE": false}})
 }
 
 type createReq struct {
@@ -255,8 +266,14 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req createReq
-	if err := json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeJSON(w, 400, map[string]string{"error": "bad json"})
+		return
+	}
+	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
+		writeJSON(w, 400, map[string]string{"error": "body must contain one JSON object (max 8192 bytes)"})
 		return
 	}
 	keys, err := s.hub.CreateRoom(req.Room, req.Password, req.Title, req.Lobby)
@@ -318,11 +335,16 @@ func (s *Server) options(w http.ResponseWriter, _ *http.Request) {
 }
 
 func readOffer(w http.ResponseWriter, r *http.Request) (webrtc.SessionDescription, bool) {
-	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/sdp") {
+	if ct, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || ct != "application/sdp" {
 		http.Error(w, "Content-Type must be application/sdp", http.StatusUnsupportedMediaType)
 		return webrtc.SessionDescription{}, false
 	}
-	b, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		http.Error(w, "offer too large", http.StatusRequestEntityTooLarge)
+		return webrtc.SessionDescription{}, false
+	}
 	if err != nil || len(b) == 0 {
 		http.Error(w, "empty offer", http.StatusBadRequest)
 		return webrtc.SessionDescription{}, false
@@ -333,7 +355,7 @@ func readOffer(w http.ResponseWriter, r *http.Request) (webrtc.SessionDescriptio
 func (s *Server) writeAnswer(w http.ResponseWriter, r *http.Request, ans *webrtc.SessionDescription, closeFn func(), done <-chan struct{}) {
 	id := studio.NewRoomID() + studio.NewRoomID()
 	s.mu.Lock()
-	s.sessions[id] = closeFn
+	s.sessions[id] = session{path: r.URL.Path + "/" + id, close: closeFn}
 	s.mu.Unlock()
 	// Forget the session when the media ends on its own (OBS quit without
 	// sending DELETE, network loss): otherwise the map grows forever.
@@ -369,6 +391,10 @@ func (s *Server) whip(w http.ResponseWriter, r *http.Request) {
 	key := bearer(r)
 	if !room.CheckPush(key) && !room.CheckHost(key) {
 		http.Error(w, "invalid bearer token (use the room push key)", http.StatusUnauthorized)
+		return
+	}
+	if r.PathValue("stream") == "program" && !room.CheckHost(key) {
+		http.Error(w, "program stream requires the host key", http.StatusForbidden)
 		return
 	}
 	offer, ok := readOffer(w, r)
@@ -416,29 +442,55 @@ func (s *Server) whep(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	s.mu.Lock()
-	fn := s.sessions[id]
-	delete(s.sessions, id)
-	s.mu.Unlock()
-	if fn == nil {
-		http.Error(w, "unknown session", http.StatusNotFound)
+	if !s.authorizeSession(w, r) {
 		return
 	}
-	fn()
-	w.WriteHeader(http.StatusOK)
-}
-
-// patchSession accepts trickle ICE fragments. Our answers already contain
-// all server candidates, and pion learns client candidates from STUN
-// binding requests (peer reflexive), so trickle is acknowledged and ignored.
-func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
 	s.mu.Lock()
-	_, ok := s.sessions[r.PathValue("id")]
+	resource, ok := s.sessions[id]
+	if ok && resource.path == r.URL.Path {
+		delete(s.sessions, id)
+	} else {
+		ok = false
+	}
 	s.mu.Unlock()
 	if !ok {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	resource.close()
+	w.WriteHeader(http.StatusOK)
+}
+
+// Non-trickle only: never claim to have applied candidates that were ignored.
+func (s *Server) patchSession(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeSession(w, r) {
+		return
+	}
+	s.mu.Lock()
+	resource, ok := s.sessions[r.PathValue("id")]
+	s.mu.Unlock()
+	if !ok || resource.path != r.URL.Path {
+		http.Error(w, "unknown session", http.StatusNotFound)
+		return
+	}
+	http.Error(w, "trickle ICE is not supported; send a complete SDP offer", http.StatusNotImplemented)
+}
+
+func (s *Server) authorizeSession(w http.ResponseWriter, r *http.Request) bool {
+	room := s.hub.Room(r.PathValue("room"))
+	if room == nil {
+		http.NotFound(w, r)
+		return false
+	}
+	key := bearer(r)
+	allowed := room.CheckView(key)
+	if strings.HasPrefix(r.URL.Path, "/whip/") {
+		allowed = room.CheckPush(key)
+	}
+	if !allowed && !room.CheckHost(key) {
+		http.Error(w, "invalid bearer token", http.StatusUnauthorized)
+		return false
+	}
+	return true
 }

@@ -1,9 +1,41 @@
 package restream
 
 import (
+	"net"
 	"strings"
 	"testing"
 )
+
+func TestReservedRTPPorts(t *testing.T) {
+	sockets, port, err := reserveRTPPorts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, s := range sockets {
+			_ = s.Close()
+		}
+	}()
+	if port%2 != 0 {
+		t.Fatal("RTP port must be even")
+	}
+	for _, p := range []int{port, port + 1} {
+		conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: p})
+		if err == nil {
+			conn.Close()
+			t.Fatalf("port %d not reserved", p)
+		}
+	}
+}
+
+func TestStatsNeverExposeDestinationKeys(t *testing.T) {
+	s := &Session{}
+	s.readStats(strings.NewReader("[tee] Unable to open rtmp://example/live/secret-key\nfps=30\nbitrate=4000k\nout_time=00:00:05\nprogress=continue\n"))
+	status := s.Status()
+	if strings.Contains(status.LastError, "secret-key") || status.Stats != "30 fps · 4000k · 00:00:05" {
+		t.Fatalf("unsafe or invalid status: %+v", status)
+	}
+}
 
 func TestDestinationValidate(t *testing.T) {
 	ok := []string{"rtmp://a.rtmp.youtube.com/live2/abcd", "rtmps://live-api-s.facebook.com:443/rtmp/k", "srt://host:9000?streamid=x"}

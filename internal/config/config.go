@@ -8,6 +8,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -96,12 +99,18 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.BoolVar(&c.LogJSON, "log-json", false, "JSON logs")
 
 	// Environment first, flags override.
+	var envErrs []error
 	fs.VisitAll(func(f *flag.Flag) {
 		key := "SWR_" + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
 		if v := getenv(key); v != "" {
-			_ = f.Value.Set(v)
+			if err := f.Value.Set(v); err != nil {
+				envErrs = append(envErrs, fmt.Errorf("invalid %s", key))
+			}
 		}
 	})
+	if len(envErrs) > 0 {
+		return c, errors.Join(envErrs...)
+	}
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
@@ -134,7 +143,7 @@ func (c Config) Validate() error {
 	if c.UDPPort < 0 || c.UDPPort > 65535 {
 		errs = append(errs, fmt.Errorf("invalid udp-port %d", c.UDPPort))
 	}
-	if (c.UDPPortMin == 0) != (c.UDPPortMax == 0) || c.UDPPortMin > c.UDPPortMax {
+	if c.UDPPortMin < 0 || c.UDPPortMax > 65535 || (c.UDPPortMin == 0) != (c.UDPPortMax == 0) || c.UDPPortMin > c.UDPPortMax {
 		errs = append(errs, errors.New("udp-min and udp-max must both be set and min <= max"))
 	}
 	if c.MaxPeers < 2 {
@@ -143,11 +152,28 @@ func (c Config) Validate() error {
 	if c.MaxRooms < 1 {
 		errs = append(errs, errors.New("max-rooms must be >= 1"))
 	}
-	if c.MsgRate <= 0 || c.MsgBurst < 1 {
+	if math.IsNaN(c.MsgRate) || math.IsInf(c.MsgRate, 0) || c.MsgRate <= 0 || c.MsgBurst < 1 {
 		errs = append(errs, errors.New("msg-rate and msg-burst must be positive"))
 	}
 	if c.MaxMsgBytes < 4096 {
 		errs = append(errs, errors.New("max-msg must be >= 4096"))
+	}
+	if c.IdleRoomTTL <= 0 {
+		errs = append(errs, errors.New("room-ttl must be positive"))
+	}
+	if c.UDPPort != 0 && c.UDPPortMin != 0 {
+		errs = append(errs, errors.New("choose udp-port or udp-min/udp-max"))
+	}
+	for _, ip := range c.PublicIPs {
+		if net.ParseIP(ip) == nil {
+			errs = append(errs, errors.New("public-ip must contain IP addresses"))
+		}
+	}
+	if c.PublicURL != "" {
+		u, err := url.Parse(c.PublicURL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+			errs = append(errs, errors.New("public-url must be an http(s) origin without credentials, path, query or fragment"))
+		}
 	}
 	for _, u := range c.TURN {
 		if !strings.HasPrefix(u, "turn:") && !strings.HasPrefix(u, "turns:") {

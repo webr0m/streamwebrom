@@ -115,7 +115,7 @@ func (e *Engine) newPC() (*webrtc.PeerConnection, error) {
 }
 
 // complete waits (bounded) for ICE gathering so the SDP carries candidates.
-func (e *Engine) complete(ctx context.Context, pc *webrtc.PeerConnection) *webrtc.SessionDescription {
+func (e *Engine) complete(ctx context.Context, pc *webrtc.PeerConnection) (*webrtc.SessionDescription, error) {
 	done := webrtc.GatheringCompletePromise(pc)
 	t := time.NewTimer(e.opts.GatherTimeout)
 	defer t.Stop()
@@ -124,7 +124,10 @@ func (e *Engine) complete(ctx context.Context, pc *webrtc.PeerConnection) *webrt
 	case <-t.C:
 	case <-ctx.Done():
 	}
-	return pc.LocalDescription()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return pc.LocalDescription(), nil
 }
 
 // Sink receives forwarded RTP. TrackLocalStaticRTP, pion media writers and
@@ -294,7 +297,12 @@ func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webr
 		_ = pc.Close()
 		return nil, nil, err
 	}
-	return s, e.complete(ctx, pc), nil
+	desc, err := e.complete(ctx, pc)
+	if err != nil {
+		s.Close()
+		return nil, nil, err
+	}
+	return s, desc, nil
 }
 
 // countMedia counts audio/video sections the publisher will actually send.
@@ -481,7 +489,12 @@ func (e *Engine) SubscribeOffer(ctx context.Context, s *Stream) (*Subscriber, *w
 		sub.Close()
 		return nil, nil, err
 	}
-	return sub, e.complete(ctx, pc), nil
+	desc, err := e.complete(ctx, pc)
+	if err != nil {
+		sub.Close()
+		return nil, nil, err
+	}
+	return sub, desc, nil
 }
 
 // SubscribeAnswer handles client-initiated subscriptions (WHEP): the client
@@ -512,7 +525,12 @@ func (e *Engine) SubscribeAnswer(ctx context.Context, s *Stream, offer webrtc.Se
 		sub.Close()
 		return nil, nil, err
 	}
-	return sub, e.complete(ctx, pc), nil
+	desc, err := e.complete(ctx, pc)
+	if err != nil {
+		sub.Close()
+		return nil, nil, err
+	}
+	return sub, desc, nil
 }
 
 func waitReady(ctx context.Context, s *Stream) error {

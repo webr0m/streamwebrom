@@ -24,7 +24,9 @@ const remotes = new Map(); // streamId -> { tile, sub, video }
 const sig = new Signal();
 let myId = "";
 
-$("#name").value = params.get("label") || params.get("name") || localStorage.getItem("swr.name") || "";
+let savedName = "";
+try { savedName = localStorage.getItem("swr.name") || ""; } catch {}
+$("#name").value = params.get("label") || params.get("name") || savedName;
 if (params.get("password") || params.get("pw")) $("#pw").value = params.get("password") || params.get("pw");
 
 // ---------- pre-join ----------
@@ -110,7 +112,7 @@ $("#joinBtn").onclick = join;
 async function join() {
   const name = $("#name").value.trim();
   if (!name) return toast("Escribe tu nombre", "err");
-  localStorage.setItem("swr.name", name);
+  try { localStorage.setItem("swr.name", name); } catch {}
   $("#joinBtn").disabled = true;
   try {
     const invite = new URLSearchParams(location.hash.slice(1)).get("invite") || "";

@@ -1,15 +1,16 @@
-import { $, $$, el, toast, copy, params, hashParams, api, Signal, publish, subscribe, levelMeter, fmtTime } from "./rtc.js";
+import { $, $$, el, toast, copy, params, hashParams, api, Signal, publish, subscribe, levelMeter, fmtTime, readStored, writeStored } from "./rtc.js";
 import { Compositor, AudioMixer } from "./compositor.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
 import { listDevices, openScreen, loadPrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain, QUALITIES, FPS } from "./devices.js";
 
 const prefs = loadPrefs();
 let hostCamId = "";         // stream id of the host's main camera (hot-swappable)
-let monitorOn = localStorage.getItem("swr.monitor") !== "0";
+let monitorOn = true;
+try { monitorOn = localStorage.getItem("swr.monitor") !== "0"; } catch {}
 const monitors = new Map(); // streamId -> <audio> for the host's headphones
 
 const room = (params.get("room") || "").toLowerCase();
-const savedRooms = JSON.parse(localStorage.getItem("swr.rooms") || "{}");
+const savedRooms = readStored("swr.rooms", {});
 const hostKey = hashParams.get("key") || savedRooms[room]?.hostKey;
 if (!room || !hostKey) {
   alert("Falta la sala o la clave de anfitrión. Crea un estudio desde la portada.");
@@ -18,8 +19,10 @@ if (!room || !hostKey) {
 }
 // Remember the key locally and scrub it from the address bar (screenshots, screen shares).
 savedRooms[room] = { ...(savedRooms[room] || {}), room, hostKey, created: savedRooms[room]?.created || Date.now() };
-localStorage.setItem("swr.rooms", JSON.stringify(savedRooms));
-history.replaceState(null, "", `/studio?room=${encodeURIComponent(room)}`);
+const stored = writeStored("swr.rooms", savedRooms);
+// Scrub the key only if the browser retained it; otherwise a reload locks
+// the host out of their own studio.
+if (stored) history.replaceState(null, "", `/studio?room=${encodeURIComponent(room)}`);
 
 const LAYOUTS = [["solo", "Solo"], ["split", "Dividido"], ["grid", "Cuadrícula"], ["pip", "PiP"], ["sidebar", "Lateral"], ["spotlight", "Destacado"], ["screen", "Pantalla"], ["news", "Noticiero"]];
 
@@ -167,9 +170,9 @@ function syncMonitor() {
   for (const [id, a] of monitors) { a.muted = !monitorOn; a.volume = Math.min(1, localVol(id)); }
   $("#monitor").classList.toggle("on", monitorOn);
 }
-const localVolumes = JSON.parse(sessionStorage.getItem("swr.mon") || "{}");
+const localVolumes = readStored("swr.mon", {}, true);
 const localVol = (id) => localVolumes[id] ?? 1;
-$("#monitor").onclick = () => { monitorOn = !monitorOn; localStorage.setItem("swr.monitor", monitorOn ? "1" : "0"); syncMonitor(); toast(monitorOn ? "Escuchando a los invitados" : "Monitor silenciado"); };
+$("#monitor").onclick = () => { monitorOn = !monitorOn; try { localStorage.setItem("swr.monitor", monitorOn ? "1" : "0"); } catch {} syncMonitor(); toast(monitorOn ? "Escuchando a los invitados" : "Monitor silenciado"); };
 
 // ---------- host's own sources ----------
 async function addLocal(media, kind, name, extra = {}, cleanup = null) {
@@ -574,8 +577,8 @@ function renderScenes() {
 
 // ---------- destinations (kept in localStorage only) ----------
 const destKey = `swr.dest.${room}`;
-let dests = JSON.parse(localStorage.getItem(destKey) || localStorage.getItem("swr.dest") || "[]");
-const saveDests = () => { localStorage.setItem(destKey, JSON.stringify(dests)); localStorage.setItem("swr.dest", JSON.stringify(dests)); renderDests(); };
+let dests = readStored(destKey, readStored("swr.dest", []));
+const saveDests = () => { if (!writeStored(destKey, dests)) toast("No se pudieron guardar los destinos en este navegador", "err"); writeStored("swr.dest", dests); renderDests(); };
 $("#destPreset").onchange = (e) => { $("#destURL").value = e.target.value; };
 $("#destURL").value = $("#destPreset").value;
 $("#destAdd").onclick = () => {

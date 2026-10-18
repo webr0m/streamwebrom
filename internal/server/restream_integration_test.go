@@ -31,12 +31,12 @@ func TestMultistreamToRTMP(t *testing.T) {
 	dir := t.TempDir()
 	ivf, ogg := filepath.Join(dir, "v.ivf"), filepath.Join(dir, "a.ogg")
 	gen := exec.Command(ff, "-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "testsrc=size=640x360:rate=30", "-t", "8", "-c:v", "libvpx", "-deadline", "realtime", "-g", "30", "-b:v", "800k", ivf)
+		"-f", "lavfi", "-i", "testsrc=size=640x360:rate=30", "-t", "12", "-c:v", "libvpx", "-deadline", "realtime", "-g", "30", "-b:v", "800k", ivf)
 	if out, err := gen.CombinedOutput(); err != nil {
 		t.Skipf("ffmpeg cannot encode vp8: %v %s", err, out)
 	}
 	gen = exec.Command(ff, "-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "8", "-c:a", "libopus", "-page_duration", "20000", ogg)
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "12", "-c:a", "libopus", "-page_duration", "20000", ogg)
 	if out, err := gen.CombinedOutput(); err != nil {
 		t.Skipf("ffmpeg cannot encode opus: %v %s", err, out)
 	}
@@ -84,8 +84,9 @@ func TestMultistreamToRTMP(t *testing.T) {
 	port := l.Addr().(*net.TCPAddr).Port
 	l.Close()
 	out := filepath.Join(dir, "out.flv")
-	sink := exec.CommandContext(ctx, ff, "-hide_banner", "-loglevel", "error", "-y", "-listen", "1", "-i",
+	sink := exec.CommandContext(ctx, ff, "-hide_banner", "-loglevel", "error", "-y", "-listen", "1", "-timeout", "15", "-i",
 		"rtmp://127.0.0.1:"+itoa(port)+"/live/key", "-c", "copy", out)
+	sink.Stderr = os.Stderr
 	if err := sink.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestMultistreamToRTMP(t *testing.T) {
 	if !st.State.Live {
 		t.Fatalf("not live: %+v", st)
 	}
-	time.Sleep(5 * time.Second)
+	time.Sleep(7 * time.Second)
 	host.send(map[string]any{"type": "endlive"})
 	done := make(chan error, 1)
 	go func() { done <- sink.Wait() }()

@@ -7,6 +7,7 @@
 package record
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -110,7 +111,7 @@ func (r *Recorder) Start(room string, s *sfu.Stream) (*Recording, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	ts := time.Now().Format("20060102-150405")
+	ts := time.Now().Format("20060102-150405.000000000")
 	rec := &Recording{Stream: s.ID, Started: time.Now()}
 	for _, f := range s.Forwarders() {
 		base := filepath.Join(dir, fmt.Sprintf("%s-%s-%s", SafeName(s.ID), ts, f.Kind.String()))
@@ -222,7 +223,9 @@ func (r *Recorder) mux(rec *Recording) (string, error) {
 		args = append(args, "-map", fmt.Sprint(i))
 	}
 	args = append(args, "-c", "copy", out)
-	if err := exec.Command(bin, args...).Run(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := exec.CommandContext(ctx, bin, args...).Run(); err != nil {
 		return "", err
 	}
 	return out, nil

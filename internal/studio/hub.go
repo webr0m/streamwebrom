@@ -80,8 +80,13 @@ func (h *Hub) CreateRoom(id, guestPassword, title string, lobby bool) (Keys, err
 	if !ValidRoomID(id) {
 		return Keys{}, errors.New("room id must be 3-48 chars: a-z 0-9 _ -")
 	}
-	if len(guestPassword) > 128 || utf8.RuneCountInString(title) > 120 {
+	if len(guestPassword) > 72 || utf8.RuneCountInString(title) > 120 {
 		return Keys{}, errors.New("password or title too long")
+	}
+	// Hash passwords outside the hub lock so other rooms remain responsive.
+	r, keys, err := newRoom(id, guestPassword, lobby, title)
+	if err != nil {
+		return Keys{}, err
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -90,10 +95,6 @@ func (h *Hub) CreateRoom(id, guestPassword, title string, lobby bool) (Keys, err
 	}
 	if len(h.rooms) >= h.o.MaxRooms {
 		return Keys{}, errors.New("server is at room capacity")
-	}
-	r, keys, err := newRoom(id, guestPassword, lobby, title)
-	if err != nil {
-		return Keys{}, err
 	}
 	h.rooms[id] = r
 	h.log.Info("room created", "room", id)
@@ -146,7 +147,7 @@ func (h *Hub) ReapNow(now time.Time) int {
 	n := 0
 	for id, r := range h.rooms {
 		r.mu.RLock()
-		idle := len(r.peers) == 0 && len(r.waiting) == 0 && len(r.streams) == 0 && now.Sub(r.emptyAt) > h.o.RoomTTL
+		idle := len(r.peers) == 0 && len(r.waiting) == 0 && len(r.streams) == 0 && len(r.publishing) == 0 && now.Sub(r.emptyAt) > h.o.RoomTTL
 		r.mu.RUnlock()
 		if idle {
 			r.close()
@@ -485,7 +486,8 @@ func (h *Hub) dropStreams(r *Room, pubs map[string]*sfu.Stream, fromStage bool) 
 			if _, ok := pubs[id]; !ok {
 				return false
 			}
-			return r.Stream(id) == nil
+			// Update already owns r.mu; calling Stream here deadlocks.
+			return r.streams[id] == nil
 		}
 		if !fromStage {
 			gone = func(string) bool { return false }
@@ -543,10 +545,25 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 	if !streamIDRe.MatchString(id) {
 		return errors.New("bad stream id")
 	}
+	if id == "program" && role != RoleHost {
+		return errors.New("program stream id requires host")
+	}
+	p.mu.Lock()
+	_, replacing := p.pubs[id]
+	full := len(p.pubs) >= 8 && !replacing
+	p.mu.Unlock()
+	if full {
+		return errors.New("maximum 8 published streams per peer")
+	}
 	// A guest may not hijack someone else's stream id.
 	if old := p.room.Stream(id); old != nil && old.Owner != p.ID && role != RoleHost {
 		return errors.New("stream id in use")
 	}
+	release, err := p.room.reserveStream(id, p.ID, role == RoleHost, h.o.MaxPeers*8)
+	if err != nil {
+		return err
+	}
+	defer release()
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	s, answer, err := h.o.Engine.Publish(cctx, id, p.ID, kind, *m.SDP)
@@ -559,7 +576,9 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 	}
 	p.pubs[id] = s
 	p.mu.Unlock()
-	p.room.AddStream(s)
+	if !p.room.AddStream(s) {
+		return errors.New("room closed")
+	}
 	if label := strings.TrimSpace(m.Name); label != "" {
 		_ = p.room.Update(func(st *State) error { st.Labels[id] = cleanName(label); return nil })
 	}
@@ -707,13 +726,19 @@ func (h *Hub) hostAction(host *Peer, m Msg) error {
 		return h.goLive(r, m)
 	case "endlive":
 		r.mu.Lock()
+		r.liveGeneration++
+		r.starting = false
 		rs := r.restream
 		r.restream = nil
+		r.state.Live = false
+		r.state.Restream = nil
 		r.mu.Unlock()
 		if rs != nil {
 			rs.Stop()
 		}
-		return r.Update(func(st *State) error { st.Live = false; st.Restream = nil; return nil })
+		st := r.Snapshot()
+		r.broadcast(Msg{Type: "state", State: &st}, "")
+		return nil
 	}
 	return fmt.Errorf("unknown message %q", m.Type)
 }
@@ -749,13 +774,16 @@ func (h *Hub) setState(r *Room, m Msg) error {
 			case "stage":
 				var s []string
 				if err = json.Unmarshal(v, &s); err == nil {
-					if len(s) > 25 {
-						return errors.New("too many on stage")
+					if err := validateStage(s); err != nil {
+						return err
 					}
 					st.Stage = s
 				}
 			case "featured":
 				err = json.Unmarshal(v, &st.Featured)
+				if st.Featured != "" && !streamIDRe.MatchString(st.Featured) {
+					return errors.New("invalid featured stream id")
+				}
 			case "banner":
 				var b *Banner
 				if err = json.Unmarshal(v, &b); err == nil {
@@ -804,6 +832,20 @@ func (h *Hub) setState(r *Room, m Msg) error {
 					if len(sc) > 20 {
 						return errors.New("too many scenes")
 					}
+					for name, scene := range sc {
+						if utf8.RuneCountInString(name) > 80 {
+							return errors.New("scene name too long")
+						}
+						if !slices.Contains(Layouts, scene.Layout) {
+							return errors.New("unknown scene layout")
+						}
+						if err := validateStage(scene.Stage); err != nil {
+							return err
+						}
+						if scene.Banner != nil {
+							scene.Banner.Text = limit(scene.Banner.Text, 300)
+						}
+					}
 					st.Scenes = sc
 				}
 			case "outputs": // VDO.Ninja-style extra scenes (/view?scene=N), "1" is the program
@@ -816,8 +858,11 @@ func (h *Hub) setState(r *Room, m Msg) error {
 						if !sceneNameRe.MatchString(name) {
 							return fmt.Errorf("bad scene name %q", name)
 						}
-						if len(sc.Stage) > 25 {
-							return errors.New("too many in scene")
+						if err := validateStage(sc.Stage); err != nil {
+							return err
+						}
+						if sc.Featured != "" && !streamIDRe.MatchString(sc.Featured) {
+							return errors.New("invalid featured stream id")
 						}
 						if sc.Layout != "" && !slices.Contains(Layouts, sc.Layout) {
 							return fmt.Errorf("unknown layout %q", sc.Layout)
@@ -828,7 +873,13 @@ func (h *Hub) setState(r *Room, m Msg) error {
 			case "labels":
 				var l map[string]string
 				if err = json.Unmarshal(v, &l); err == nil {
+					if len(l) > 200 {
+						return errors.New("too many labels")
+					}
 					for k2, v2 := range l {
+						if !streamIDRe.MatchString(k2) {
+							return errors.New("invalid label stream id")
+						}
 						l[k2] = limit(v2, 80)
 					}
 					st.Labels = l
@@ -877,6 +928,20 @@ func (h *Hub) setState(r *Room, m Msg) error {
 	})
 }
 
+func validateStage(stage []string) error {
+	if len(stage) > 25 {
+		return errors.New("too many on stage")
+	}
+	seen := make(map[string]bool, len(stage))
+	for _, id := range stage {
+		if !streamIDRe.MatchString(id) || seen[id] {
+			return errors.New("invalid or duplicate stage stream id")
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
 func limit(s string, n int) string {
 	if utf8.RuneCountInString(s) > n {
 		return string([]rune(s)[:n])
@@ -886,7 +951,7 @@ func limit(s string, n int) string {
 
 var sceneNameRe = regexp.MustCompile(`^[a-z0-9-]{1,16}$`)
 
-var colorRe = regexp.MustCompile(`^#[0-9a-fA-F]{3,8}$`)
+var colorRe = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
 
 func validURL(u string) bool {
 	if u == "" {
@@ -973,12 +1038,24 @@ func (h *Hub) goLive(r *Room, m Msg) error {
 		return errors.New("already live")
 	}
 	r.starting = true // two hosts pressing "Go live" at once must not start two ffmpegs
+	r.liveGeneration++
+	generation := r.liveGeneration
 	r.mu.Unlock()
 	sess, err := restream.Start(h.o.FFmpeg, s, m.Dests, settings, h.log)
 	r.mu.Lock()
+	if r.liveGeneration != generation || r.closed {
+		r.mu.Unlock()
+		if sess != nil {
+			sess.Stop()
+		}
+		return errors.New("go live cancelled")
+	}
 	r.starting = false
 	if err == nil {
 		r.restream = sess
+		r.state.Live = true
+		st := sess.Status()
+		r.state.Restream = &st
 	}
 	r.mu.Unlock()
 	if err != nil {
@@ -991,12 +1068,15 @@ func (h *Hub) goLive(r *Room, m Msg) error {
 			select {
 			case <-sess.Done():
 				st := sess.Status()
-				_ = r.Update(func(s *State) error { s.Live = false; s.Restream = &st; return nil })
 				r.mu.Lock()
 				if r.restream == sess {
 					r.restream = nil
+					r.state.Live = false
+					r.state.Restream = &st
 				}
 				r.mu.Unlock()
+				snapshot := r.Snapshot()
+				r.broadcast(Msg{Type: "state", State: &snapshot}, "")
 				return
 			case <-t.C:
 				st := sess.Status()
@@ -1004,8 +1084,9 @@ func (h *Hub) goLive(r *Room, m Msg) error {
 			}
 		}
 	}()
-	st := sess.Status()
-	return r.Update(func(s *State) error { s.Live = true; s.Restream = &st; return nil })
+	snapshot := r.Snapshot()
+	r.broadcast(Msg{Type: "state", State: &snapshot}, "")
+	return nil
 }
 
 // PublishWHIP registers an external (OBS/WHIP) publisher in a room.
@@ -1013,11 +1094,18 @@ func (h *Hub) PublishWHIP(ctx context.Context, r *Room, streamID string, offer w
 	if !streamIDRe.MatchString(streamID) {
 		return nil, nil, errors.New("bad stream id")
 	}
+	release, err := r.reserveStream(streamID, "whip", false, h.o.MaxPeers*8)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
 	s, ans, err := h.o.Engine.Publish(ctx, streamID, "whip", "whip", offer)
 	if err != nil {
 		return nil, nil, err
 	}
-	r.AddStream(s)
+	if !r.AddStream(s) {
+		return nil, nil, errors.New("room closed")
+	}
 	return s, ans, nil
 }
 

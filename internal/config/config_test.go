@@ -39,10 +39,24 @@ func TestValidation(t *testing.T) {
 		{"-max-peers", "1"},
 		{"-turn", "stun:x"},
 		{"-max-msg", "10"},
+		{"-udp-min", "-1", "-udp-max", "10"},
+		{"-udp-min", "65536", "-udp-max", "65537"},
+		{"-udp-port", "50000", "-udp-min", "50001", "-udp-max", "50002"},
+		{"-room-ttl", "0"},
+		{"-msg-rate", "NaN"},
+		{"-msg-rate", "+Inf"},
+		{"-public-ip", "example.com"},
+		{"-public-url", "https://example.com/path"},
 	}
 	for _, args := range cases {
 		if _, err := Load(args, env(nil)); err == nil {
 			t.Errorf("%v should fail validation", args)
 		}
+	}
+}
+
+func TestMalformedEnvironmentFails(t *testing.T) {
+	if _, err := Load(nil, env(map[string]string{"SWR_MAX_PEERS": "oops"})); err == nil {
+		t.Fatal("invalid environment silently accepted")
 	}
 }

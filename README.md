@@ -1,5 +1,9 @@
 # StreamWebRom
 
+**Versión 1.5.0:** auditoría de servidor/cliente, reconexión de OBS, protección de sesiones WHIP/WHEP, diagnóstico previo y clientes Android/iOS. Ver [auditoría y resultados](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
+
+Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
+
 **Estudio de streaming en vivo, en un solo binario.** Invitados por enlace, salida limpia para OBS,
 multistream a YouTube/Twitch/Facebook/Kick, grabación aislada por invitado y branding en vivo.
 Servidor en Go (SFU WebRTC con [pion](https://github.com/pion/webrtc)), cliente web sin dependencias.
@@ -54,6 +58,10 @@ o deja `ffmpeg.exe` junto al ejecutable.
 
 **App web instalable (PWA):** abre el estudio en Chrome/Edge y usa *Instalar app*; funciona en PC y móvil igual que VDO.Ninja.
 
+**Android:** la entrega incluye un APK de prueba y otro sin firma para distribución. **iPhone/iPad:** proyecto SwiftUI/WKWebView y compilación de simulador en CI; un IPA para dispositivos requiere firma Apple. Ambos clientes se conectan a tu servidor HTTPS. Instrucciones y límites en [mobile/README.md](mobile/README.md).
+
+**Antes de transmitir:** abre `/diagnostics` para revisar navegador, cámara/micrófono, conexión al servidor, ffmpeg y configuración TURN.
+
 ### Publicarlo en tu dominio desde tu PC (Cloudflare Tunnel)
 
 Ideal cuando tu hosting es compartido (cPanel) y no puede correr servidores de video.
@@ -79,6 +87,8 @@ En Linux/macOS: `streamwebrom -addr 127.0.0.1:8443 -public-url https://stream.tu
 | `POST /whep/R/program` + Bearer `viewKey` | Reproductores WHEP |
 
 Las claves viajan en el fragmento `#`, que el navegador nunca envía al servidor ni a los logs.
+
+WHIP al ID reservado `program` exige `hostKey`; usa `pushKey` para fuentes como `obs` o `cam`. Los recursos DELETE/PATCH requieren el Bearer correspondiente. Envía SDP completo: PATCH de trickle ICE devuelve 501 porque no está implementado.
 
 ## Opciones de URL (estilo VDO.Ninja)
 
@@ -137,6 +147,8 @@ make test-race    # detector de carreras (requiere cgo)
 make all          # binarios para linux/mac/windows (amd64 y arm64)
 make launcher     # app Windows .NET con el servidor embebido
 ```
+
+En PowerShell: `./scripts/build.ps1` genera los seis servidores, el lanzador Windows y `dist/SHA256SUMS.txt` (requiere Go y SDK .NET 8). `./scripts/build-android.ps1` genera los APK con JDK 17 y SDK Android 35. Después de agregar artefactos, vuelve a calcular los checksums antes de publicar.
 
 ```
 cmd/streamwebrom     punto de entrada

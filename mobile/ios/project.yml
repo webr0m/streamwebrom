@@ -1,0 +1,22 @@
+name: StreamWebRom
+options:
+  bundleIdPrefix: lat.webrom
+  deploymentTarget:
+    iOS: '16.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    MARKETING_VERSION: '1.5.0'
+    CURRENT_PROJECT_VERSION: '10500'
+targets:
+  StreamWebRom:
+    type: application
+    platform: iOS
+    sources: [StreamWebRom]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: lat.webrom.streamwebrom
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: StreamWebRom/Info.plist
+        TARGETED_DEVICE_FAMILY: '1,2'
+        SUPPORTS_MACCATALYST: NO

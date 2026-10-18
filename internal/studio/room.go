@@ -11,6 +11,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -117,16 +119,19 @@ type Room struct {
 	pushKey   string
 	inviteKey string // carried by the host's invite links: those guests skip the waiting room
 
-	mu       sync.RWMutex
-	peers    map[string]*Peer
-	waiting  map[string]*Peer
-	passes   map[string]bool // rejoin passes of admitted guests (reconnects skip the lobby)
-	streams  map[string]*sfu.Stream
-	state    State
-	chat     []Comment
-	emptyAt  time.Time
-	restream *restream.Session
-	starting bool // a go-live is being set up (guards against double start)
+	mu             sync.RWMutex
+	peers          map[string]*Peer
+	waiting        map[string]*Peer
+	passes         map[string]bool // rejoin passes of admitted guests (reconnects skip the lobby)
+	streams        map[string]*sfu.Stream
+	publishing     map[string]bool
+	state          State
+	chat           []Comment
+	emptyAt        time.Time
+	restream       *restream.Session
+	starting       bool // a go-live is being set up (guards against double start)
+	liveGeneration uint64
+	closed         bool
 }
 
 // Keys returned once to the creator.
@@ -154,12 +159,11 @@ func token(n int) string {
 
 func newRoom(id, guestPassword string, lobby bool, title string) (*Room, Keys, error) {
 	hostKey := token(24)
-	hh, err := bcrypt.GenerateFromPassword([]byte(hostKey), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, Keys{}, err
-	}
+	// High-entropy generated keys need constant-time verification, not an
+	// expensive password KDF on every HTTP/WebSocket authentication attempt.
+	hh := sha256.Sum256([]byte(hostKey))
 	r := &Room{
-		ID: id, Created: time.Now(), hostHash: hh,
+		ID: id, Created: time.Now(), hostHash: hh[:],
 		viewKey: token(16), pushKey: token(20), inviteKey: token(16),
 		peers: map[string]*Peer{}, waiting: map[string]*Peer{}, passes: map[string]bool{}, streams: map[string]*sfu.Stream{},
 		emptyAt: time.Now(),
@@ -179,7 +183,8 @@ func newRoom(id, guestPassword string, lobby bool, title string) (*Room, Keys, e
 
 // CheckHost verifies a host key.
 func (r *Room) CheckHost(key string) bool {
-	return key != "" && bcrypt.CompareHashAndPassword(r.hostHash, []byte(key)) == nil
+	hash := sha256.Sum256([]byte(key))
+	return key != "" && subtle.ConstantTimeCompare(r.hostHash, hash[:]) == 1
 }
 
 // CheckGuest verifies the guest password (always true when none is set).
@@ -224,8 +229,13 @@ func (r *Room) Streams() []sfu.Info {
 }
 
 // AddStream registers a stream; an existing stream with the same id is replaced.
-func (r *Room) AddStream(s *sfu.Stream) {
+func (r *Room) AddStream(s *sfu.Stream) bool {
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		s.Close()
+		return false
+	}
 	old := r.streams[s.ID]
 	r.streams[s.ID] = s
 	r.mu.Unlock()
@@ -234,20 +244,27 @@ func (r *Room) AddStream(s *sfu.Stream) {
 	}
 	s.OnClose(func() {
 		r.mu.Lock()
-		if r.streams[s.ID] == s {
+		removed := r.streams[s.ID] == s
+		if removed {
 			delete(r.streams, s.ID)
 		}
 		r.mu.Unlock()
-		r.broadcast(Msg{Type: "stream-removed", Stream: s.ID}, "")
+		if removed {
+			r.broadcast(Msg{Type: "stream-removed", Stream: s.ID}, "")
+		}
 	})
 	go func() {
 		select {
 		case <-s.Ready():
+			if r.Stream(s.ID) != s {
+				return
+			}
 			inf := s.Info()
 			r.broadcast(Msg{Type: "stream-added", Info: &inf, Name: r.label(s)}, "")
 		case <-s.Done():
 		}
 	}()
+	return true
 }
 
 func (r *Room) label(s *sfu.Stream) string {
@@ -272,13 +289,40 @@ func (r *Room) Snapshot() State {
 
 // cloneState deep-copies a state (maps, slices and pointers included).
 func cloneState(in State) (State, error) {
-	b, err := json.Marshal(in)
-	if err != nil {
-		return in, err
+	s := in
+	s.Stage = slices.Clone(in.Stage)
+	s.Recording = slices.Clone(in.Recording)
+	s.Banners = slices.Clone(in.Banners)
+	s.Labels = maps.Clone(in.Labels)
+	s.Muted = maps.Clone(in.Muted)
+	s.Hidden = maps.Clone(in.Hidden)
+	s.Volumes = maps.Clone(in.Volumes)
+	s.Scenes = maps.Clone(in.Scenes)
+	for k, sc := range s.Scenes {
+		sc.Stage = slices.Clone(sc.Stage)
+		if sc.Banner != nil {
+			b := *sc.Banner
+			sc.Banner = &b
+		}
+		s.Scenes[k] = sc
 	}
-	var s State
-	if err := json.Unmarshal(b, &s); err != nil {
-		return in, err
+	s.Outputs = maps.Clone(in.Outputs)
+	for k, o := range s.Outputs {
+		o.Stage = slices.Clone(o.Stage)
+		s.Outputs[k] = o
+	}
+	if in.Banner != nil {
+		b := *in.Banner
+		s.Banner = &b
+	}
+	if in.Comment != nil {
+		c := *in.Comment
+		s.Comment = &c
+	}
+	if in.Restream != nil {
+		rs := *in.Restream
+		rs.Targets = slices.Clone(rs.Targets)
+		s.Restream = &rs
 	}
 	if s.Labels == nil {
 		s.Labels = map[string]string{}
@@ -308,6 +352,29 @@ func (r *Room) Update(fn func(*State) error) error {
 	st := r.Snapshot()
 	r.broadcast(Msg{Type: "state", State: &st}, "")
 	return nil
+}
+
+// reserveStream prevents concurrent negotiations from stealing the same ID.
+func (r *Room) reserveStream(id, owner string, replaceAny bool, max int) (func(), error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return nil, errors.New("room closed")
+	}
+	if r.publishing[id] {
+		return nil, errors.New("stream is being negotiated")
+	}
+	if old := r.streams[id]; old != nil && old.Owner != owner && !replaceAny {
+		return nil, errors.New("stream id in use")
+	}
+	if r.streams[id] == nil && len(r.streams)+len(r.publishing) >= max {
+		return nil, errors.New("room stream capacity reached")
+	}
+	if r.publishing == nil {
+		r.publishing = map[string]bool{}
+	}
+	r.publishing[id] = true
+	return func() { r.mu.Lock(); delete(r.publishing, id); r.mu.Unlock() }, nil
 }
 
 func (r *Room) broadcast(m Msg, except string) {
@@ -366,13 +433,25 @@ func (r *Room) empty() bool {
 
 func (r *Room) close() {
 	r.mu.Lock()
+	r.closed = true
+	r.liveGeneration++
 	streams := make([]*sfu.Stream, 0, len(r.streams))
 	for _, s := range r.streams {
 		streams = append(streams, s)
 	}
 	rs := r.restream
 	r.restream = nil
+	peers := make([]*Peer, 0, len(r.peers)+len(r.waiting))
+	for _, p := range r.peers {
+		peers = append(peers, p)
+	}
+	for _, p := range r.waiting {
+		peers = append(peers, p)
+	}
 	r.mu.Unlock()
+	for _, p := range peers {
+		p.close()
+	}
 	if rs != nil {
 		rs.Stop()
 	}

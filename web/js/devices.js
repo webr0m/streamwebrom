@@ -65,7 +65,7 @@ export function loadPrefs() {
 export function savePrefs(p) {
   const { cameraHint, micHint, speakerHint, ...keep } = p;
   try { localStorage.setItem(STORE, JSON.stringify(keep)); return; } catch { delete keep.effectBgImage; delete keep.effectReplaceImage; } // quota: drop saved images
-  localStorage.setItem(STORE, JSON.stringify(keep));
+  try { localStorage.setItem(STORE, JSON.stringify(keep)); } catch { /* Storage may be disabled; preferences still work for this session. */ }
 }
 
 export const canPickSpeaker = () => "setSinkId" in HTMLMediaElement.prototype;

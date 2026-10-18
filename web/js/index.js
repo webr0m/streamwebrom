@@ -1,11 +1,17 @@
 import { $, el, api, toast } from "./rtc.js";
 
-const saved = () => JSON.parse(localStorage.getItem("swr.rooms") || "{}");
+const saved = () => {
+  try {
+    const rooms = JSON.parse(localStorage.getItem("swr.rooms") || "{}");
+    return rooms && typeof rooms === "object" && !Array.isArray(rooms) ? rooms : {};
+  } catch { return {}; }
+};
 
 $("#create").addEventListener("click", async () => {
   const btn = $("#create");
   btn.disabled = true;
   try {
+    if (new TextEncoder().encode($("#pw").value).length > 72) throw new Error("La contraseña admite hasta 72 bytes (los acentos y emojis ocupan más de uno).");
     const keys = await api("/api/rooms", {
       room: $("#room").value.trim().toLowerCase(),
       title: $("#title").value.trim(),
@@ -14,7 +20,8 @@ $("#create").addEventListener("click", async () => {
     });
     const all = saved();
     all[keys.room] = { ...keys, title: $("#title").value.trim(), created: Date.now() };
-    localStorage.setItem("swr.rooms", JSON.stringify(all));
+    try { localStorage.setItem("swr.rooms", JSON.stringify(all)); }
+    catch { toast("No se pudo guardar el estudio en este navegador. Guarda el enlace del anfitrión."); }
     // The host key travels in the fragment: never sent to servers or logged.
     location.href = `/studio?room=${encodeURIComponent(keys.room)}#key=${encodeURIComponent(keys.hostKey)}`;
   } catch (e) {
@@ -30,7 +37,7 @@ const join = () => {
 $("#join").addEventListener("click", join);
 $("#joinRoom").addEventListener("keydown", (e) => e.key === "Enter" && join());
 
-const rooms = Object.values(saved()).sort((a, b) => b.created - a.created).slice(0, 5);
+const rooms = Object.values(saved()).filter((r) => r && typeof r.room === "string" && typeof r.hostKey === "string").sort((a, b) => b.created - a.created).slice(0, 5);
 if (rooms.length) {
   $("#recent").append(el("label", { text: "Tus estudios recientes" }));
   for (const r of rooms) {
