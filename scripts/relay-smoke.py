@@ -70,7 +70,7 @@ with sync_playwright() as pw:
     assert relay['type']=='relay' and relay['relayProtocol'] in ('tcp','tls'),relay
     if args.expect_cutoff:
         for page in [host,guest]:
-            page.wait_for_function('window.relayRejoined || window.recoveryError',timeout=150000)
+            page.wait_for_function('() => window.relayRejoined || window.recoveryError',timeout=150000)
             assert page.evaluate('window.relayRejoined===true'),page.evaluate('window.recoveryError')
         guest.wait_for_function("""async()=>[...(await sub.pc.getStats()).values()].some(s=>s.type==='inbound-rtp'&&s.kind==='video'&&s.framesDecoded>0)""",timeout=20000)
         assert host.evaluate("fetch('/api/config').then(r=>r.json()).then(c=>c.relay.provider==='local'&&c.relay.reason==='quota')")
