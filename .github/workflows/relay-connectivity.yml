@@ -11,6 +11,11 @@ on:
         type: choice
         options: [cloudflare, local]
         required: true
+      mode:
+        description: Client route (local can be tested while Cloudflare is active)
+        type: choice
+        options: [auto, tls, local]
+        default: auto
       exercise_cutoff:
         description: Require automatic quota cutoff and decoded video after local reconnection (configure a temporary test budget first)
         type: boolean
@@ -32,4 +37,5 @@ jobs:
           EXPECT_PROVIDER: ${{ inputs.provider }}
           STUDIO_URL: ${{ inputs.url }}
           EXPECT_CUTOFF: ${{ inputs.exercise_cutoff }}
-        run: python scripts/relay-smoke.py --url "$STUDIO_URL" --tcp-only --expect-provider "$EXPECT_PROVIDER"
+          CLIENT_MODE: ${{ inputs.mode }}
+        run: python scripts/relay-smoke.py --url "$STUDIO_URL" --tcp-only --expect-provider "$EXPECT_PROVIDER" --mode "$CLIENT_MODE"

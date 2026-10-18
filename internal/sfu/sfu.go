@@ -31,10 +31,12 @@ type Options struct {
 	RecordTraffic    func(int)
 	ICEServers       []webrtc.ICEServer
 	ICEConfiguration func() webrtc.Configuration
-	PublicIPs        []string
-	UDPPort          int
-	UDPPortMin       uint16
-	UDPPortMax       uint16
+	// LocalICEConfiguration is an operator-defined alternative, never supplied by a client.
+	LocalICEConfiguration func() webrtc.Configuration
+	PublicIPs             []string
+	UDPPort               int
+	UDPPortMin            uint16
+	UDPPortMax            uint16
 	// GatherTimeout bounds how long we wait for ICE gathering when building
 	// non-trickle SDP (WHIP/WHEP style).
 	GatherTimeout time.Duration
@@ -108,9 +110,21 @@ func (e *Engine) Close() error {
 	return nil
 }
 
-func (e *Engine) newPC() (*webrtc.PeerConnection, error) {
+type localRelayContextKey struct{}
+
+// WithLocalRelay chooses the installed relay for one authenticated socket.
+func WithLocalRelay(ctx context.Context) context.Context {
+	return context.WithValue(ctx, localRelayContextKey{}, true)
+}
+
+func (e *Engine) newPC(ctx context.Context) (*webrtc.PeerConnection, error) {
 	configuration := webrtc.Configuration{ICEServers: e.opts.ICEServers}
-	if e.opts.ICEConfiguration != nil {
+	if local, _ := ctx.Value(localRelayContextKey{}).(bool); local {
+		if e.opts.LocalICEConfiguration == nil {
+			return nil, errors.New("local relay is not configured")
+		}
+		configuration = e.opts.LocalICEConfiguration()
+	} else if e.opts.ICEConfiguration != nil {
 		configuration = e.opts.ICEConfiguration()
 	}
 	configuration.BundlePolicy = webrtc.BundlePolicyMaxBundle
@@ -289,7 +303,7 @@ func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webr
 	if offer.Type != webrtc.SDPTypeOffer {
 		return nil, nil, errors.New("expected an SDP offer")
 	}
-	pc, err := e.newPC()
+	pc, err := e.newPC(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -524,7 +538,7 @@ func (e *Engine) SubscribeOffer(ctx context.Context, s *Stream, onICE ...func(we
 	if err := waitReady(ctx, s); err != nil {
 		return nil, nil, err
 	}
-	pc, err := e.newPC()
+	pc, err := e.newPC(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -557,7 +571,7 @@ func (e *Engine) SubscribeAnswer(ctx context.Context, s *Stream, offer webrtc.Se
 	if err := waitReady(ctx, s); err != nil {
 		return nil, nil, err
 	}
-	pc, err := e.newPC()
+	pc, err := e.newPC(ctx)
 	if err != nil {
 		return nil, nil, err
 	}

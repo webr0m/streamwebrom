@@ -22,6 +22,16 @@ const extraCams = new Map(); // pubId -> { pub, media }
 let state = {};
 const remotes = new Map(); // streamId -> { tile, sub, video }
 const sig = new Signal();
+$("#networkMode").value = sig.mediaMode;
+function selectNetwork(mode) {
+  $("#networkMode").value = mode;
+  const url = new URL(location.href);
+  if (mode === "auto") url.searchParams.delete("network"); else url.searchParams.set("network", mode);
+  history.replaceState(null, "", url);
+  sig.useNetwork(mode);
+  if (entered) connectionStatus("Cambiando la ruta de audio y video…");
+}
+$("#networkMode").onchange = () => selectNetwork($("#networkMode").value);
 let myId = "";
 
 let savedName = "";
@@ -132,6 +142,8 @@ function connectionStatus(text, retry = false) {
   $("#connection").classList.toggle("hidden", !text);
   $("#connectionText").textContent = text;
   $("#retryMedia").classList.toggle("hidden", !retry);
+  $("#retryTLS").classList.toggle("hidden", !retry || sig.mediaMode === "tls");
+  $("#retryLocal").classList.toggle("hidden", !retry || sig.mediaMode === "local" || !sig.localIce.length);
 }
 async function connectMedia() {
   if (connectingMedia || !media.getTracks().length) return;
@@ -152,6 +164,8 @@ async function connectMedia() {
   finally { connectingMedia = false; $("#retryMedia").disabled = false; }
 }
 $("#retryMedia").onclick = connectMedia;
+$("#retryTLS").onclick = () => selectNetwork("tls");
+$("#retryLocal").onclick = () => selectNetwork("local");
 sig.on("disconnected", () => { if (entered) connectionStatus("Reconectando con el servidor…"); });
 sig.on("welcome", (m) => {
   if (rewait) { rewait = false; $("#waiting").classList.add("hidden"); $("#call").classList.remove("hidden"); resume(m); return; }

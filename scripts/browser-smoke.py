@@ -116,6 +116,12 @@ with sync_playwright() as pw:
     blocked.wait_for_function('() => window.__sockets.length>=2 && window.__sockets.at(-1).readyState===1',timeout=15000)
     expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
     assert blocked.evaluate("window.__pcs.some(pc=>pc.connectionState==='connected')")
+    # Allocation alone is insufficient: the diagnostic must decode generated
+    # video after a full publish/subscribe round trip, without opening devices.
+    diagnostic = page(); diagnostic.goto(args.url+'/diagnostics')
+    diagnostic.locator('#videoRoute').click()
+    expect(diagnostic.locator('#videoRouteResult')).to_contain_text('Video enviado al servidor y recibido correctamente', timeout=45000)
+    diagnostic.close()
     # Safari's engine catches unsupported syntax and DOM assumptions.
     webkit = pw.webkit.launch(headless=True)
     safari = webkit.new_page()

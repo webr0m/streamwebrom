@@ -44,6 +44,16 @@ Configura esas variables en el servicio que ejecuta StreamWebRom y reinícialo. 
 
 Estas pruebas no representan una comprobación con cada operadora móvil.
 
+## Rutas alternativas por participante (1.6.1)
+
+Una prueba de asignación TURN puede pasar y aun así fallar el audio/video. En `/diagnostics`, «Probar video hasta el servidor» envía una imagen generada y verifica su recepción y decodificación. No abre la cámara ni el micrófono.
+
+Prueba las opciones «Solo conexión cifrada por 443» y «Relé del equipo anfitrión por 443». En la pantalla de ingreso del invitado, el selector «Conexión» ofrece las mismas rutas. Si falla el ingreso, los botones del aviso permiten cambiar de ruta conservando el permiso de reingreso. Los enlaces pueden incluir `&network=tls` o `&network=local`; se conserva el fragmento de la invitación.
+
+`tls` excluye STUN, conexiones directas y TURN/UDP: solo utiliza `turns:` en TCP/443. `local` emplea el TURN instalado por el anfitrión y también usa TLS/443 desde el navegador. El SFU ofrece sus candidatos directos para alcanzar ese relé, aunque Cloudflare siga activo para otros participantes. No hace falta desactivar Cloudflare globalmente ni esperar al corte de consumo. Estas rutas requieren un relé TLS/443 válido; no se aceptan URLs de servidor proporcionadas por el invitado.
+
+La compatibilidad con un operador concreto debe confirmarse en ese teléfono y con sus datos móviles. Una prueba desde otra red no confirma la conectividad de Movistar Chile. No es necesario cambiar APN, desactivar IPv6 ni compartir contraseñas para probar estas alternativas.
+
 ## Cloudflare y respaldo local (1.6.0)
 
 En Windows, **Red → TURN local / Cloudflare** configura ambos. Los tokens se guardan con DPAPI en `relay-credentials.json`, dentro de la carpeta de datos del usuario. No copies este archivo a otro usuario ni publiques los tokens. El lanzador los pasa al servidor por entorno, sin incluirlos en argumentos o registros. Linux/macOS usan las variables indicadas abajo y un almacén de secretos del servicio.

@@ -15,8 +15,29 @@ class Socket {
 }
 globalThis.WebSocket = Socket;
 const source = await readFile(new URL('../web/js/rtc.js', import.meta.url), 'utf8');
-const { Signal, readStored, waitConnected } = await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const { Signal, readStored, waitConnected, iceConfiguration } = await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 const signals=[];
+
+test('restricted mobile mode uses only TLS/443 relay candidates',()=>{
+  const servers=[{urls:'stun:stun.test:3478'},{urls:['turn:relay.test:3478?transport=udp','turn:relay.test:443?transport=tcp','turns:relay.test:5349?transport=tcp','turns:relay.test:443?transport=tcp'],username:'temporary',credential:'test'}];
+  const cfg=iceConfiguration(servers,'tls');
+  assert.equal(cfg.iceTransportPolicy,'relay');
+  assert.deepEqual(cfg.iceServers,[{urls:['turns:relay.test:443?transport=tcp'],username:'temporary',credential:'test'}]);
+  assert.equal(servers[1].urls.length,4);
+  assert.deepEqual(iceConfiguration(servers).iceServers,servers);
+  assert.throws(()=>iceConfiguration([{urls:'turn:relay.test:443?transport=tcp'}],'local'),/puerto 443/);
+});
+
+test('switching a single socket to local preserves admission and password in memory',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','setInterval']});
+  const s=signal(),ws=await connected(s);
+  s.joinMsg.password='in-memory';s.useNetwork('local');
+  t.mock.timers.tick(501);
+  const retry=Socket.sockets.at(-1);retry.open();
+  assert.equal(retry.sent[0].route,'local');assert.equal(retry.sent[0].rejoin,'pass');assert.equal(retry.sent[0].password,'in-memory');
+  retry.receive({type:'welcome',ice:[],localIce:[{urls:'turns:local.test:443?transport=tcp'}]});
+  await Promise.resolve();assert.equal(s.localIce.length,1);
+});
 afterEach(()=>{ signals.splice(0).forEach(s=>s.close()); Socket.sockets=[]; storage.clear(); });
 function signal() { const s=new Signal();signals.push(s);return s; }
 async function connected(s) {

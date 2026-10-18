@@ -27,6 +27,7 @@ type Msg struct {
 	PeerID   string `json:"peerId,omitempty"`
 	Invite   string `json:"invite,omitempty"` // invite key from the host's invite link: skips the lobby
 	Rejoin   string `json:"rejoin,omitempty"` // pass given to an admitted guest so a reconnect skips the lobby
+	Route    string `json:"route,omitempty"`  // empty = default provider; local = operator-installed relay
 
 	// media
 	Stream      string                     `json:"stream,omitempty"`
@@ -53,6 +54,7 @@ type Msg struct {
 	Chat     []Comment              `json:"chat,omitempty"`
 	Comment  *Comment               `json:"comment,omitempty"`
 	ICE      []webrtc.ICEServer     `json:"ice,omitempty"`
+	LocalICE []webrtc.ICEServer     `json:"localIce,omitempty"`
 	Keys     *Keys                  `json:"keys,omitempty"`
 	Dests    []restream.Destination `json:"dests,omitempty"`
 	Settings *restream.Settings     `json:"settings,omitempty"`
@@ -67,11 +69,12 @@ type Peer struct {
 	Name string
 	Role Role
 
-	room *Room
-	pass string // rejoin pass (guests), guarded by room.mu
-	conn *websocket.Conn
-	out  chan []byte
-	lim  *rate.Limiter
+	room  *Room
+	pass  string // rejoin pass (guests), guarded by room.mu
+	route string // immutable after join, before publishing the peer into a room
+	conn  *websocket.Conn
+	out   chan []byte
+	lim   *rate.Limiter
 
 	mu           sync.Mutex
 	mic          bool

@@ -34,6 +34,22 @@ export async function copy(text) {
 export const params = new URLSearchParams(location.search);
 export const hashParams = new URLSearchParams(location.hash.slice(1));
 
+export function networkMode(value) { return ["tls", "local"].includes(value) ? value : "auto"; }
+
+// A TLS-only attempt must not keep UDP/STUN candidates: some mobile networks
+// allocate UDP relays successfully but cannot carry media over that route.
+export function iceConfiguration(servers, mode = "auto") {
+  if (mode === "auto") return { iceServers: servers, bundlePolicy: "max-bundle" };
+  const filtered = servers.map(s => ({ ...s, urls: [s.urls].flat().filter(u => {
+    try {
+      const url = new URL(u);
+      return url.protocol === "turns:" && url.pathname.endsWith(":443") && [null, "tcp"].includes(url.searchParams.get("transport"));
+    } catch { return false; }
+  }) })).filter(s => s.urls.length);
+  if (!filtered.length) throw new Error("Esta ruta no tiene TURN cifrado en el puerto 443. Prueba otro modo de conexión.");
+  return { iceServers: filtered, iceTransportPolicy: "relay", bundlePolicy: "max-bundle" };
+}
+
 export function readStored(key, fallback, session = false) {
   try {
     const value = JSON.parse((session ? sessionStorage : localStorage).getItem(key));
@@ -64,6 +80,8 @@ export class Signal extends EventTarget {
     this.pending = new Map();
     this.queue = [];
     this.ice = [];
+    this.localIce = [];
+    this.mediaMode = networkMode(params.get("network"));
     this.retry = 0;
     this.closed = false;
     this.everWelcomed = false; // once in, keep retrying until close()
@@ -71,6 +89,7 @@ export class Signal extends EventTarget {
 
   connect(joinMsg) {
 	if (this.closed) return Promise.reject(new Error("connection closed"));
+    joinMsg = { ...joinMsg, route: this.mediaMode === "local" ? "local" : "" };
     // An admitted guest gets a rejoin pass so reconnects (and reloads in the
     // same tab) skip the waiting room instead of getting stuck in it.
     const passKey = joinMsg.room ? `swr.rejoin.${joinMsg.room}` : "";
@@ -94,7 +113,7 @@ export class Signal extends EventTarget {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === "welcome") {
           clearTimeout(deadline);
-          this.retry = 0; welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.trickle = m.trickle === true; this.flush(); resolve(m);
+          this.retry = 0; welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.localIce = m.localIce || []; this.trickle = m.trickle === true; this.flush(); resolve(m);
           if (m.rejoin) { this.joinMsg = { ...this.joinMsg, rejoin: m.rejoin }; try { passKey && sessionStorage.setItem(passKey, m.rejoin); } catch {} }
         }
         // Waiting in the lobby counts as connected: if the socket drops while
@@ -144,6 +163,13 @@ export class Signal extends EventTarget {
   }
 
   on(type, fn) { this.addEventListener(type, (e) => fn(e.detail)); return this; }
+
+  useNetwork(mode) {
+    this.mediaMode = networkMode(mode);
+    // Rejoin with the same in-memory password and admission pass. A fresh
+    // socket lets the SFU select the matching operator-defined ICE route.
+    if (this.ws && !this.closed) this.ws.close();
+  }
 
   send(m) {
     if (this.closed) return;
@@ -255,7 +281,7 @@ function prefer(tr, mime) {
  * opts: { kind, stream, name, videoKbps, audioKbps, codec, contentHint }
  */
 export async function publish(sig, media, opts = {}) {
-  const pc = new RTCPeerConnection({ iceServers: sig.ice, bundlePolicy: "max-bundle" });
+  const pc = new RTCPeerConnection(iceConfiguration(sig.ice, sig.mediaMode));
   const ice = incrementalICE(sig, pc);
   const senders = {};
   for (const track of media.getTracks()) {
@@ -326,7 +352,7 @@ async function tune(senders, opts) {
 
 /** Subscribe to a stream id. Resolves with { stream, pc, close() }. */
 export async function subscribe(sig, id) {
-  const pc = new RTCPeerConnection({ iceServers: sig.ice, bundlePolicy: "max-bundle" });
+  const pc = new RTCPeerConnection(iceConfiguration(sig.ice, sig.mediaMode));
   const ice = incrementalICE(sig, pc);
   const media = new MediaStream();
   pc.ontrack = (e) => {

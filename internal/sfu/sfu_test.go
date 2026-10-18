@@ -51,7 +51,7 @@ func TestProviderChangeRestoresDirectPolicyForLocalFallback(t *testing.T) {
 	defer e.Close()
 	for _, want := range []webrtc.ICETransportPolicy{webrtc.ICETransportPolicyRelay, webrtc.ICETransportPolicyAll} {
 		policy = want
-		pc, err := e.newPC()
+		pc, err := e.newPC(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -59,6 +59,40 @@ func TestProviderChangeRestoresDirectPolicyForLocalFallback(t *testing.T) {
 			t.Fatal("media provider policy did not change")
 		}
 		pc.Close()
+	}
+}
+
+func TestLocalRouteDoesNotChangeOtherPeers(t *testing.T) {
+	e, err := NewEngine(Options{
+		ICEConfiguration: func() webrtc.Configuration {
+			return webrtc.Configuration{ICETransportPolicy: webrtc.ICETransportPolicyRelay}
+		},
+		LocalICEConfiguration: func() webrtc.Configuration { return webrtc.Configuration{} },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	for _, local := range []bool{false, true, false} {
+		ctx := context.Background()
+		want := webrtc.ICETransportPolicyRelay
+		if local {
+			ctx = WithLocalRelay(ctx)
+			want = webrtc.ICETransportPolicyAll
+		}
+		pc, err := e.newPC(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pc.GetConfiguration().ICETransportPolicy != want {
+			t.Fatal("one client's route affected another peer")
+		}
+		pc.Close()
+	}
+	missing, _ := NewEngine(Options{})
+	defer missing.Close()
+	if pc, err := missing.newPC(WithLocalRelay(context.Background())); err == nil || pc != nil {
+		t.Fatal("unconfigured local route accepted")
 	}
 }
 

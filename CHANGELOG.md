@@ -1,5 +1,13 @@
 # Cambios
 
+## v1.6.1 — Rutas alternativas para redes móviles
+
+- Modo de invitado «Red móvil»: usa exclusivamente TURN cifrado por TLS/TCP en el puerto 443, sin candidatos UDP ni conexiones directas.
+- Selección del relé local por participante, incluso con Cloudflare activo. El SFU elige la ruta correspondiente sin cambiar la de los demás usuarios ni desactivar el control mensual.
+- El cambio de ruta conserva la contraseña en memoria y el permiso de reingreso; no requiere volver a compartir la invitación.
+- Diagnóstico con video generado: comprueba envío, recepción y decodificación hasta el servidor sin utilizar cámara o micrófono. La asignación TURN por sí sola no acredita que pase video.
+- Nuevas pruebas de aislamiento de rutas, filtrado TLS/443 y video de diagnóstico.
+
 ## v1.6.0 — Cloudflare TURN y respaldo local
 
 - Corrige el anuncio SDP de trickle ICE en ofertas y respuestas: el navegador debe esperar los candidatos TURN tardíos, incluso cuando las primeras rutas directas fallan.

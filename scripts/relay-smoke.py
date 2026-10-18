@@ -13,6 +13,7 @@ parser.add_argument('--url',default='http://localhost:18444')
 parser.add_argument('--browser')
 parser.add_argument('--tcp-only', action='store_true', help='Filter native relay URLs to test TURN/TCP explicitly')
 parser.add_argument('--expect-provider', choices=['cloudflare','local'])
+parser.add_argument('--mode',choices=['auto','tls','local'],default='auto',help='Client-specific route; local must work while Cloudflare remains enabled')
 parser.add_argument('--expect-cutoff',action='store_true',default=os.getenv('EXPECT_CUTOFF')=='true',help='Keep media active and require automatic Cloudflare-to-local reconnection')
 args=parser.parse_args()
 
@@ -28,7 +29,7 @@ with sync_playwright() as pw:
     errors=[]
     host=ctx.new_page();host.on('pageerror',lambda e:errors.append(str(e)))
     host.on('console',lambda m:print(m.text,flush=True) if m.text.startswith('[relay-check]') else None)
-    response=host.goto(args.url+'/diagnostics')
+    response=host.goto(args.url+'/diagnostics?network='+args.mode)
     if not response.ok: raise RuntimeError(f'Diagnostics page returned HTTP {response.status}: {host.title()}')
     if args.expect_provider:
         actual=host.evaluate("fetch('/api/config').then(async r=>{if(!r.ok)throw Error('config HTTP '+r.status);return r.json()})").get('relay',{}).get('provider')
@@ -46,7 +47,7 @@ with sync_playwright() as pw:
       window.hostStream=pub.id;
       sig.on('reconnected',async()=>{try{pub=await rtc.publish(sig,media,{name:'TURN host',stream:hostStream});window.relayRejoined=true;}catch(e){window.recoveryError=e.message;}});
     }""",keys)
-    guest=ctx.new_page();guest.on('pageerror',lambda e:errors.append(str(e)));guest.goto(args.url+'/diagnostics')
+    guest=ctx.new_page();guest.on('pageerror',lambda e:errors.append(str(e)));guest.goto(args.url+'/diagnostics?network='+args.mode)
     guest.evaluate("""async ({keys,stream})=>{
       const rtc=await import('/js/rtc.js');window.rtc=rtc;window.sig=new rtc.Signal();
       await sig.connect({type:'join',room:keys.room,role:'guest',name:'TURN guest'});

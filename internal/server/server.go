@@ -31,13 +31,14 @@ import (
 
 // Server is the HTTP front.
 type Server struct {
-	cfg         config.Config
-	hub         *studio.Hub
-	static      fs.FS
-	log         *slog.Logger
-	start       time.Time
-	iceProvider func() []webrtc.ICEServer
-	RelayStatus func() map[string]string
+	cfg              config.Config
+	hub              *studio.Hub
+	static           fs.FS
+	log              *slog.Logger
+	start            time.Time
+	iceProvider      func() []webrtc.ICEServer
+	RelayStatus      func() map[string]string
+	LocalICEProvider func() []webrtc.ICEServer
 
 	mu       sync.Mutex
 	sessions map[string]session // WHIP/WHEP resource id -> scoped resource
@@ -263,8 +264,12 @@ func (s *Server) clientConfig(w http.ResponseWriter, r *http.Request) {
 	if s.RelayStatus != nil {
 		relay = s.RelayStatus()
 	}
+	var localICE []webrtc.ICEServer
+	if s.LocalICEProvider != nil {
+		localICE = s.LocalICEProvider()
+	}
 	writeJSON(w, 200, map[string]any{"ice": s.iceServers(), "publicURL": s.cfg.PublicURL, "version": s.cfg.Version, "layouts": studio.Layouts,
-		"relay": relay, "capabilities": map[string]bool{"multistream": ffmpegErr == nil, "recording": true, "trickleICE": true}})
+		"localIce": localICE, "relay": relay, "capabilities": map[string]bool{"multistream": ffmpegErr == nil, "recording": true, "trickleICE": true}})
 }
 
 // WHIP/WHEP transports must also release allocations on a provider cutoff.

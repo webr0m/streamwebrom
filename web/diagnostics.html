@@ -16,6 +16,11 @@
     <p id="mediaResult" role="status" aria-live="polite"></p>
     <p><button id="relay" class="btn">Probar relé TURN</button></p>
     <p id="relayResult" role="status" aria-live="polite"></p>
+    <p><label for="networkMode">Ruta para las pruebas</label>
+      <select id="networkMode"><option value="auto">Automática</option><option value="tls">Solo conexión cifrada por 443</option><option value="local">Relé del equipo anfitrión por 443</option></select></p>
+    <p><button id="videoRoute" class="btn primary">Probar video hasta el servidor</button></p>
+    <p id="videoRouteResult" role="status" aria-live="polite"></p>
+    <p class="muted">Esta prueba envía una imagen de color generada y comprueba que vuelve a recibirse. No utiliza tu cámara ni tu micrófono. Si «Automática» falla, prueba las otras rutas.</p>
     <h2>Desde Android, iPhone o iPad</h2>
     <p>Abre la URL HTTPS de tu servidor. También puedes instalar la app web desde el menú del navegador; en Safari usa Compartir → Añadir a pantalla de inicio. Los clientes móviles aceptan el mismo enlace del estudio o de invitación.</p>
     <p>Las redes 4G/5G pueden necesitar un relé TURN, preferiblemente con TCP/TLS en el puerto 443. Cloudflare Tunnel publica la web; el túnel HTTP no transporta el audio y video WebRTC. La prueba TURN comprueba la asignación de una ruta de relé desde este equipo; el paso de video se comprueba al entrar en la sala.</p>

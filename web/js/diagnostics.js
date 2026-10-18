@@ -1,4 +1,11 @@
-import { $, el, api } from "./rtc.js";
+import { $, el, api, Signal, publish, subscribe, iceConfiguration, networkMode, params } from "./rtc.js";
+
+$("#networkMode").value = networkMode(params.get("network"));
+$("#networkMode").onchange = () => {
+  const url = new URL(location.href);
+  url.searchParams.set("network", $("#networkMode").value);
+  history.replaceState(null, "", url);
+};
 
 function row(label, ok, detail) {
   return el("p", {}, el("strong", { text: `${ok ? "✓" : "⚠"} ${label}: ` }), detail);
@@ -38,9 +45,11 @@ $("#relay").onclick = async () => {
   let pc;
   try {
     const cfg = await api("/api/config");
-    const servers = (cfg.ice || []).map(s => ({ ...s, urls: [s.urls].flat().filter(url => /^turns?:/i.test(url)) })).filter(s => s.urls.length);
+    const mode = $("#networkMode").value;
+    const configured = mode === "local" ? cfg.localIce || [] : cfg.ice || [];
+    const servers = configured.map(s => ({ ...s, urls: [s.urls].flat().filter(url => /^turns?:/i.test(url)) })).filter(s => s.urls.length);
     if (!servers.length) throw new Error("El servidor no tiene TURN configurado. El administrador debe añadir un relé para las redes móviles que no permiten conexión directa.");
-    pc = new RTCPeerConnection({ iceServers: servers, iceTransportPolicy: "relay" });
+    pc = new RTCPeerConnection({ ...iceConfiguration(servers, mode), iceTransportPolicy: "relay" });
     pc.createDataChannel("relay-check");
     await new Promise(async (resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("TURN no respondió en 15 segundos. Revisa la dirección, las credenciales y el firewall del relé.")), 15000);
@@ -54,4 +63,43 @@ $("#relay").onclick = async () => {
     result.textContent = "✓ Se obtuvo una ruta TURN desde esta red. Entra en la sala para comprobar audio y video.";
   } catch (e) { result.textContent = e.message; }
   finally { if (pc) { pc.onicecandidate = null; pc.close(); } button.disabled = false; }
+};
+
+$("#videoRoute").onclick = async () => {
+  const button = $("#videoRoute"), result = $("#videoRouteResult"), selector = $("#networkMode");
+  button.disabled = selector.disabled = true;
+  result.textContent = "Comprobando envío y recepción de video…";
+  let sig, pub, sub, media, timer, video;
+  try {
+    const mode = selector.value;
+    // Validate the selected route before creating a disposable test room.
+    const cfg = await api("/api/config");
+    iceConfiguration(mode === "local" ? cfg.localIce || [] : cfg.ice || [], mode);
+    const keys = await api("/api/rooms", { room: `check-${crypto.randomUUID().slice(0, 12)}`, lobby: false });
+    sig = new Signal(); sig.mediaMode = mode;
+    await sig.connect({ type: "join", room: keys.room, role: "host", key: keys.hostKey, name: "Prueba de red" });
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    let frame = 0;
+    const draw = () => { ctx.fillStyle = `hsl(${frame++ % 360} 70% 50%)`; ctx.fillRect(0, 0, 64, 64); };
+    draw(); media = canvas.captureStream(5); timer = setInterval(draw, 200);
+    pub = await publish(sig, media, { name: "Prueba de red", videoKbps: 80, fps: 5 });
+    sub = await subscribe(sig, pub.id);
+    video = document.createElement("video"); video.muted = true; video.playsInline = true; video.srcObject = sub.stream;
+    await video.play();
+    const deadline = Date.now() + 20000;
+    let decoded = false;
+    while (Date.now() < deadline) {
+      const stats = await sub.pc.getStats();
+      if ([...stats.values()].some(s => s.type === "inbound-rtp" && s.kind === "video" && s.framesDecoded > 0)) { decoded = true; break; }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    if (!decoded) throw new Error("La ruta conecta, pero el video no vuelve al navegador. Prueba otra ruta.");
+    result.textContent = `✓ Video enviado al servidor y recibido correctamente · ${selector.selectedOptions[0].textContent}.`;
+  } catch (e) { result.textContent = `No se completó la prueba de video: ${e.message}`; }
+  finally {
+    clearInterval(timer); video?.pause(); if (video) video.srcObject = null;
+    sub?.close(); pub?.stop(); media?.getTracks().forEach(t => t.stop()); sig?.close();
+    button.disabled = selector.disabled = false;
+  }
 };

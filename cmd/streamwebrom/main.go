@@ -126,10 +126,18 @@ func run() error {
 		return out
 	}
 	var recordTraffic func(int)
+	var localICE func() []webrtc.ICEServer
+	var localServerICE func() webrtc.Configuration
+	if localRelay != nil {
+		localICE = localRelay.ICE
+		// The authenticated local relay reaches this SFU directly. Do not force
+		// a Cloudflare allocation on the server side of this alternative route.
+		localServerICE = func() webrtc.Configuration { return webrtc.Configuration{} }
+	}
 	if cloudRelay != nil {
 		recordTraffic = cloudRelay.RecordMedia
 	}
-	engine, err := sfu.NewEngine(sfu.Options{RecordTraffic: recordTraffic, ICEServers: ice, ICEConfiguration: serverICE, PublicIPs: cfg.PublicIPs, UDPPort: cfg.UDPPort,
+	engine, err := sfu.NewEngine(sfu.Options{RecordTraffic: recordTraffic, ICEServers: ice, ICEConfiguration: serverICE, LocalICEConfiguration: localServerICE, PublicIPs: cfg.PublicIPs, UDPPort: cfg.UDPPort,
 		UDPPortMin: uint16(cfg.UDPPortMin), UDPPortMax: uint16(cfg.UDPPortMax), Logger: log})
 	if err != nil {
 		return err
@@ -137,7 +145,7 @@ func run() error {
 	defer engine.Close()
 
 	hub := studio.NewHub(ctx, studio.Options{
-		Engine: engine, Recorder: record.New(cfg.DataDir, cfg.FFmpeg), FFmpeg: cfg.FFmpeg, ICE: ice, ICEProvider: clientICE,
+		Engine: engine, Recorder: record.New(cfg.DataDir, cfg.FFmpeg), FFmpeg: cfg.FFmpeg, ICE: ice, ICEProvider: clientICE, LocalICEProvider: localICE,
 		MaxRooms: cfg.MaxRooms, MaxPeers: cfg.MaxPeers, MaxMsgBytes: cfg.MaxMsgBytes,
 		MsgRate: cfg.MsgRate, MsgBurst: cfg.MsgBurst, RoomTTL: cfg.IdleRoomTTL, RejoinGrace: 30 * time.Second,
 		CheckOrigin: server.CheckOrigin(cfg), Logger: log,
@@ -148,6 +156,7 @@ func run() error {
 		return err
 	}
 	front := server.New(cfg, hub, static, log, clientICE)
+	front.LocalICEProvider = localICE
 	if cloudRelay != nil {
 		front.RelayStatus = func() map[string]string {
 			st := cloudRelay.Status()

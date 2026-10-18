@@ -19,6 +19,8 @@
     <div id="pwBox" class="hidden"><label for="pw">Contraseña</label><input id="pw" type="password" maxlength="128"></div>
     <div id="devPre" class="col"></div>
     <div id="camCtlPre"></div>
+    <label for="networkMode">Conexión</label>
+    <select id="networkMode"><option value="auto">Automática</option><option value="tls">Red móvil: conexión cifrada por 443</option><option value="local">Alternativa: relé del equipo anfitrión</option></select>
     <button class="primary" id="joinBtn">Entrar</button>
     <p class="muted" id="hint" style="margin:0;font-size:12px">Tu video solo sale en vivo cuando el anfitrión te sube al escenario.</p>
   </div>
@@ -30,6 +32,8 @@
   <div id="connection" class="card hidden" role="status" aria-live="polite" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:20;max-width:90vw">
     <p id="connectionText"></p>
     <button id="retryMedia" class="primary hidden">Reintentar audio y video</button>
+    <button id="retryTLS" class="hidden">Probar conexión móvil por 443</button>
+    <button id="retryLocal" class="hidden">Probar relé del anfitrión</button>
     <a href="/diagnostics" target="_blank" rel="noopener">Diagnóstico de conexión</a>
   </div>
   <div class="grid" id="grid"></div>

@@ -25,17 +25,18 @@ import (
 
 // Options for the hub.
 type Options struct {
-	Engine      *sfu.Engine
-	Recorder    *record.Recorder
-	FFmpeg      string
-	ICE         []webrtc.ICEServer
-	ICEProvider func() []webrtc.ICEServer
-	MaxRooms    int
-	MaxPeers    int
-	MaxMsgBytes int64
-	MsgRate     float64
-	MsgBurst    int
-	RoomTTL     time.Duration
+	Engine           *sfu.Engine
+	Recorder         *record.Recorder
+	FFmpeg           string
+	ICE              []webrtc.ICEServer
+	ICEProvider      func() []webrtc.ICEServer
+	LocalICEProvider func() []webrtc.ICEServer
+	MaxRooms         int
+	MaxPeers         int
+	MaxMsgBytes      int64
+	MsgRate          float64
+	MsgBurst         int
+	RoomTTL          time.Duration
 	// RejoinGrace keeps a reconnecting guest's place on stage (0 = drop at once).
 	RejoinGrace time.Duration
 	CheckOrigin func(*http.Request) bool
@@ -350,6 +351,12 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 }
 
 func (h *Hub) join(p *Peer, m Msg) error {
+	if m.Route != "" && m.Route != "local" {
+		return errors.New("invalid media route")
+	}
+	if m.Route == "local" && h.o.LocalICEProvider == nil {
+		return errors.New("local relay is not configured")
+	}
 	r := h.Room(m.Room)
 	if r == nil {
 		return errors.New("room not found")
@@ -372,6 +379,7 @@ func (h *Hub) join(p *Peer, m Msg) error {
 	default:
 		return errors.New("invalid role")
 	}
+	p.route = m.Route
 	p.Name = cleanName(m.Name)
 	if role == RoleViewer && m.Name == "" {
 		p.Name = "OBS"
@@ -438,6 +446,12 @@ func (h *Hub) welcome(p *Peer) {
 		Peers: r.Peers(), Streams: r.Streams(), Chat: r.history(), ICE: h.o.ICE, Trickle: true}
 	if h.o.ICEProvider != nil {
 		w.ICE = h.o.ICEProvider()
+	}
+	if h.o.LocalICEProvider != nil {
+		w.LocalICE = h.o.LocalICEProvider()
+		if p.route == "local" {
+			w.ICE = w.LocalICE
+		}
 	}
 	if role == RoleGuest {
 		w.Rejoin = r.issuePass(p)
@@ -565,6 +579,9 @@ func (h *Hub) dropStreams(r *Room, pubs map[string]*sfu.Stream, fromStage bool) 
 }
 
 func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
+	if p.route == "local" {
+		ctx = sfu.WithLocalRelay(ctx)
+	}
 	role := p.role()
 	if role == RoleViewer {
 		return errors.New("viewers cannot publish")
@@ -646,6 +663,9 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 }
 
 func (h *Hub) subscribe(ctx context.Context, p *Peer, m Msg) error {
+	if p.route == "local" {
+		ctx = sfu.WithLocalRelay(ctx)
+	}
 	s := p.room.Stream(m.Stream)
 	if s == nil {
 		return fmt.Errorf("stream %q not found", m.Stream)
