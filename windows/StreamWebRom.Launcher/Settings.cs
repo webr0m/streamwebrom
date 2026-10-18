@@ -11,6 +11,20 @@ public sealed class Settings
     public bool Https { get; set; } = true;
     public int UdpPort { get; set; } = 50000;
     public string PublicIp { get; set; } = "";
+    public string TurnUrls { get; set; } = "";
+    public string TurnUser { get; set; } = "";
+    public string TurnPasswordProtected { get; set; } = "";
+
+    [JsonIgnore]
+    public string TurnPassword
+    {
+        get
+        {
+            try { return string.IsNullOrEmpty(TurnPasswordProtected) ? "" : Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(TurnPasswordProtected), Entropy, DataProtectionScope.CurrentUser)); }
+            catch { return ""; }
+        }
+        set => TurnPasswordProtected = string.IsNullOrEmpty(value) ? "" : Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(value), Entropy, DataProtectionScope.CurrentUser));
+    }
     public bool AutoStart { get; set; } = true;
 
     /// <summary>Publish through a Cloudflare Tunnel (Cloudflare provides HTTPS).</summary>

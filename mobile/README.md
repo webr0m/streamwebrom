@@ -1,4 +1,6 @@
-# Clientes móviles 1.5.0
+# Clientes móviles 1.5.1
+
+La corrección de conexión móvil incluye cambios del servidor y de la web: actualiza también el servidor a 1.5.1. Las redes con CGNAT/UDP bloqueado necesitan un servicio TURN configurado; instalar un APK nuevo por sí solo no proporciona un relé. Ver [redes móviles](../docs/REDES-MOVILES.md).
 
 Android e iOS abren el estudio servido por tu instalación de StreamWebRom usando WebRTC del sistema. No ejecutan el SFU, ffmpeg ni las grabaciones en el teléfono. Usa HTTPS con certificado válido; los certificados autofirmados sin confianza no se aceptan.
 

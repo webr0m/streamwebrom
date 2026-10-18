@@ -250,7 +250,7 @@ func (s *Server) iceServers() []webrtc.ICEServer {
 func (s *Server) clientConfig(w http.ResponseWriter, r *http.Request) {
 	_, ffmpegErr := exec.LookPath(s.cfg.FFmpeg)
 	writeJSON(w, 200, map[string]any{"ice": s.iceServers(), "publicURL": s.cfg.PublicURL, "version": s.cfg.Version, "layouts": studio.Layouts,
-		"capabilities": map[string]bool{"multistream": ffmpegErr == nil, "recording": true, "trickleICE": false}})
+		"capabilities": map[string]bool{"multistream": ffmpegErr == nil, "recording": true, "trickleICE": true}})
 }
 
 type createReq struct {

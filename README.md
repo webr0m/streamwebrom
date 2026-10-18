@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.5.0:** auditoría de servidor/cliente, reconexión de OBS, protección de sesiones WHIP/WHEP, diagnóstico previo y clientes Android/iOS. Ver [auditoría y resultados](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.5.1:** corregida la pérdida de rutas ICE tardías y la espera indefinida de audio/video. Nuevo reintento en backstage, configuración TURN en Windows y prueba real de relé en Diagnóstico. Para redes 4G/5G restrictivas hace falta configurar TURN: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 
@@ -68,7 +68,7 @@ Ideal cuando tu hosting es compartido (cPanel) y no puede correr servidores de v
 
 1. En Cloudflare Zero Trust crea un túnel con hostname público (p. ej. `stream.webrom.lat`) → `http://localhost:8443`.
 2. En la app de Windows marca *Publicar en internet*, escribe el dominio y pega el token del túnel (se guarda cifrado con DPAPI). La app descarga `cloudflared` y lo ejecuta.
-3. Reenvía en tu router el puerto **UDP 50000** a tu PC: la web y la señalización pasan por Cloudflare, pero el video WebRTC viaja por UDP directo (Cloudflare Tunnel no transporta UDP). Opcional: `-turn` para redes muy restrictivas.
+3. Reenvía en tu router el puerto **UDP 50000** a tu PC para conexiones directas. Para redes móviles restrictivas, CGNAT o UDP bloqueado, configura además un **relé TURN con TCP/TLS**, preferiblemente en el puerto 443. La web y la señalización pasan por Cloudflare Tunnel; el túnel HTTP no transporta el audio/video WebRTC. Instrucciones: [redes móviles](docs/REDES-MOVILES.md).
 
 En Linux/macOS: `streamwebrom -addr 127.0.0.1:8443 -public-url https://stream.tudominio.com -udp-port 50000` y `cloudflared tunnel run --token …`.
 

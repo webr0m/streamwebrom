@@ -1,5 +1,5 @@
 // Offline-capable app shell. Live media and signalling are never cached.
-const CACHE = "swr-v7";
+const CACHE = "swr-v8";
 const SHELL = ["/", "/studio", "/guest", "/view", "/diagnostics", "/js/diagnostics.js", "/css/app.css", "/js/rtc.js", "/js/compositor.js", "/js/index.js",
   "/js/studio.js", "/js/guest.js", "/js/view.js", "/js/pwa.js", "/js/devices.js", "/js/effects.js", "/js/ticker.js", "/js/remote.js", "/js/chat.js", "/js/stickers.js", "/img/logo.svg", "/manifest.webmanifest"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });

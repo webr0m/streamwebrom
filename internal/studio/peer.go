@@ -2,6 +2,7 @@ package studio
 
 import (
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -28,10 +29,13 @@ type Msg struct {
 	Rejoin   string `json:"rejoin,omitempty"` // pass given to an admitted guest so a reconnect skips the lobby
 
 	// media
-	Stream string                     `json:"stream,omitempty"`
-	Kind   string                     `json:"kind,omitempty"`
-	SDP    *webrtc.SessionDescription `json:"sdp,omitempty"`
-	Info   *sfu.Info                  `json:"info,omitempty"`
+	Stream      string                     `json:"stream,omitempty"`
+	Kind        string                     `json:"kind,omitempty"`
+	SDP         *webrtc.SessionDescription `json:"sdp,omitempty"`
+	Info        *sfu.Info                  `json:"info,omitempty"`
+	Trickle     bool                       `json:"trickle,omitempty"`
+	Negotiation string                     `json:"negotiation,omitempty"`
+	Candidate   *webrtc.ICECandidateInit   `json:"candidate,omitempty"`
 
 	// control
 	Action string          `json:"action,omitempty"`
@@ -69,19 +73,54 @@ type Peer struct {
 	out  chan []byte
 	lim  *rate.Limiter
 
-	mu   sync.Mutex
-	mic  bool
-	cam  bool
-	hand bool
-	subs map[string]*sfu.Subscriber
-	pubs map[string]*sfu.Stream
-	once sync.Once
-	gone chan struct{}
+	mu     sync.Mutex
+	mic    bool
+	cam    bool
+	hand   bool
+	subs   map[string]*sfu.Subscriber
+	pubs   map[string]*sfu.Stream
+	icePCs map[string]*webrtc.PeerConnection
+	once   sync.Once
+	gone   chan struct{}
 }
 
 func newPeer(conn *websocket.Conn, lim *rate.Limiter) *Peer {
 	return &Peer{ID: token(12), conn: conn, out: make(chan []byte, 256), lim: lim,
-		subs: map[string]*sfu.Subscriber{}, pubs: map[string]*sfu.Stream{}, gone: make(chan struct{})}
+		subs: map[string]*sfu.Subscriber{}, pubs: map[string]*sfu.Stream{}, icePCs: map[string]*webrtc.PeerConnection{}, gone: make(chan struct{})}
+}
+
+// Each negotiation belongs to this authenticated socket. Removing it on close
+// also prevents late candidates from being applied to a replacement stream.
+func (p *Peer) registerICE(id string, pc *webrtc.PeerConnection, done <-chan struct{}) {
+	p.mu.Lock()
+	p.icePCs[id] = pc
+	p.mu.Unlock()
+	go func() {
+		<-done
+		p.mu.Lock()
+		if p.icePCs[id] == pc {
+			delete(p.icePCs, id)
+		}
+		p.mu.Unlock()
+	}()
+}
+
+func (p *Peer) iceCallback(m Msg) ([]func(webrtc.ICECandidateInit), error) {
+	if !m.Trickle {
+		return nil, nil
+	}
+	if !streamIDRe.MatchString(m.Negotiation) {
+		return nil, errors.New("invalid ICE negotiation")
+	}
+	p.mu.Lock()
+	_, exists := p.icePCs[m.Negotiation]
+	p.mu.Unlock()
+	if exists {
+		return nil, errors.New("ICE negotiation already exists")
+	}
+	return []func(webrtc.ICECandidateInit){func(c webrtc.ICECandidateInit) {
+		p.Send(Msg{Type: "ice", Negotiation: m.Negotiation, Candidate: &c})
+	}}, nil
 }
 
 // role reads the peer's role; it changes once, when the host admits a

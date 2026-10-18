@@ -25,7 +25,11 @@ New-Item -ItemType Directory -Force $build, "$build\classes", "$build\dex", $Out
 Run "$tools\aapt2.exe" @('compile', '--dir', "$app\res", '-o', "$build\resources.zip")
 $manifest = (Get-Content -Raw "$app\AndroidManifest.xml").Replace('<manifest xmlns:', '<manifest package="lat.webrom.streamwebrom" xmlns:')
 $manifest | Set-Content -Encoding utf8 "$build\AndroidManifest.xml"
-Run "$tools\aapt2.exe" @('link', '-I', $androidJar, '--manifest', "$build\AndroidManifest.xml", '--min-sdk-version', '26', '--target-sdk-version', '35', '--version-code', '10500', '--version-name', '1.5.0', '-o', "$build\base.apk", '-R', "$build\resources.zip")
+$gradle = Get-Content -Raw (Join-Path $root 'mobile/android/app/build.gradle')
+$versionCode = [regex]::Match($gradle, 'versionCode\s+(\d+)').Groups[1].Value
+$versionName = [regex]::Match($gradle, "versionName\s+'([^']+)'").Groups[1].Value
+if (!$versionCode -or !$versionName) { throw 'Cannot read Android app version from build.gradle' }
+Run "$tools\aapt2.exe" @('link', '-I', $androidJar, '--manifest', "$build\AndroidManifest.xml", '--min-sdk-version', '26', '--target-sdk-version', '35', '--version-code', $versionCode, '--version-name', $versionName, '-o', "$build\base.apk", '-R', "$build\resources.zip")
 $sources = @(Get-ChildItem "$app\java" -Recurse -Filter '*.java' | ForEach-Object FullName)
 Run "$JavaHome\bin\javac.exe" (@('--release', '17', '-encoding', 'UTF-8', '-classpath', $androidJar, '-d', "$build\classes") + $sources)
 $classes = @(Get-ChildItem "$build\classes" -Recurse -Filter '*.class' | ForEach-Object FullName)

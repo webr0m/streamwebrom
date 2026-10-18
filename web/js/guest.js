@@ -127,6 +127,32 @@ async function join() {
 if ((params.has("autostart") || params.has("autojoin") || params.has("aj")) && $("#name").value) setTimeout(join, 800);
 
 let entered = false, rewait = false;
+let connectingMedia = false;
+function connectionStatus(text, retry = false) {
+  $("#connection").classList.toggle("hidden", !text);
+  $("#connectionText").textContent = text;
+  $("#retryMedia").classList.toggle("hidden", !retry);
+}
+async function connectMedia() {
+  if (connectingMedia || !media.getTracks().length) return;
+  connectingMedia = true;
+  $("#retryMedia").disabled = true;
+  connectionStatus("Conectando audio y video…");
+  try {
+    pub?.stop(); pub = null;
+    pub = await publish(sig, media, pubOpts($("#name").value));
+    connectionStatus(""); sendMedia(); updateStageBadge();
+    const current = pub;
+    pub.pc.addEventListener("connectionstatechange", () => {
+      if (pub !== current) return;
+      if (pub.pc.connectionState === "connected") connectionStatus("");
+      else if (["failed", "disconnected"].includes(pub.pc.connectionState)) connectionStatus("Se perdió la conexión de audio y video. Puedes volver a conectarte.", true);
+    });
+  } catch (e) { connectionStatus(e.message, true); }
+  finally { connectingMedia = false; $("#retryMedia").disabled = false; }
+}
+$("#retryMedia").onclick = connectMedia;
+sig.on("disconnected", () => { if (entered) connectionStatus("Reconectando con el servidor…"); });
 sig.on("welcome", (m) => {
   if (rewait) { rewait = false; $("#waiting").classList.add("hidden"); $("#call").classList.remove("hidden"); resume(m); return; }
   if (!entered && !$("#waiting").classList.contains("hidden")) enter(m);
@@ -146,7 +172,8 @@ async function resume(m) {
   // The server forgot our old publications: publish fresh ones.
   myId = m.peerId;
   try { pub?.pc.close(); } catch {}
-  pub = media.getTracks().length ? await publish(sig, media, pubOpts($("#name").value)).catch(() => null) : null;
+  pub = null;
+  await connectMedia();
   if (screenPub) { try { screenPub.pc.close(); } catch {} screenPub = await publish(sig, screenMedia, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail" }).catch(() => null); }
   for (const [id, x] of extraCams) { try { x.pub.pc.close(); } catch {} extraCams.delete(id); x.media.getTracks().forEach((t) => t.stop()); }
   for (const id of [...remotes.keys()]) unwatch(id);
@@ -165,7 +192,7 @@ async function enter(m) {
   if (params.has("muted") || params.has("mute")) media.getAudioTracks().forEach((t) => (t.enabled = false));
   if (params.has("videomute") || params.has("vm")) media.getVideoTracks().forEach((t) => (t.enabled = false));
   addTile("me", media, $("#name").value + " (tú)", true, levelMeter(media));
-  if (media.getTracks().length) pub = await publish(sig, media, pubOpts($("#name").value));
+  await connectMedia();
   setMic(micOn()); setCam(camOn());
   for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
   for (const c of m.chat || []) addChat(c);

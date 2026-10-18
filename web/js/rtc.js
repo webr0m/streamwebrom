@@ -47,10 +47,13 @@ export function writeStored(key, value, session = false) {
 }
 
 export async function api(path, body) {
-  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || r.statusText);
-  return data;
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const r = await fetch(path, { ...(body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}), signal: controller.signal });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    return data;
+  } finally { clearTimeout(timer); }
 }
 
 const rid = () => crypto.randomUUID();
@@ -80,17 +83,23 @@ export class Signal extends EventTarget {
       const ws = new WebSocket(`${proto}//${location.host}/ws`);
       this.ws = ws;
       let welcomed = false, terminal = false;
-      ws.onopen = () => { ws.send(JSON.stringify(joinMsg)); };
+      const deadline = setTimeout(() => {
+        if (this.ws !== ws || welcomed) return;
+        reject(new Error("El servidor no respondió. Revisa tu conexión e inténtalo de nuevo."));
+        ws.close();
+      }, 20000);
+      ws.onopen = () => { if (this.ws === ws) ws.send(JSON.stringify(joinMsg)); };
       ws.onmessage = (ev) => {
         if (this.ws !== ws) return;
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === "welcome") {
-          this.retry = 0; welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.flush(); resolve(m);
+          clearTimeout(deadline);
+          this.retry = 0; welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.trickle = m.trickle === true; this.flush(); resolve(m);
           if (m.rejoin) { this.joinMsg = { ...this.joinMsg, rejoin: m.rejoin }; try { passKey && sessionStorage.setItem(passKey, m.rejoin); } catch {} }
         }
         // Waiting in the lobby counts as connected: if the socket drops while
         // waiting, reconnect and knock again instead of leaving a dead page.
-        if (m.type === "waiting") { welcomed = true; this.everWelcomed = true; resolve(m); }
+        if (m.type === "waiting") { clearTimeout(deadline); welcomed = true; this.everWelcomed = true; resolve(m); }
         if (m.type === "error" && !welcomed && !m.reqId) {
           // Authentication failure is terminal, including after a reconnect.
           terminal = true; reject(new Error(m.error)); ws.close();
@@ -111,6 +120,7 @@ export class Signal extends EventTarget {
         this.dispatchEvent(new CustomEvent("*", { detail: m }));
       };
       ws.onclose = () => {
+        clearTimeout(deadline);
         if (this.ws !== ws) return;
         clearInterval(this.keepalive);
         this.queue = [];
@@ -170,6 +180,64 @@ function gathered(pc, ms = 2000) {
   });
 }
 
+// Candidates can arrive before the SDP response, or several seconds after it.
+// Scope them to one negotiation so replacing a camera cannot reuse stale ICE.
+function incrementalICE(sig, pc) {
+  const controller = new AbortController();
+  const negotiation = rid(), local = [], remote = [];
+  let ready = false, stopped = false;
+  const send = (candidate) => {
+    if (!stopped && sig.ws?.readyState === 1) sig.send({ type: "ice", negotiation, candidate });
+  };
+  const add = (candidate) => pc.addIceCandidate(candidate).catch((e) => {
+    if (!stopped) console.warn("ICE candidate", e);
+  });
+  const receive = ({ detail: m }) => {
+    if (stopped || m.negotiation !== negotiation || !m.candidate) return;
+    if (ready) add(m.candidate);
+    else if (remote.length < 128) remote.push(m.candidate);
+  };
+  const cleanup = () => {
+    stopped = true; local.length = remote.length = 0; pc.onicecandidate = null;
+    controller.abort();
+    sig.removeEventListener("ice", receive);
+    sig.removeEventListener("disconnected", disconnected);
+  };
+  const disconnected = () => { cleanup(); pc.close(); };
+  sig.addEventListener("ice", receive);
+  sig.addEventListener("disconnected", disconnected, { once: true });
+  if (sig.trickle) pc.onicecandidate = ({ candidate }) => {
+    if (!candidate || stopped) return;
+    const value = candidate.toJSON();
+    if (ready) send(value); else if (local.length < 128) local.push(value);
+  };
+  return {
+    fields: sig.trickle ? { trickle: true, negotiation } : {},
+    signal: controller.signal,
+    ready() { if (stopped) return; ready = true; local.splice(0).forEach(send); remote.splice(0).forEach(add); },
+    close: cleanup,
+  };
+}
+
+export function waitConnected(pc, iceServers = [], timeout = 30000, signal) {
+  return new Promise((resolve, reject) => {
+    const hasTURN = iceServers.some(s => [s.urls].flat().some(url => /^turns?:/i.test(url)));
+    const error = () => new Error(hasTURN
+      ? "No se pudo conectar el audio y video. Comprueba el servicio TURN y vuelve a intentar."
+      : "No se pudo conectar el audio y video. Esta red puede necesitar un relé TURN; el servidor no tiene uno configurado.");
+    const aborted = () => finish(new Error("Se perdió la conexión con el servidor."));
+    const finish = (err) => { clearTimeout(timer); pc.removeEventListener("connectionstatechange", changed); signal?.removeEventListener("abort", aborted); err ? reject(err) : resolve(); };
+    const changed = () => {
+      if (pc.connectionState === "connected") finish();
+      else if (["failed", "closed"].includes(pc.connectionState)) finish(error());
+    };
+    const timer = setTimeout(() => finish(error()), timeout);
+    pc.addEventListener("connectionstatechange", changed);
+    signal?.addEventListener("abort", aborted, { once: true });
+    if (signal?.aborted) aborted(); else changed();
+  });
+}
+
 /** Prefer a codec on a transceiver if the browser has it. */
 const CODECS = { h264: "video/H264", vp8: "video/VP8", vp9: "video/VP9", av1: "video/AV1" };
 function prefer(tr, mime) {
@@ -188,6 +256,7 @@ function prefer(tr, mime) {
  */
 export async function publish(sig, media, opts = {}) {
   const pc = new RTCPeerConnection({ iceServers: sig.ice, bundlePolicy: "max-bundle" });
+  const ice = incrementalICE(sig, pc);
   const senders = {};
   for (const track of media.getTracks()) {
     if (opts.contentHint && track.kind === "video") track.contentHint = opts.contentHint;
@@ -198,11 +267,14 @@ export async function publish(sig, media, opts = {}) {
   let res;
   try {
     await pc.setLocalDescription(await pc.createOffer());
-    await gathered(pc);
-    res = await sig.request({ type: "publish", kind: opts.kind || "camera", stream: opts.stream || "", name: opts.name || "", sdp: pc.localDescription });
+    if (!sig.trickle) await gathered(pc, 10000);
+    res = await sig.request({ type: "publish", kind: opts.kind || "camera", stream: opts.stream || "", name: opts.name || "", sdp: pc.localDescription, ...ice.fields });
     const answer = opts.stereo ? { type: res.sdp.type, sdp: stereoOpus(res.sdp.sdp, opts.audioKbps || 256) } : res.sdp;
     await pc.setRemoteDescription(answer);
+    ice.ready();
+    await waitConnected(pc, sig.ice, 30000, ice.signal);
   } catch (e) {
+    ice.close();
     pc.close(); // do not leak a half-open connection (and its camera reference)
     if (res?.stream) sig.send({ type: "unpublish", stream: res.stream });
     throw e;
@@ -210,7 +282,7 @@ export async function publish(sig, media, opts = {}) {
   await tune(senders, opts);
   return {
     id: res.stream, pc, senders, opts,
-    stop() { try { sig.send({ type: "unpublish", stream: res.stream }); } catch {} pc.close(); },
+    stop() { ice.close(); try { sig.send({ type: "unpublish", stream: res.stream }); } catch {} pc.close(); },
     /** Hot-swap a device without renegotiating (falls back to null = silence/black). */
     async replaceTrack(kind, track) {
       if (!senders[kind]) return false;
@@ -255,6 +327,7 @@ async function tune(senders, opts) {
 /** Subscribe to a stream id. Resolves with { stream, pc, close() }. */
 export async function subscribe(sig, id) {
   const pc = new RTCPeerConnection({ iceServers: sig.ice, bundlePolicy: "max-bundle" });
+  const ice = incrementalICE(sig, pc);
   const media = new MediaStream();
   pc.ontrack = (e) => {
     media.addTrack(e.track);
@@ -263,17 +336,20 @@ export async function subscribe(sig, id) {
   };
   let offer;
   try {
-    offer = await sig.request({ type: "subscribe", stream: id });
+    offer = await sig.request({ type: "subscribe", stream: id, ...ice.fields });
     await pc.setRemoteDescription(offer.sdp);
     await pc.setLocalDescription(await pc.createAnswer());
-    await gathered(pc);
+    if (!sig.trickle) await gathered(pc, 10000);
+    sig.send({ type: "answer", stream: id, sdp: pc.localDescription });
+    ice.ready();
+    await waitConnected(pc, sig.ice, 30000, ice.signal);
   } catch (e) {
+    ice.close();
     pc.close();
     if (offer) sig.send({ type: "unsubscribe", stream: id });
     throw e;
   }
-  sig.send({ type: "answer", stream: id, sdp: pc.localDescription });
-  return { id, name: offer.name, stream: media, pc, close() { sig.send({ type: "unsubscribe", stream: id }); pc.close(); } };
+  return { id, name: offer.name, stream: media, pc, close() { ice.close(); sig.send({ type: "unsubscribe", stream: id }); pc.close(); } };
 }
 
 /** Audio level 0..1 for a stream, polled by the caller. */

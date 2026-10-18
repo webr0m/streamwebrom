@@ -1,5 +1,15 @@
 # Cambios
 
+## v1.5.1 — conexión móvil y backstage
+
+- Trickle ICE bidireccional por WebSocket: los candidatos de conexión tardíos, incluidos los de TURN, ya no se descartan a los 2/3 segundos. Cada negociación queda vinculada a su conexión autenticada; no permite inyectar candidatos en otras conexiones ni reutilizar los de una cámara reemplazada.
+- Publicar y recibir esperan una conexión WebRTC real, con plazo de 30 segundos y cancelación al perder la señalización. La entrada WebSocket y las solicitudes HTTP también tienen límites de espera.
+- El invitado ve el estado de audio/video, una explicación de TURN cuando falta una ruta y un botón para reintentar dentro del backstage. La sala y el chat siguen disponibles tras un fallo de publicación.
+- Windows permite configurar direcciones, usuario y contraseña TURN; la contraseña se guarda cifrada con DPAPI y se pasa al servidor por entorno. Diagnóstico prueba la asignación real de un relé desde el navegador.
+- Pruebas de navegador con candidatos retrasados 3,5 segundos en ambos sentidos, bloqueo total de ICE, reintento y reconexión. Integración real de video con publicación y recepción forzadas por TURN/TCP. Los clientes HTTP WHIP/WHEP conservan su negociación sin trickle.
+- Binarios de servidor, Windows, Android e iOS simulador actualizados a 1.5.1. Un IPA para iPhone físico continúa requiriendo firma Apple.
+- Esta actualización no crea un servicio TURN: las redes que necesitan relé requieren uno configurado y accesible. Ver `docs/REDES-MOVILES.md`.
+
 ## v1.5.0 — auditoría y clientes móviles
 
 - Corregidos bloqueo al desconectar invitados, retirada de cámaras reemplazadas, reservas concurrentes de IDs, reconexión de salidas OBS y carreras en el estado de restream.

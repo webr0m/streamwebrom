@@ -130,6 +130,29 @@ func (e *Engine) complete(ctx context.Context, pc *webrtc.PeerConnection) (*webr
 	return pc.LocalDescription(), nil
 }
 
+// WebSocket peers exchange candidates as they arrive, including slow TURN
+// allocations. HTTP WHIP/WHEP clients retain the non-trickle SDP path.
+func trickle(pc *webrtc.PeerConnection, callbacks []func(webrtc.ICECandidateInit)) {
+	if len(callbacks) == 0 {
+		return
+	}
+	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+		if c != nil {
+			callbacks[0](c.ToJSON())
+		}
+	})
+}
+
+func (e *Engine) description(ctx context.Context, pc *webrtc.PeerConnection, incremental bool) (*webrtc.SessionDescription, error) {
+	if !incremental {
+		return e.complete(ctx, pc)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return pc.LocalDescription(), nil
+}
+
 // Sink receives forwarded RTP. TrackLocalStaticRTP, pion media writers and
 // UDP pipes all satisfy it.
 type Sink interface {
@@ -241,7 +264,7 @@ type Stream struct {
 
 // Publish accepts a publisher offer and returns the answer. expectedTracks is
 // derived from the offer's m-lines so we know when the stream is complete.
-func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webrtc.SessionDescription) (*Stream, *webrtc.SessionDescription, error) {
+func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webrtc.SessionDescription, onICE ...func(webrtc.ICECandidateInit)) (*Stream, *webrtc.SessionDescription, error) {
 	if offer.Type != webrtc.SDPTypeOffer {
 		return nil, nil, errors.New("expected an SDP offer")
 	}
@@ -252,6 +275,7 @@ func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webr
 	s := &Stream{ID: id, Owner: owner, Kind: kind, engine: e, pc: pc,
 		ready: make(chan struct{}), closed: make(chan struct{}), created: time.Now(),
 		expected: countMedia(offer.SDP)}
+	trickle(pc, onICE)
 
 	pc.OnTrack(func(tr *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		f := &Forwarder{
@@ -297,7 +321,7 @@ func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webr
 		_ = pc.Close()
 		return nil, nil, err
 	}
-	desc, err := e.complete(ctx, pc)
+	desc, err := e.description(ctx, pc, len(onICE) > 0)
 	if err != nil {
 		s.Close()
 		return nil, nil, err
@@ -341,6 +365,9 @@ func (s *Stream) Ready() <-chan struct{} { return s.ready }
 
 // Done is closed when the stream ends.
 func (s *Stream) Done() <-chan struct{} { return s.closed }
+
+// PC exposes the publisher connection for authenticated trickle ICE signalling.
+func (s *Stream) PC() *webrtc.PeerConnection { return s.pc }
 
 // Forwarders returns a snapshot of the stream's tracks.
 func (s *Stream) Forwarders() []*Forwarder {
@@ -467,7 +494,7 @@ func (e *Engine) attach(s *Stream, pc *webrtc.PeerConnection) (*Subscriber, erro
 
 // SubscribeOffer creates a server-initiated subscription (used over the
 // WebSocket signalling): the server sends an offer, the client answers.
-func (e *Engine) SubscribeOffer(ctx context.Context, s *Stream) (*Subscriber, *webrtc.SessionDescription, error) {
+func (e *Engine) SubscribeOffer(ctx context.Context, s *Stream, onICE ...func(webrtc.ICECandidateInit)) (*Subscriber, *webrtc.SessionDescription, error) {
 	if err := waitReady(ctx, s); err != nil {
 		return nil, nil, err
 	}
@@ -480,6 +507,7 @@ func (e *Engine) SubscribeOffer(ctx context.Context, s *Stream) (*Subscriber, *w
 		_ = pc.Close()
 		return nil, nil, err
 	}
+	trickle(pc, onICE)
 	offer, err := pc.CreateOffer(nil)
 	if err != nil {
 		sub.Close()
@@ -489,7 +517,7 @@ func (e *Engine) SubscribeOffer(ctx context.Context, s *Stream) (*Subscriber, *w
 		sub.Close()
 		return nil, nil, err
 	}
-	desc, err := e.complete(ctx, pc)
+	desc, err := e.description(ctx, pc, len(onICE) > 0)
 	if err != nil {
 		sub.Close()
 		return nil, nil, err

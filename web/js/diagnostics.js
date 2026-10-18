@@ -14,7 +14,7 @@ async function check() {
     const cfg = await api("/api/config");
     box.append(row("Servidor", true, `Conectado · ${cfg.version || "desarrollo"}`));
     box.append(row("Multistream", cfg.capabilities?.multistream, cfg.capabilities?.multistream ? "ffmpeg disponible en el servidor" : "Instala ffmpeg en el servidor para enviar a RTMP/SRT"));
-    const turn = (cfg.ice || []).some((server) => server.urls.some((url) => /^turns?:/.test(url)));
+    const turn = (cfg.ice || []).some((server) => [server.urls].flat().some((url) => /^turns?:/.test(url)));
     box.append(row("Relé TURN", turn, turn ? "Configurado" : "Sin TURN; algunas redes restrictivas pueden impedir el video"));
   } catch (e) { box.append(row("Servidor", false, e.message)); }
 }
@@ -30,3 +30,27 @@ $("#media").onclick = async () => {
   finally { stream?.getTracks().forEach((track) => track.stop()); button.disabled = false; }
 };
 check();
+
+$("#relay").onclick = async () => {
+  const button = $("#relay"), result = $("#relayResult");
+  button.disabled = true; result.textContent = "Comprobando acceso al relé TURN…";
+  let pc;
+  try {
+    const cfg = await api("/api/config");
+    const servers = (cfg.ice || []).map(s => ({ ...s, urls: [s.urls].flat().filter(url => /^turns?:/i.test(url)) })).filter(s => s.urls.length);
+    if (!servers.length) throw new Error("El servidor no tiene TURN configurado. El administrador debe añadir un relé para las redes móviles que no permiten conexión directa.");
+    pc = new RTCPeerConnection({ iceServers: servers, iceTransportPolicy: "relay" });
+    pc.createDataChannel("relay-check");
+    await new Promise(async (resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("TURN no respondió en 15 segundos. Revisa la dirección, las credenciales y el firewall del relé.")), 15000);
+      pc.onicecandidate = ({ candidate }) => {
+        if (!candidate) { clearTimeout(timer); reject(new Error("No se obtuvo una ruta TURN. Comprueba las credenciales y prueba TURN con TCP/TLS.")); }
+        else if (candidate.type === "relay") { clearTimeout(timer); resolve(); }
+      };
+      try { await pc.setLocalDescription(await pc.createOffer()); }
+      catch (e) { clearTimeout(timer); reject(e); }
+    });
+    result.textContent = "✓ Se obtuvo una ruta TURN desde esta red. Entra en la sala para comprobar audio y video.";
+  } catch (e) { result.textContent = e.message; }
+  finally { if (pc) { pc.onicecandidate = null; pc.close(); } button.disabled = false; }
+};

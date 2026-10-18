@@ -15,7 +15,7 @@ class Socket {
 }
 globalThis.WebSocket = Socket;
 const source = await readFile(new URL('../web/js/rtc.js', import.meta.url), 'utf8');
-const { Signal, readStored } = await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const { Signal, readStored, waitConnected } = await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 const signals=[];
 afterEach(()=>{ signals.splice(0).forEach(s=>s.close()); Socket.sockets=[]; storage.clear(); });
 function signal() { const s=new Signal();signals.push(s);return s; }
@@ -61,4 +61,32 @@ test('storage failures and malformed values fall back safely',()=>{
   globalThis.localStorage={getItem:()=>'{broken'};assert.deepEqual(readStored('rooms',{}),{});
   globalThis.localStorage={getItem:()=>{throw new Error('denied')}};assert.deepEqual(readStored('rooms',[]),[]);
   globalThis.localStorage={getItem:()=> '[]'};assert.deepEqual(readStored('rooms',{}),{});
+});
+
+test('a stalled mobile WebSocket rejects and permits retry',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','setInterval']});
+  const s=signal(), join=s.connect({type:'join',room:'test-room'});
+  const rejection=assert.rejects(join,/servidor no respondió/);
+  t.mock.timers.tick(20001);await rejection;
+  assert.equal(Socket.sockets[0].readyState,3);
+  await connected(s);
+});
+
+test('waiting for media reports missing TURN instead of hanging forever',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','setInterval']});
+  const pc=new EventTarget();pc.connectionState='connecting';
+  const pending=assert.rejects(waitConnected(pc,[],30000),/no tiene uno configurado/);
+  t.mock.timers.tick(30001);await pending;
+});
+
+test('media connection success and configured TURN failure have distinct results',async()=>{
+  const pc=new EventTarget();pc.connectionState='connecting';
+  const pending=waitConnected(pc,[]);pc.connectionState='connected';pc.dispatchEvent(new Event('connectionstatechange'));await pending;
+  pc.connectionState='failed';await assert.rejects(waitConnected(pc,[{urls:'turns:relay.test:443?transport=tcp'}]),/Comprueba el servicio TURN/);
+});
+
+test('signalling loss cancels a pending media connection immediately',async()=>{
+  const pc=new EventTarget();pc.connectionState='connecting';const controller=new AbortController();
+  const pending=assert.rejects(waitConnected(pc,[],30000,controller.signal),/perdió la conexión con el servidor/);
+  controller.abort();await pending;
 });

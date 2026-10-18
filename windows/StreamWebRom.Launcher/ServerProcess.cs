@@ -73,6 +73,14 @@ public sealed class ServerProcess : IDisposable
             WorkingDirectory = DataDir,
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
+        // Keep TURN credentials out of the process command line and logs.
+        // Blank launcher fields retain explicitly configured SWR_TURN env vars.
+        if (!string.IsNullOrWhiteSpace(s.TurnUrls))
+        {
+            psi.Environment["SWR_TURN"] = s.TurnUrls.Trim();
+            psi.Environment["SWR_TURN_USER"] = s.TurnUser;
+            psi.Environment["SWR_TURN_PASS"] = s.TurnPassword;
+        }
         var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
         proc.OutputDataReceived += (_, e) => { if (e.Data != null) Output?.Invoke(e.Data); };
         proc.ErrorDataReceived += (_, e) => { if (e.Data != null) Output?.Invoke(e.Data); };

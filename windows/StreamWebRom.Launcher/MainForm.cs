@@ -23,6 +23,9 @@ public sealed class MainForm : Form
     private readonly NumericUpDown _udp = new() { Minimum = 0, Maximum = 65535, Width = 90 };
     private readonly CheckBox _https = new() { Text = "HTTPS (necesario para cámaras de otros equipos/teléfonos)", AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(3, 7, 12, 3) };
     private readonly TextBox _pubIp = new() { Width = 160, PlaceholderText = "opcional" };
+    private readonly TextBox _turnUrls = new() { Width = 330, PlaceholderText = "turn:relay.ejemplo.com:3478,turns:relay.ejemplo.com:443?transport=tcp" };
+    private readonly TextBox _turnUser = new() { Width = 140, PlaceholderText = "usuario TURN" };
+    private readonly TextBox _turnPassword = new() { Width = 180, UseSystemPasswordChar = true, PlaceholderText = "contraseña TURN" };
     private bool _quitting;
 
     // v1.3 look (StreamYard-style): near-black surfaces, cards, blue primary.
@@ -40,7 +43,9 @@ public sealed class MainForm : Form
         _tunnelOn.Checked = _settings.TunnelEnabled; _host.Text = _settings.PublicHost;
         if (!string.IsNullOrEmpty(_settings.TunnelTokenProtected)) _token.PlaceholderText = "token guardado (cifrado) · pega otro para cambiarlo";
         _port.Value = _settings.Port; _udp.Value = _settings.UdpPort; _https.Checked = _settings.Https; _pubIp.Text = _settings.PublicIp;
-        foreach (var c in new Control[] { _host, _token, _pubIp, _port, _udp }) StyleInput(c);
+        _turnUrls.Text = _settings.TurnUrls; _turnUser.Text = _settings.TurnUser;
+        if (!string.IsNullOrEmpty(_settings.TurnPasswordProtected)) _turnPassword.PlaceholderText = "contraseña guardada (cifrada)";
+        foreach (var c in new Control[] { _host, _token, _pubIp, _port, _udp, _turnUrls, _turnUser, _turnPassword }) StyleInput(c);
 
         // Top bar: app name + status pill on the left, primary action on the right.
         var top = new TableLayoutPanel { Dock = DockStyle.Top, Height = 64, ColumnCount = 3, BackColor = Color.FromArgb(23, 24, 27), Padding = new Padding(18, 0, 18, 0) };
@@ -94,6 +99,12 @@ public sealed class MainForm : Form
         opts.Controls.Add(Lbl("Puerto UDP media")); opts.Controls.Add(_udp);
         opts.Controls.Add(Lbl("IP pública")); opts.Controls.Add(_pubIp);
         opts.Controls.Add(_https);
+        opts.Controls.Add(Lbl("Relé TURN (redes móviles)")); opts.Controls.Add(_turnUrls);
+        opts.Controls.Add(Lbl("Usuario")); opts.Controls.Add(_turnUser);
+        opts.Controls.Add(Lbl("Contraseña")); opts.Controls.Add(_turnPassword);
+        var diagnose = Btn("Probar conexión");
+        diagnose.Click += (_, _) => OpenUrl((_settings.TunnelActive ? _publicUrl.Text : _localUrl.Text) + "/diagnostics");
+        opts.Controls.Add(diagnose);
         var apply = Btn("Aplicar y reiniciar", true);
         apply.Click += (_, _) => { SaveSettings(); StopServer(); StartServer(); };
         opts.Controls.Add(apply);
@@ -107,7 +118,7 @@ public sealed class MainForm : Form
         tunHelp.Click += (_, _) => MessageBox.Show(
             "Cloudflare → Zero Trust → Networks → Tunnels → streamwebrom → Configure → copia el token de “Install and run a connector” (la parte larga después de --token).\n\n" +
             "Se guarda cifrado con tu usuario de Windows y nunca sale de este PC.\n\n" +
-            "El video viaja por UDP directo a este PC: abre/reenvía el puerto UDP de media (por defecto 50000) en tu router para que conecten invitados detrás de cualquier red.",
+            "El túnel publica la web; el audio y video necesitan además UDP accesible o un servidor TURN. Para redes móviles con CGNAT o UDP bloqueado, configura un relé TURN con TCP/TLS en la tarjeta Red y compruébalo en Diagnóstico.",
             "Cloudflare Tunnel", MessageBoxButtons.OK, MessageBoxIcon.Information);
         tun.Controls.Add(tunHelp);
         root.Controls.Add(Card("Publicar en internet", tun));
@@ -177,6 +188,8 @@ public sealed class MainForm : Form
     {
         _settings.Port = (int)_port.Value; _settings.UdpPort = (int)_udp.Value;
         _settings.Https = _https.Checked; _settings.PublicIp = _pubIp.Text;
+        _settings.TurnUrls = _turnUrls.Text.Trim(); _settings.TurnUser = _turnUser.Text.Trim();
+        if (_turnPassword.Text.Length > 0) { _settings.TurnPassword = _turnPassword.Text; _turnPassword.Clear(); _turnPassword.PlaceholderText = "contraseña guardada (cifrada)"; }
         _settings.TunnelEnabled = _tunnelOn.Checked; _settings.PublicHost = _host.Text.Trim();
         if (!string.IsNullOrWhiteSpace(_token.Text)) { _settings.TunnelToken = _token.Text; _token.Clear(); _token.PlaceholderText = "token guardado (cifrado) · pega otro para cambiarlo"; }
         _settings.Save();

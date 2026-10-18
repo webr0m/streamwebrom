@@ -230,6 +230,14 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 		return errors.New("waiting for the host to let you in")
 	}
 	switch m.Type {
+	case "ice":
+		p.mu.Lock()
+		pc := p.icePCs[m.Negotiation]
+		p.mu.Unlock()
+		if pc == nil || m.Candidate == nil {
+			return errors.New("unknown ICE negotiation")
+		}
+		return pc.AddICECandidate(*m.Candidate)
 	case "publish":
 		return h.publish(ctx, p, m)
 	case "unpublish":
@@ -402,7 +410,7 @@ func (h *Hub) welcome(p *Peer) {
 	st := r.Snapshot()
 	role := p.role()
 	w := Msg{Type: "welcome", PeerID: p.ID, Role: role, Room: r.ID, State: &st,
-		Peers: r.Peers(), Streams: r.Streams(), Chat: r.history(), ICE: h.o.ICE}
+		Peers: r.Peers(), Streams: r.Streams(), Chat: r.history(), ICE: h.o.ICE, Trickle: true}
 	if role == RoleGuest {
 		w.Rejoin = r.issuePass(p)
 	}
@@ -566,7 +574,11 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 	defer release()
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	s, answer, err := h.o.Engine.Publish(cctx, id, p.ID, kind, *m.SDP)
+	callbacks, err := p.iceCallback(m)
+	if err != nil {
+		return err
+	}
+	s, answer, err := h.o.Engine.Publish(cctx, id, p.ID, kind, *m.SDP, callbacks...)
 	if err != nil {
 		return err
 	}
@@ -576,6 +588,9 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 	}
 	p.pubs[id] = s
 	p.mu.Unlock()
+	if m.Trickle {
+		p.registerICE(m.Negotiation, s.PC(), s.Done())
+	}
 	if !p.room.AddStream(s) {
 		return errors.New("room closed")
 	}
@@ -593,7 +608,11 @@ func (h *Hub) subscribe(ctx context.Context, p *Peer, m Msg) error {
 	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	sub, offer, err := h.o.Engine.SubscribeOffer(cctx, s)
+	callbacks, err := p.iceCallback(m)
+	if err != nil {
+		return err
+	}
+	sub, offer, err := h.o.Engine.SubscribeOffer(cctx, s, callbacks...)
 	if err != nil {
 		return err
 	}
@@ -603,6 +622,9 @@ func (h *Hub) subscribe(ctx context.Context, p *Peer, m Msg) error {
 	}
 	p.subs[s.ID] = sub
 	p.mu.Unlock()
+	if m.Trickle {
+		p.registerICE(m.Negotiation, sub.PC(), sub.Done())
+	}
 	p.Send(Msg{Type: "offer", Stream: s.ID, SDP: offer, ReqID: m.ReqID, Name: p.room.label(s)})
 	return nil
 }
