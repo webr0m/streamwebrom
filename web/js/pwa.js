@@ -1,6 +1,7 @@
 // Installable web app (PWA). Skipped inside OBS/vMix (no service workers needed there).
 if ("serviceWorker" in navigator && !/OBS|vMix/i.test(navigator.userAgent) && location.pathname !== "/view") {
-  navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+  const build = new URL(import.meta.url).pathname.match(/^\/assets\/([^/]+)\//)?.[1] || "dev";
+  navigator.serviceWorker.register(`/sw.js?build=${encodeURIComponent(build)}`, { scope: "/", updateViaCache: "none" }).catch(() => {});
 }
 let deferred;
 window.addEventListener("beforeinstallprompt", (e) => {

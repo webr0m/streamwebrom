@@ -118,10 +118,15 @@ with sync_playwright() as pw:
     assert blocked.evaluate("window.__pcs.some(pc=>pc.connectionState==='connected')")
     # Allocation alone is insufficient: the diagnostic must decode generated
     # video after a full publish/subscribe round trip, without opening devices.
-    diagnostic = page(); diagnostic.goto(args.url+'/diagnostics')
+    # Emulate a stale CDN/browser copy at every old unversioned module URL.
+    cache_context = browser.new_context(service_workers='block')
+    cache_context.route(args.url+'/js/**', lambda route: route.fulfill(status=200,content_type='text/javascript',body='throw new Error("stale unversioned script");'))
+    diagnostic = cache_context.new_page()
+    diagnostic.on('pageerror',lambda error:errors.append(str(error)))
+    diagnostic.goto(args.url+'/diagnostics')
     diagnostic.locator('#videoRoute').click()
     expect(diagnostic.locator('#videoRouteResult')).to_contain_text('Video enviado al servidor y recibido correctamente', timeout=45000)
-    diagnostic.close()
+    diagnostic.close(); cache_context.close()
     # Safari's engine catches unsupported syntax and DOM assumptions.
     webkit = pw.webkit.launch(headless=True)
     safari = webkit.new_page()

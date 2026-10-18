@@ -41,6 +41,7 @@ def analyse(path):
     src = open(path, encoding="utf-8").read()
     # esprima only parses ES2017: lower ES2020 operators for parsing purposes only.
     import re
+    src = src.replace("import.meta", '({url: ""})')
     src = re.sub(r"\?\.(?=[\[(])", "", src)
     src = src.replace("?.", ".").replace("??=", "||=").replace("??", "||")
     src = re.sub(r"catch\s*\{", "catch (_e) {", src)

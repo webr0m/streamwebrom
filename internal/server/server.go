@@ -34,6 +34,7 @@ type Server struct {
 	cfg              config.Config
 	hub              *studio.Hub
 	static           fs.FS
+	assetPrefix      string
 	log              *slog.Logger
 	start            time.Time
 	iceProvider      func() []webrtc.ICEServer
@@ -127,6 +128,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 func New(cfg config.Config, hub *studio.Hub, static fs.FS, log *slog.Logger, iceProvider ...func() []webrtc.ICEServer) *Server {
 	s := &Server{cfg: cfg, hub: hub, static: static, log: log, start: time.Now(), sessions: map[string]session{},
 		ipRate: map[string]*rate.Limiter{}, ipConns: map[string]int{}}
+	s.assetPrefix = shellPrefix(static)
 	if len(iceProvider) > 0 {
 		s.iceProvider = iceProvider[0]
 	}
@@ -218,8 +220,16 @@ func (s *Server) pages(files http.Handler) http.Handler {
 	routes := map[string]string{"/": "/index.html", "/studio": "/studio.html", "/guest": "/guest.html", "/view": "/view.html", "/join": "/guest.html", "/diagnostics": "/diagnostics.html"}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if p, ok := routes[r.URL.Path]; ok {
-			w.Header().Set("Cache-Control", "no-cache")
-			http.ServeFileFS(w, r, s.static, strings.TrimPrefix(p, "/"))
+			s.serveShell(w, r, strings.TrimPrefix(p, "/"), false)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/assets/") {
+			name := strings.TrimPrefix(r.URL.Path, s.assetPrefix+"/")
+			if !fs.ValidPath(name) || !(strings.HasPrefix(name, "js/") && strings.HasSuffix(name, ".js") || strings.HasPrefix(name, "css/") && strings.HasSuffix(name, ".css")) {
+				http.NotFound(w, r)
+				return
+			}
+			s.serveShell(w, r, name, true)
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, ".html") { // canonical pretty URLs only
@@ -227,7 +237,8 @@ func (s *Server) pages(files http.Handler) http.Handler {
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, ".js") || strings.HasSuffix(r.URL.Path, ".css") {
-			w.Header().Set("Cache-Control", "no-cache")
+			s.serveShell(w, r, strings.TrimPrefix(r.URL.Path, "/"), false)
+			return
 		}
 		files.ServeHTTP(w, r)
 	})

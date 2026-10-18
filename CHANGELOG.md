@@ -1,5 +1,12 @@
 # Cambios
 
+## v1.6.2 — Actualizaciones web coherentes
+
+- Archivos JavaScript y CSS bajo una ruta con hash de contenido; los imports relativos conservan el mismo hash. Evita mezclar páginas nuevas con módulos antiguos guardados por el navegador o CDN.
+- Corrige botones de diagnóstico sin respuesta después de actualizar, aun cuando `/api/config` ya indicaba la versión nueva.
+- Caché del service worker ligada al mismo contenido, actualización sin caché HTTP y política `no-store` para páginas y recursos sin versión.
+- Prueba de navegador con módulos antiguos simulados en `/js/`: el diagnóstico completo de video debe seguir funcionando.
+
 ## v1.6.1 — Rutas alternativas para redes móviles
 
 - Modo de invitado «Red móvil»: usa exclusivamente TURN cifrado por TLS/TCP en el puerto 443, sin candidatos UDP ni conexiones directas.

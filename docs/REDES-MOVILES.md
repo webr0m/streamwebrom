@@ -46,6 +46,8 @@ Estas pruebas no representan una comprobación con cada operadora móvil.
 
 ## Rutas alternativas por participante (1.6.1)
 
+Desde 1.6.2 las páginas cargan JavaScript/CSS mediante rutas con hash de contenido, incluidos los imports entre módulos y el service worker. Esto evita que una página nueva use código antiguo retenido por el navegador o el CDN. Tras actualizar, recarga la página antes de probar. Un botón visible que no responde puede indicar una mezcla de versiones; el número de `/api/config` por sí solo no confirma qué JavaScript cargó el teléfono.
+
 Una prueba de asignación TURN puede pasar y aun así fallar el audio/video. En `/diagnostics`, «Probar video hasta el servidor» envía una imagen generada y verifica su recepción y decodificación. No abre la cámara ni el micrófono.
 
 Prueba las opciones «Solo conexión cifrada por 443» y «Relé del equipo anfitrión por 443». En la pantalla de ingreso del invitado, el selector «Conexión» ofrece las mismas rutas. Si falla el ingreso, los botones del aviso permiten cambiar de ruta conservando el permiso de reingreso. Los enlaces pueden incluir `&network=tls` o `&network=local`; se conserva el fragmento de la invitación.

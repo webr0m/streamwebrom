@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.6.1:** rutas alternativas para redes móviles: TURN cifrado por 443 y relé local por participante, además del cambio preventivo por cuota. Diagnóstico con envío y recepción de video generado, sin cámara. Requiere configurar la infraestructura: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.6.2:** actualizaciones web sin mezclar código antiguo en caché, rutas alternativas para redes móviles (TURN cifrado por 443 y relé local por participante) y diagnóstico con envío y recepción de video generado, sin cámara. Requiere configurar la infraestructura: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 

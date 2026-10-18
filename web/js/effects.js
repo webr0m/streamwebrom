@@ -84,7 +84,7 @@ const tickers = new Set();
 function onTick(fn) {
   if (!ticker) {
     try {
-      ticker = new Worker("/js/ticker.js");
+      ticker = new Worker(new URL("./ticker.js", import.meta.url));
       ticker.onmessage = () => tickers.forEach((f) => f());
     } catch { ticker = { postMessage() {}, fallback: setInterval(() => tickers.forEach((f) => f()), 33) }; }
   }
