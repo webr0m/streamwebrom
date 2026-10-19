@@ -68,6 +68,12 @@ with sync_playwright() as pw:
     obs.goto(args.url+'/view?room='+keys['room']+'&stream='+screen_id+'&mute=1#key='+keys['viewKey'])
     obs.wait_for_function("()=>{const v=document.querySelector('#single');return v.videoWidth>0&&v.readyState>=2}",timeout=20000)
     assert obs.locator('#single').evaluate('e=>getComputedStyle(e).objectFit')=='contain'
+    # Stopping from the guest also removes the source from the scene lineup.
+    guest.locator('#cancelScreen').click()
+    expect(screen).to_have_count(0,timeout=15000)
+    expect(host.locator('#sceneBar .scenecount').first).to_have_text('1 en escena')
+    authorize();guest.locator('#startScreen').click()
+    expect(screen).to_have_count(1,timeout=20000)
     host.locator('[data-tab="people"]').click()
     host.get_by_role('button',name='Revocar pantalla',exact=True).click()
     expect(screen).to_have_count(0,timeout=15000)
@@ -102,5 +108,5 @@ with sync_playwright() as pw:
     assert guest.evaluate('__captures.every(t=>t.readyState==="ended")')
     expect(screen).to_have_count(0,timeout=15000)
     assert not errors,errors
-    print(json.dumps({'hostApprovalBeforeCapture':True,'denyCancelRetry':True,'realScreenVideoToOBS':True,'revokeStopsTracks':True,'latePickerReleased':True,'offstageRevokes':True,'leaveReleasesShare':True,'pageErrors':errors}),flush=True)
+    print(json.dumps({'hostApprovalBeforeCapture':True,'denyCancelRetry':True,'realScreenVideoToOBS':True,'guestStopClearsStage':True,'revokeStopsTracks':True,'latePickerReleased':True,'offstageRevokes':True,'leaveReleasesShare':True,'pageErrors':errors}),flush=True)
     context.close();browser.close()

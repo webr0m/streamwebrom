@@ -291,6 +291,7 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 			r.mu.Unlock()
 			if removed {
 				r.broadcast(Msg{Type: "stream-removed", Stream: s.ID}, "")
+				h.dropStreams(r, map[string]*sfu.Stream{s.ID: s}, true)
 			}
 			s.Close()
 		}
