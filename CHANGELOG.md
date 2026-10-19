@@ -1,8 +1,9 @@
 # Cambios
 
-## v1.6.5 — Volver a entrar después de salir
+## v1.6.6 — Volver a entrar después de salir
 
 - «Volver a entrar» fuerza una página nueva y conserva la invitación. Antes, con `#invite`, el enlace podía navegar dentro del mismo documento y dejar visible «Saliste de la sala».
+- Libera el identificador de cámara antes de cierres TURN lentos al retirar una publicación. Evita «stream id in use» al volver a entrar rápidamente. Cierra primero la señalización al salir.
 - La desconexión final y los atajos de teclado ya no acceden a controles retirados de la pantalla de salida.
 - Regresión en Chromium con pantalla táctil y tamaño de móvil: salir y volver a entrar dos veces con fragmento de invitación, recuperando medios.
 

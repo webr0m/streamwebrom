@@ -1,4 +1,4 @@
-param([string]$Version = '1.6.5', [switch]$SkipLauncher)
+param([string]$Version = '1.6.6', [switch]$SkipLauncher)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root

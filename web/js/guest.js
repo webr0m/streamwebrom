@@ -487,7 +487,9 @@ async function addExtraCam(dev) {
 $("#leaveBtn").onclick = () => leave("Saliste de la sala.");
 
 function leave(text) {
-  pub?.stop(); screenPub?.stop(); for (const x of extraCams.values()) x.pub.stop(); sig.close();
+  // Closing signalling first avoids queued unpublish operations delaying the
+  // server's leave cleanup when a TURN connection takes time to shut down.
+  sig.close(); pub?.stop(); screenPub?.stop(); for (const x of extraCams.values()) x.pub.stop();
   media?.getTracks().forEach((t) => t.stop());
   // With #invite in the URL, a link to location.href is a same-document
   // navigation: it leaves this goodbye screen and the closed Signal in place.

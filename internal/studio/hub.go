@@ -273,6 +273,17 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 		delete(p.pubs, m.Stream)
 		p.mu.Unlock()
 		if s != nil {
+			// TURN teardown can block. Free the room ID before closing the PC,
+			// as leave() does, so a quick return can reclaim its stable camera.
+			r.mu.Lock()
+			removed := r.streams[s.ID] == s
+			if removed {
+				delete(r.streams, s.ID)
+			}
+			r.mu.Unlock()
+			if removed {
+				r.broadcast(Msg{Type: "stream-removed", Stream: s.ID}, "")
+			}
 			s.Close()
 		}
 		return nil
