@@ -4,7 +4,7 @@
 //   /view?room=R&scene=2#key=...                extra scene 2..8 (its own lineup/layout, VDO.Ninja "add to scene")
 //   /view?room=R&stream=ID#key=...              one source, full frame
 // Optional (VDO.Ninja-style):
-//   &cover=1 crop to fill · &mute=1 / &noaudio no sound · &volume=0..100
+//   &cover=0 show the entire source (default: centered 16:9 camera crop) · &mute=1 / &noaudio no sound · &volume=0..100
 //   &label=1 show the name · &mirror=1 · &rotate=90|180|270 · &bg=#hex
 //   &audioonly=1 sound only · &status=0 hide status text · &transparent=1
 //   &stats=1 show resolution / fps / bitrate overlay
@@ -29,7 +29,8 @@ if (params.get("mirror") === "1") single.style.transform = "scaleX(-1)";
 const rot = Number(params.get("rotate"));
 if ([90, 180, 270].includes(rot)) single.style.transform = (single.style.transform || "") + ` rotate(${rot}deg)`;
 if (audioOnly) single.style.visibility = "hidden";
-if (params.get("cover") === "1") document.body.classList.add("cover");
+const framing = kind => document.body.classList.toggle("contain", params.get("cover") === "0" || (params.get("cover") !== "1" && kind === "screen"));
+framing();
 const status = $("#status");
 const say = (t) => { status.textContent = t; status.classList.toggle("hidden", !t || params.get("status") === "0"); };
 
@@ -74,6 +75,7 @@ async function watch(info) {
     v.srcObject = sub.stream;
     await v.play().catch(() => {});
     if (only) {
+      framing(info.kind);
       const s = $("#single");
       s.srcObject = sub.stream; s.muted = muted; s.volume = baseVol; s.classList.remove("hidden");
       if (params.get("label") === "1" || params.has("showlabel")) $("#label").textContent = sub.name || "";

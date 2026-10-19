@@ -59,6 +59,7 @@
         </div>
       </details>
     </div>
+    <div class="waitroom hidden" id="screenRequests" aria-live="polite"></div>
     <div class="waitroom hidden" id="waitroom" aria-live="polite"></div>
     <div class="backstage" id="backstage"></div>
 
@@ -134,7 +135,7 @@
         <div class="panehead">OBS</div>
         <p class="muted" style="margin:0">Pega estos enlaces en OBS → Fuente → <b>Navegador</b> (1920×1080, marca “Controlar audio vía OBS”).</p>
         <div class="row wrap obsopts">
-          <label class="row"><input type="checkbox" id="obsCover"> Recortar para llenar</label>
+          <label class="row"><input type="checkbox" id="obsCover" checked> Encuadre del estudio (16:9)</label>
           <label class="row"><input type="checkbox" id="obsMute"> Sin audio</label>
           <label class="row"><input type="checkbox" id="obsLabel"> Mostrar nombre</label>
           <label class="row"><input type="checkbox" id="obsTransparent"> Fondo transparente</label>

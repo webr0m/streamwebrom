@@ -32,11 +32,17 @@ export function callGrid(grid, reset) {
     const width = grid.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     const height = grid.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
     if (width <= 0 || height <= 0 || !tiles.length) return;
-    const primaryHeight = focused ? (tiles.length === 1 ? height : Math.max(0, height * .66 - gap)) : 0;
-    const fit = fitTiles(tiles.length - (focused ? 1 : 0), width, height - primaryHeight - (focused ? gap : 0), gap, !focused && width < height ? 1 : 16 / 9);
+    const aspect = 16 / 9;
+    const primaryWidth = focused ? Math.min(width, (tiles.length === 1 ? height : Math.max(0, height * .66 - gap)) * aspect) : 0;
+    const primaryHeight = primaryWidth / aspect;
+    const fit = fitTiles(tiles.length - (focused ? 1 : 0), width, height - primaryHeight - (focused && tiles.length > 1 ? gap : 0), gap);
+    // Keep thumbnails smaller than the selection even on a tall phone. Each
+    // track and the selected tile keep the same 16:9 frame after rotation.
+    if (focused && fit.width > primaryWidth * .65) { fit.width = primaryWidth * .65; fit.height = fit.width / aspect; }
     const columns = focused && tiles.length === 1 ? 1 : fit.columns;
-    grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, ${focused ? width / columns - gap * (columns - 1) / columns : fit.width}px))`;
+    grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, ${focused && tiles.length === 1 ? primaryWidth : fit.width}px))`;
     grid.style.gridTemplateRows = focused ? `${primaryHeight}px${fit.rows ? ` repeat(${fit.rows}, ${fit.height}px)` : ""}` : `repeat(${fit.rows}, ${fit.height}px)`;
+    for (const tile of tiles) tile.style.width = tile === focused ? `${primaryWidth}px` : "";
     grid.classList.toggle("has-expanded", !!focused);
   }
   const click = e => {

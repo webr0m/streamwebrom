@@ -265,6 +265,14 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 			return errors.New("unknown ICE negotiation")
 		}
 		return pc.AddICECandidate(*m.Candidate)
+	case "screen-request":
+		return h.requestScreen(p, m)
+	case "screen-cancel":
+		if role != RoleGuest {
+			return errors.New("only guests request screen permission")
+		}
+		h.revokeScreen(p, "cancelled")
+		return nil
 	case "publish":
 		return h.publish(ctx, p, m)
 	case "unpublish":
@@ -611,6 +619,18 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 	if kind == "program" && role != RoleHost {
 		return errors.New("only the host publishes the program")
 	}
+	var screenEpoch uint64
+	if kind == "screen" && role == RoleGuest {
+		p.room.mu.RLock()
+		p.mu.Lock()
+		screenEpoch = p.screenEpoch
+		p.mu.Unlock()
+		allowed := p.room.screenPermitLocked(p, screenEpoch)
+		p.room.mu.RUnlock()
+		if !allowed {
+			return errors.New("Compartir pantalla requiere autorización del anfitrión y estar en el escenario")
+		}
+	}
 	id := m.Stream
 	if id == "" {
 		id = p.ID + "-" + kind
@@ -664,8 +684,17 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 	if m.Trickle {
 		p.registerICE(m.Negotiation, s.PC(), s.Done())
 	}
-	if !p.room.AddStream(s) {
-		return errors.New("room closed")
+	var permit func() bool
+	if kind == "screen" && role == RoleGuest {
+		permit = func() bool { return p.room.screenPermitLocked(p, screenEpoch) }
+	}
+	if !p.room.addStream(s, permit) {
+		p.mu.Lock()
+		if p.pubs[id] == s {
+			delete(p.pubs, id)
+		}
+		p.mu.Unlock()
+		return errors.New("La sala se cerró o se revocó el permiso para compartir pantalla")
 	}
 	if label := strings.TrimSpace(m.Name); label != "" {
 		_ = p.room.Update(func(st *State) error { st.Labels[id] = cleanName(label); return nil })
@@ -789,6 +818,20 @@ func (h *Hub) hostAction(host *Peer, m Msg) error {
 		p.Send(Msg{Type: "kicked"})
 		time.AfterFunc(200*time.Millisecond, p.close)
 		return nil
+	case "screen-permission":
+		p := h.peerByID(r, m.Target)
+		if p == nil || p.role() != RoleGuest {
+			return errors.New("guest not found")
+		}
+		switch m.Action {
+		case "allow":
+			return h.allowScreen(p)
+		case "deny", "revoke":
+			h.revokeScreen(p, map[string]string{"deny": "denied", "revoke": "revoked"}[m.Action])
+			return nil
+		default:
+			return errors.New("bad screen permission action")
+		}
 	case "request": // remote moderation: mute/unmute mic, camera off/on, lower hand...
 		if !slices.Contains(RequestActions, m.Action) {
 			return fmt.Errorf("unknown request %q", m.Action)
@@ -807,6 +850,16 @@ func (h *Hub) hostAction(host *Peer, m Msg) error {
 			return errors.New("peer not found")
 		}
 		for _, p := range targets {
+			if m.Action == "screenon" {
+				if err := h.allowScreen(p); err != nil {
+					return err
+				}
+				continue
+			}
+			if m.Action == "screenoff" {
+				h.revokeScreen(p, "revoked")
+				continue
+			}
 			if m.Action == "lowerhand" {
 				p.mu.Lock()
 				p.hand = false

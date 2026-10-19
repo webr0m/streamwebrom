@@ -1,5 +1,13 @@
 # Cambios
 
+## v1.8.0 — Encuadre 16:9 y pantalla con autorización
+
+- Invitados en cualquier escenario pueden solicitar compartir pantalla. El anfitrión aprueba, rechaza o revoca; el invitado elige la pantalla tras aprobarse. El servidor exige autorización, invalida negociaciones revocadas y detiene el envío al retirar el permiso o sacar al invitado de todos los escenarios. Cada conexión y nueva sesión de pantalla requiere permiso nuevo.
+- Cuadros 16:9 en móviles y computadores, con el mismo encuadre al girar el teléfono, ampliar y reagrupar participantes. Se elimina el modo cuadrado del teléfono y la altura libre del video ampliado.
+- Cámaras con recorte centrado sin deformación, igual que el anfitrión. Pantallas compartidas completas dentro del mismo marco.
+- Salidas individuales de OBS con recorte de cámara por defecto y marco 16:9 independiente de la ventana. La opción explícita `cover=0` mantiene la imagen completa. Programa y escenas conservan el mismo compositor 1920×1080 del anfitrión; los diseños de un participante y con ticker también conservan el aspecto del cuadro.
+- Prueba real de video vertical por WebRTC en estudio, invitado y OBS; comprobación de recorte mediante píxeles, tres tamaños de ventana y diseños de programa. Cuadrícula con 1–9 fuentes en cuatro tamaños, normal y ampliada, sin superposición.
+
 ## v1.7.0 — Cuadrícula móvil y avisos de conexión
 
 - Los cuadros se ajustan al espacio disponible y al número de videos, se reagrupan al entrar o salir fuentes y se adaptan al girar el teléfono. Los controles y avisos reservan su espacio sin tapar los cuadros.

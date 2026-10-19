@@ -6,9 +6,10 @@ const {fitTiles}=await moduleAt('../web/js/call-grid.js');
 const {watchConnection}=await moduleAt('../web/js/connection-health.js');
 
 test('participant layouts fit phone portrait, landscape and desktop without overflow',()=>{
-  for(const [w,h] of [[308,480],[381,650],[832,240],[1260,660]])for(let count=1;count<=32;count++)for(const aspect of [1,16/9]){
-    const fit=fitTiles(count,w,h,6,aspect);
+  for(const [w,h] of [[308,480],[381,650],[832,240],[1260,660]])for(let count=1;count<=32;count++){
+    const fit=fitTiles(count,w,h,6);
     assert.ok(fit.width>0&&fit.height>0);
+    assert.ok(Math.abs(fit.width/fit.height-16/9)<.0001);
     assert.ok(fit.columns*fit.width+(fit.columns-1)*6<=w+.001);
     assert.ok(fit.rows*fit.height+(fit.rows-1)*6<=h+.001);
     assert.ok(fit.rows*fit.columns>=count);

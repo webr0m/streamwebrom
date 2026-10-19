@@ -230,8 +230,12 @@ func (r *Room) Streams() []sfu.Info {
 
 // AddStream registers a stream; an existing stream with the same id is replaced.
 func (r *Room) AddStream(s *sfu.Stream) bool {
+	return r.addStream(s, nil)
+}
+
+func (r *Room) addStream(s *sfu.Stream, permit func() bool) bool {
 	r.mu.Lock()
-	if r.closed {
+	if r.closed || (permit != nil && !permit()) {
 		r.mu.Unlock()
 		s.Close()
 		return false
@@ -348,7 +352,20 @@ func (r *Room) Update(fn func(*State) error) error {
 		return err
 	}
 	r.state = next
+	// Removing a guest from every live scene also revokes screen access.
+	removed := map[*Peer][]*sfu.Stream{}
+	for _, p := range r.peers {
+		p.mu.Lock()
+		active := p.screenAllowed || p.screenRequested
+		p.mu.Unlock()
+		if active && !r.onStageLocked(p) {
+			removed[p] = r.clearScreenLocked(p)
+		}
+	}
 	r.mu.Unlock()
+	for p, streams := range removed {
+		r.finishScreenRemoval(p, streams, "revoked")
+	}
 	st := r.Snapshot()
 	r.broadcast(Msg{Type: "state", State: &st}, "")
 	return nil
@@ -403,13 +420,15 @@ func (r *Room) toHosts(m Msg) {
 
 // PeerInfo is the public view of a participant.
 type PeerInfo struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Role  Role   `json:"role"`
-	Mic   bool   `json:"mic"`
-	Cam   bool   `json:"cam"`
-	Hand  bool   `json:"hand"`
-	Stage bool   `json:"stage"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Role            Role   `json:"role"`
+	Mic             bool   `json:"mic"`
+	Cam             bool   `json:"cam"`
+	Hand            bool   `json:"hand"`
+	Stage           bool   `json:"stage"`
+	ScreenAllowed   bool   `json:"screenAllowed"`
+	ScreenRequested bool   `json:"screenRequested"`
 }
 
 // Peers returns public infos (viewers are hidden).

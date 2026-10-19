@@ -54,7 +54,7 @@ with sync_playwright() as pw:
           const grid=document.querySelector('#grid'),bar=document.querySelector('.call .bar').getBoundingClientRect();
           const rects=[...grid.children].map(e=>e.getBoundingClientRect());
           if(!rects.length||grid.scrollWidth>grid.clientWidth+1||document.documentElement.scrollWidth>innerWidth+1)return false;
-          return rects.every((r,i)=>r.width>0&&r.height>0&&r.left>=-1&&r.right<=innerWidth+1&&r.bottom<=bar.top+1&&rects.every((s,j)=>i===j||r.right<=s.left+1||s.right<=r.left+1||r.bottom<=s.top+1||s.bottom<=r.top+1));
+          return rects.every((r,i)=>r.width>0&&r.height>0&&Math.abs(r.width/r.height-16/9)<.025&&r.left>=-1&&r.right<=innerWidth+1&&r.bottom<=bar.top+1&&rects.every((s,j)=>i===j||r.right<=s.left+1||s.right<=r.left+1||r.bottom<=s.top+1||s.bottom<=r.top+1));
         }""",timeout=5000)
 
     for count in range(1,10):
@@ -70,6 +70,9 @@ with sync_playwright() as pw:
         if count>1:
             guest.locator('#grid .tile-focus').last.tap()
             expect(guest.locator('#grid .expanded')).to_have_count(1);geometry()
+            for width,height in [(320,640),(851,393),(1280,720)]:
+                guest.set_viewport_size({'width':width,'height':height});geometry()
+            guest.set_viewport_size({'width':393,'height':851});geometry()
             assert guest.evaluate("""()=>{const selected=document.querySelector('.expanded').getBoundingClientRect();return [...document.querySelectorAll('#grid .tile:not(.expanded)')].every(t=>selected.height>t.getBoundingClientRect().height);}""")
             if count==6 and args.screenshots:guest.screenshot(path=str(Path(args.screenshots)/'mobile-expanded.png'))
             guest.locator('#restoreGrid').tap();expect(guest.locator('#grid .expanded')).to_have_count(0);geometry()
@@ -87,7 +90,8 @@ with sync_playwright() as pw:
     expect(guest.locator('#grid .tile')).to_have_count(9,timeout=20000);geometry()
     assert guest.evaluate('__publisher.signalingState!=="closed"'),'second camera replaced the main publisher'
     assert guest.evaluate("[...document.querySelectorAll('#grid .tile')].map(t=>t.dataset.id).filter((id,i,ids)=>ids.indexOf(id)!==i).length===0")
-    guest.locator('#screenBtn').tap();expect(guest.locator('#screenBtn')).to_have_class('icon on',timeout=20000)
+    # Screen sharing and its capture cleanup have their own host-approval
+    # integration in screen-share-smoke.py; this guest stays in backstage.
     guest.locator('#leaveBtn').tap();expect(guest.get_by_role('heading',name='Saliste de la sala.')).to_be_visible()
     assert guest.evaluate('__owned.every(t=>t.readyState==="ended")'),'leaving leaked capture tracks'
     # The Linux WebKit build may omit MediaStream. Exercise the actual grid
@@ -107,6 +111,6 @@ with sync_playwright() as pw:
     safari.locator('#restoreGrid').tap();expect(safari.locator('#grid .expanded')).to_have_count(0)
     safari_context.close();webkit.close()
     assert not errors,errors
-    print(json.dumps({'mobileGridCounts':'1-9','viewports':4,'tapToExpand':True,'selectedDepartureRegroups':True,'transientLossNoReconnectPrompt':True,'delayedCameraAutostart':True,'independentSecondCamera':True,'captureTracksReleased':True,'webkitGridOnly':True,'pageErrors':errors}),flush=True)
+    print(json.dumps({'mobileGridCounts':'1-9','viewports':4,'allTiles16by9':True,'tapToExpand':True,'selectedDepartureRegroups':True,'transientLossNoReconnectPrompt':True,'delayedCameraAutostart':True,'independentSecondCamera':True,'captureTracksReleased':True,'webkitGridOnly':True,'pageErrors':errors}),flush=True)
     host.evaluate('pubs.forEach(p=>p.stop());source.getTracks().forEach(t=>t.stop());clearInterval(draw);sig.close()')
     mobile.close();host_context.close();browser.close()

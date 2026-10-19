@@ -21,6 +21,7 @@ const room = (params.get("room") || "").toLowerCase();
 if (!room) location.href = "/";
 const prefs = loadPrefs();
 let media = new MediaStream(), pub = null, screenPub = null, screenMedia = null;
+let screenAllowed = false, screenPending = false, screenOpening = false, screenAttempt = 0, screenNotice = "";
 const extraCams = new Map(); // pubId -> { pub, media }
 let state = {};
 const remotes = new Map(); // streamId -> { tile, sub, video }
@@ -211,6 +212,7 @@ async function reconnectGuest() {
 $("#retryMedia").onclick = reconnectGuest;
 sig.on("disconnected", () => {
   ++mediaGeneration; connectingMedia = false;
+  stopScreen(false);
   clearTimeout(lossTimer); stopMediaWatch();
   if (sig.closed) return; // Leave/kick already replaced the call's DOM.
   $("#retryMedia").disabled = reconnectingGuest;
@@ -248,7 +250,7 @@ async function resume(m) {
   pub = null;
   await connectMedia();
   if (sig.closed || sig.ws !== socket) return;
-  if (screenPub) { try { screenPub.pc.close(); } catch {} screenPub = await publish(sig, screenMedia, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail" }).catch(() => null); }
+  stopScreen(false); // A new connection needs a new host authorization.
   if (sig.closed || sig.ws !== socket) return;
   for (const [id, x] of extraCams) { try { x.pub.pc.close(); } catch {} extraCams.delete(id); x.media.getTracks().forEach((t) => t.stop()); $(`[data-id="${id}"]`)?.remove(); }
   for (const id of [...remotes.keys()]) unwatch(id);
@@ -280,6 +282,7 @@ async function enter(m) {
 sig.on("stream-added", (m) => watch(m.info.id, m.info.kind, m.info.owner, m.name));
 sig.on("stream-removed", (m) => unwatch(m.stream));
 sig.on("state", (m) => { state = m.state; updateStageBadge(); });
+sig.on("screen-permission", screenPermission);
 sig.on("chat", (m) => addChat(m.comment));
 sig.on("reaction", (m) => fly(m.text));
 sig.on("request", (m) => {
@@ -290,7 +293,7 @@ sig.on("request", (m) => {
     case "camon": ask("El anfitrión te pide encender la cámara", "Encender", () => setCam(true)); break;
     case "lowerhand": $("#handBtn").classList.remove("on"); break;
     case "screenoff": if (screenPub) stopScreen(); toast("El anfitrión detuvo tu pantalla compartida"); break;
-    case "screenon": if (!screenPub) ask("El anfitrión te pide compartir tu pantalla", "Compartir", () => $("#screenBtn").click()); break;
+    case "screenon": toast("Solicita autorización antes de compartir pantalla"); break;
     default: remoteControl(m.action, m.value).catch((e) => toast(e.message, "err"));
   }
 });
@@ -401,7 +404,7 @@ async function watch(id, kind, owner, name) {
     const sub = await subscribe(sig, id);
     if (remotes.get(id) !== pending) { sub.close(); return; }
     const lvl = sub.stream.getAudioTracks().length ? levelMeter(sub.stream) : () => 0;
-    const tile = addTile(id, sub.stream, sub.name || name || "Invitado", false, lvl);
+    const tile = addTile(id, sub.stream, sub.name || name || "Invitado", false, lvl, kind);
     remotes.set(id, { sub, tile, video: tile.querySelector("video") });
   } catch { if (remotes.get(id) === pending) remotes.delete(id); }
 }
@@ -411,13 +414,13 @@ function unwatch(id) {
   remotes.delete(id);
 }
 
-function addTile(id, stream, name, mine, level) {
+function addTile(id, stream, name, mine, level, kind = "camera") {
   const v = el("video", { playsinline: true, autoplay: true });
   v.muted = mine || deafened; v.srcObject = stream;
   if (mine) mirrorPreview(v); else applySink(v, prefs.speaker);
   v.play().catch(() => { v.muted = true; v.play().catch(() => {}); document.addEventListener("click", () => { v.muted = mine || deafened; v.play(); }, { once: true }); });
   const vol = mine ? null : el("input", { type: "range", min: 0, max: 1, step: 0.05, value: 1, title: "Volumen (solo para ti)", class: "tilevol", oninput: (e) => { v.volume = Number(e.target.value); } });
-  const tile = el("div", { class: "tile", "data-id": id, "data-name": name }, v,
+  const tile = el("div", { class: "tile", "data-id": id, "data-name": name, "data-kind": kind }, v,
     el("button", { class: "tile-focus", type: "button", "aria-label": `Ampliar video de ${name}`, "aria-pressed": "false" }),
     el("span", { class: "name", text: name }), vol);
   $("#grid").append(tile);
@@ -433,6 +436,7 @@ function updateStageBadge() {
   const b = $("#stageState");
   b.textContent = live ? (state.live ? "EN VIVO" : "en escenario") + (live && progMuted ? " · silenciado" : "") : others.length ? `en escena ${others.join(", ")}` : "backstage";
   b.className = "pill " + (live ? "red" : "");
+  renderScreenPermission();
 }
 
 // ---------- controls ----------
@@ -464,20 +468,74 @@ $("#setBtn").onclick = async () => {
   dlg.showModal();
 };
 
-function stopScreen() {
-  screenPub?.stop(); screenMedia?.getTracks().forEach((t) => t.stop());
-  screenPub = null; screenMedia = null; $("#screenBtn")?.classList.remove("on");
+function onLiveStage() {
+  const mine = [pub?.id, screenPub?.id, ...extraCams.keys()].filter(Boolean);
+  return [state.stage || [], ...Object.values(state.outputs || {}).map(o => o.stage || [])].some(ids => mine.some(id => ids.includes(id)));
 }
-$("#screenBtn").onclick = async () => {
-  if (screenPub) return stopScreen();
+function renderScreenPermission() {
+  const button = $("#screenBtn"), box = $("#screenShareStatus");
+  if (!button || !box) return;
+  const supported = !!navigator.mediaDevices?.getDisplayMedia;
+  const label = screenPub ? "Detener pantalla compartida" : screenPending ? "Cancelar solicitud de pantalla" : screenAllowed ? "Compartir pantalla autorizada" : "Solicitar compartir pantalla";
+  button.title = !supported ? "Este navegador no permite compartir pantalla" : !onLiveStage() ? "El anfitrión debe subirte al escenario para compartir pantalla" : label;
+  button.setAttribute("aria-label", button.title);
+  button.disabled = screenOpening || (!screenPub && !screenPending && (!onLiveStage() || !supported));
+  button.classList.toggle("on", !!screenPub);
+  const text = screenPub ? "Compartiendo pantalla. El anfitrión controla su salida al escenario." : screenPending ? "Solicitud enviada. Esperando autorización del anfitrión…" : screenAllowed ? "El anfitrión autorizó tu pantalla. Elige qué compartir." : screenNotice;
+  box.classList.toggle("hidden", !text);
+  $("#screenShareText").textContent = text;
+  $("#startScreen").classList.toggle("hidden", !screenAllowed || !!screenPub);
+  $("#startScreen").disabled = screenOpening;
+  $("#cancelScreen").textContent = screenPub ? "Detener" : screenPending || screenAllowed ? "Cancelar" : "Cerrar";
+}
+function stopScreen(notify = true) {
+  const active = screenAllowed || screenPending || screenPub || screenOpening;
+  ++screenAttempt;
+  screenAllowed = false; screenPending = false; screenOpening = false; screenNotice = "";
+  screenPub?.stop(); screenMedia?.getTracks().forEach((t) => t.stop());
+  screenPub = null; screenMedia = null;
+  if (notify && active && !sig.closed) sig.send({ type: "screen-cancel" });
+  renderScreenPermission();
+}
+function screenPermission(m) {
+  if (sig.closed) return;
+  if (m.action === "pending") { screenPending = true; screenAllowed = false; }
+  else if (m.action === "allowed") { ++screenAttempt; screenAllowed = true; screenPending = false; screenNotice = ""; }
+  else {
+    stopScreen(false);
+    screenNotice = m.action === "denied" ? "El anfitrión rechazó la solicitud de pantalla." : m.action === "revoked" ? "El permiso de pantalla terminó. Puedes solicitarlo de nuevo cuando estés en el escenario." : "";
+  }
+  renderScreenPermission();
+}
+async function shareScreen() {
+  if (screenPub || screenPending) return stopScreen();
+  if (screenOpening) return;
+  if (!onLiveStage()) return toast("El anfitrión debe subirte al escenario antes de compartir pantalla.");
+  if (!navigator.mediaDevices?.getDisplayMedia) return toast("Este navegador no permite compartir pantalla. Usa un navegador compatible en un computador.", "err");
+  const attempt = screenAttempt;
+  if (!screenAllowed) {
+    screenPending = true; renderScreenPermission();
+    try { const reply = await sig.request({ type: "screen-request" }); if (attempt === screenAttempt && !sig.closed) screenPermission(reply); }
+    catch (e) { if (attempt === screenAttempt) { stopScreen(false); if (!sig.closed) toast(e.message, "err"); } }
+    return;
+  }
+  screenOpening = true; renderScreenPermission();
   try {
-    screenMedia = await openScreen();
-    if (sig.closed) { stopScreen(); return; }
-    screenPub = await publish(sig, screenMedia, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail", codec: prefs.codec, stereo: true, audioKbps: 192 });
-    $("#screenBtn").classList.add("on");
-    screenMedia.getVideoTracks()[0].onended = stopScreen;
-  } catch (e) { stopScreen(); if (!sig.closed && e.name !== "NotAllowedError" && e.name !== "AbortError") toast(e.name === "NotSupportedError" ? e.message : explain(e), "err"); }
-};
+    // This call must remain in the guest's own click: a host approval cannot
+    // open the browser's display picker without a fresh user gesture.
+    const opened = await openScreen();
+    if (sig.closed || attempt !== screenAttempt || !screenAllowed || !onLiveStage()) { opened.getTracks().forEach(t => t.stop()); return; }
+    screenMedia = opened;
+    const publication = await publish(sig, opened, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail", codec: prefs.codec, stereo: true, audioKbps: 192 });
+    if (sig.closed || attempt !== screenAttempt || !screenAllowed) { publication.stop(); opened.getTracks().forEach(t => t.stop()); return; }
+    screenPub = publication;
+    opened.getVideoTracks()[0].onended = () => stopScreen();
+  } catch (e) { if (attempt === screenAttempt) { stopScreen(); if (!sig.closed && e.name !== "NotAllowedError" && e.name !== "AbortError") toast(explain(e), "err"); } }
+  finally { if (attempt === screenAttempt) screenOpening = false; renderScreenPermission(); }
+}
+$("#screenBtn").onclick = shareScreen;
+$("#startScreen").onclick = shareScreen;
+$("#cancelScreen").onclick = () => stopScreen();
 
 // A second (third…) camera from the same device, e.g. overhead cam or capture card.
 $("#cam2Btn").onclick = async () => {

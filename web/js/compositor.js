@@ -32,19 +32,19 @@ export function computeLayout(layout, n, opts = {}) {
   };
   switch (layout) {
     case "solo":
-      return [{ x: 0, y: 0, w: W, h: H - bottom }];
+      return fitGrid(1, 0, 0, W, H - bottom);
     case "split":
-      if (n === 1) return [{ x: 0, y: 0, w: W, h: H - bottom }];
+      if (n === 1) return fitGrid(1, 0, 0, W, H - bottom);
       return fitGrid(Math.min(n, 2), X, Y, AW, AH).concat(n > 2 ? fitGrid(n - 2, W - 340, Y, 300, 300) : []);
     case "pip": {
-      const main = { x: 0, y: 0, w: W, h: H - bottom };
+      const main = fitGrid(1, 0, 0, W, H - bottom)[0];
       const sw = 420, sh = sw * 9 / 16, out = [main];
       for (let i = 1; i < n; i++) out.push({ x: W - pad - sw, y: H - bottom - pad - (sh + gap) * i, w: sw, h: sh });
       return out;
     }
     case "sidebar":
     case "screen": {
-      if (n === 1) return [{ x: X, y: Y, w: AW, h: AH }];
+      if (n === 1) return fitGrid(1, X, Y, AW, AH);
       const sideW = 380, mainW = AW - sideW - gap;
       const main = { x: X, y: Y + (AH - mainW * 9 / 16) / 2, w: mainW, h: mainW * 9 / 16 };
       const sh = Math.min(sideW * 9 / 16, (AH - gap * (n - 2)) / (n - 1));
@@ -54,7 +54,7 @@ export function computeLayout(layout, n, opts = {}) {
       return out;
     }
     case "spotlight": {
-      if (n === 1) return [{ x: X, y: Y, w: AW, h: AH }];
+      if (n === 1) return fitGrid(1, X, Y, AW, AH);
       const stripH = 220, mainH = AH - stripH - gap;
       const main = { x: X + (AW - mainH * 16 / 9) / 2, y: Y, w: mainH * 16 / 9, h: mainH };
       return [main, ...fitGrid(n - 1, X, Y + mainH + gap, AW, stripH)];

@@ -76,16 +76,19 @@ type Peer struct {
 	out   chan []byte
 	lim   *rate.Limiter
 
-	mu           sync.Mutex
-	mic          bool
-	cam          bool
-	routeRefresh bool
-	hand         bool
-	subs         map[string]*sfu.Subscriber
-	pubs         map[string]*sfu.Stream
-	icePCs       map[string]*webrtc.PeerConnection
-	once         sync.Once
-	gone         chan struct{}
+	mu              sync.Mutex
+	mic             bool
+	cam             bool
+	screenAllowed   bool
+	screenRequested bool
+	screenEpoch     uint64
+	routeRefresh    bool
+	hand            bool
+	subs            map[string]*sfu.Subscriber
+	pubs            map[string]*sfu.Stream
+	icePCs          map[string]*webrtc.PeerConnection
+	once            sync.Once
+	gone            chan struct{}
 }
 
 func newPeer(conn *websocket.Conn, lim *rate.Limiter) *Peer {
@@ -145,7 +148,7 @@ func (p *Peer) Info(stage []string) PeerInfo {
 			onStage = true
 		}
 	}
-	return PeerInfo{ID: p.ID, Name: p.Name, Role: p.Role, Mic: p.mic, Cam: p.cam, Hand: p.hand, Stage: onStage}
+	return PeerInfo{ID: p.ID, Name: p.Name, Role: p.Role, Mic: p.mic, Cam: p.cam, Hand: p.hand, Stage: onStage, ScreenAllowed: p.screenAllowed, ScreenRequested: p.screenRequested}
 }
 
 // Send queues a message; slow consumers are dropped instead of blocking the room.

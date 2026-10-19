@@ -74,7 +74,7 @@ jobs:
         with: { go-version: '1.27.x' }
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
-      - run: pip install playwright==1.64.0
+      - run: pip install playwright==1.64.0 Pillow==13.0.0
       - run: playwright install --with-deps chromium webkit
       - name: start disposable server
         run: |
@@ -83,6 +83,8 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://localhost:18443/api/health && break; sleep 1; done
       - run: python scripts/browser-smoke.py --url http://localhost:18443
       - run: python scripts/call-smoke.py --url http://localhost:18443
+      - run: python scripts/framing-smoke.py --url http://localhost:18443
+      - run: python scripts/screen-share-smoke.py --url http://localhost:18443
       - name: TURN/TCP relay-only integration
         run: |
           go build -o /tmp/turn-smoke scripts/turn-smoke-server.go

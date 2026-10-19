@@ -290,8 +290,8 @@ label.row { color: var(--text); font-size: 13px; margin-bottom: 0; }
 .call { display: flex; flex-direction: column; height: 100%; height: 100dvh; min-width: 0; min-height: 0; overflow: hidden; }
 .call .grid { flex: 1; min-width: 0; min-height: 0; padding: 12px; display: grid; gap: 8px; align-content: center; justify-content: center; overflow: hidden; }
 .call .grid .tile { min-width: 0; min-height: 0; width: 100%; height: 100%; aspect-ratio: auto; }
-.call .grid .tile video { object-fit: contain; }
-.call .grid .tile.expanded { grid-column: 1 / -1; grid-row: 1; }
+.tile[data-kind="screen"] video { object-fit: contain; }
+.call .grid .tile.expanded { grid-column: 1 / -1; grid-row: 1; justify-self: center; }
 .call .grid .tile.expanded { order: -1; border-color: var(--accent); }
 .call .grid .tile-focus { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 .call .grid .tile-focus:active { transform: none; }
@@ -301,6 +301,7 @@ label.row { color: var(--text); font-size: 13px; margin-bottom: 0; }
 .call .grid .tileclose { z-index: 3; }
 .call-grid-tools { flex: 0 0 auto; min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 12px; color: var(--muted); font-size: 12px; }
 .call-grid-tools button { padding: 3px 8px; }
+.screen-share-status { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); font-size: 13px; border-bottom: 1px solid var(--line); }
 .connection-status { flex: 0 0 auto; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 13px; }
 .connection-status p { margin: 0; }
 .connection-status #connectionActions:not(.hidden) { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
@@ -352,14 +353,16 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; font-we
 .hostmsg { position: fixed; left: 50%; top: 18%; transform: translateX(-50%); z-index: 60; background: var(--panel); color: #fff; border: 2px solid var(--accent); border-radius: 14px; padding: 16px 20px; max-width: min(560px, 92vw); box-shadow: 0 10px 40px rgba(0,0,0,.5); }
 .hostmsg p { font-size: 18px; margin: 8px 0 12px; white-space: pre-wrap; }
 
-/* ---------- OBS view (unchanged look: clean output) ---------- */
+/* ---------- OBS: the same landscape frame as the studio ---------- */
 body.view { background: transparent; overflow: hidden; }
-body.view canvas, body.view video { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; }
-body.view.cover video { object-fit: cover; }
-body.view .status { position: fixed; left: 12px; bottom: 12px; font-size: 12px; color: #fff; background: rgba(0,0,0,.5); padding: 4px 8px; border-radius: 6px; }
+body.view #viewFrame { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(100vw, 177.777778vh); aspect-ratio: 16 / 9; overflow: hidden; }
+body.view canvas, body.view video { width: 100%; height: 100%; display: block; object-fit: contain; }
+body.view video { object-fit: cover; }
+body.view.contain video { object-fit: contain; }
+body.view .status { position: absolute; left: 12px; bottom: 12px; font-size: 12px; color: #fff; background: rgba(0,0,0,.5); padding: 4px 8px; border-radius: 6px; }
 body.view.transparent { background: transparent !important; }
-body.view .viewlabel:not(:empty) { position: fixed; left: 24px; bottom: 24px; font: 700 28px Inter, system-ui, sans-serif; color: #fff; background: rgba(0,0,0,.55); padding: 6px 14px; border-radius: 10px; }
-body.view .viewstats { position: fixed; right: 12px; top: 12px; font: 12px ui-monospace, monospace; color: #fff; background: rgba(0,0,0,.6); padding: 4px 8px; border-radius: 6px; }
+body.view .viewlabel:not(:empty) { position: absolute; left: 24px; bottom: 24px; font: 700 28px Inter, system-ui, sans-serif; color: #fff; background: rgba(0,0,0,.55); padding: 6px 14px; border-radius: 10px; }
+body.view .viewstats { position: absolute; right: 12px; top: 12px; font: 12px ui-monospace, monospace; color: #fff; background: rgba(0,0,0,.6); padding: 4px 8px; border-radius: 6px; }
 
 /* Icons: Feather (MIT) + Lucide hand (ISC), drawn as masks so they take the button's color. */
 [data-icon="mic"] { --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z'/%3E%3Cpath d='M19 10v2a7 7 0 0 1-14 0v-2'/%3E%3Cline x1='12' y1='19' x2='12' y2='23'/%3E%3Cline x1='8' y1='23' x2='16' y2='23'/%3E%3C/svg%3E"); }

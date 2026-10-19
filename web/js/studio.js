@@ -115,7 +115,11 @@ sig.connect({ type: "join", room, role: "host", key: hostKey, name: "Anfitrión"
 
 sig.on("state", (m) => { state = m.state; renderState(); });
 sig.on("peer-joined", (m) => { peers.set(m.peer.id, m.peer); renderPeople(); toast(`${m.peer.name} entró`); });
-sig.on("peer-updated", (m) => { peers.set(m.peer.id, m.peer); renderPeople(); renderBackstage(); });
+sig.on("peer-updated", (m) => {
+  const wasPending = peers.get(m.peer.id)?.screenRequested;
+  peers.set(m.peer.id, m.peer); renderPeople(); renderBackstage();
+  if (m.peer.screenRequested && !wasPending) toast(`${m.peer.name} solicita compartir pantalla`);
+});
 sig.on("peer-left", (m) => { const p = peers.get(m.peerId); peers.delete(m.peerId); renderPeople(); if (p) toast(`${p.name} salió`); });
 sig.on("stream-added", (m) => addRemote(m.info.id, m.info.kind, m.info.owner, m.name));
 sig.on("stream-removed", (m) => removeSource(m.stream));
@@ -337,7 +341,7 @@ function renderState() {
 function obsURL(id) {
   if (!keys.viewKey) return "";
   const q = new URLSearchParams({ room, stream: id });
-  if ($("#obsCover")?.checked) q.set("cover", "1");
+  if (!$("#obsCover")?.checked) q.set("cover", "0");
   if ($("#obsMute")?.checked) q.set("mute", "1");
   if ($("#obsLabel")?.checked) q.set("label", "1");
   if ($("#obsTransparent")?.checked) q.set("transparent", "1");
@@ -367,7 +371,7 @@ function renderBackstage() {
       el("button", { title: "Cámaras y micrófonos de todos", onclick: (e) => allMenu(e.currentTarget), text: "👥" }),
       el("button", { title: "Expulsar", onclick: () => owner && confirm(`¿Expulsar a ${owner.name}?`) && sig.send({ type: "kick", target: owner.id }), text: "🚫" }),
     ];
-    const tile = el("div", { class: "tile" + (onStage(id) ? " stage" : "") + (progMuted ? " progmuted" : ""), "data-id": id },
+    const tile = el("div", { class: "tile" + (onStage(id) ? " stage" : "") + (progMuted ? " progmuted" : ""), "data-id": id, "data-kind": s.kind },
       s.preview,
       owner?.hand ? el("span", { class: "hand", text: "✋" }) : null,
       scenesWith(id).length ? el("span", { class: "scenes", title: "Escenas donde aparece", text: scenesWith(id).map((n) => n === "1" ? "P" : n).join(" ") }) : null,
@@ -392,7 +396,17 @@ function rename(id, s) {
   setState({ labels: { ...(state.labels || {}), [id]: n.trim() } });
 }
 
+const screenDecision = (target, action) => sig.send({ type: "screen-permission", target, action });
+function renderScreenRequests() {
+  const box = $("#screenRequests"), pending = [...peers.values()].filter(p => p.screenRequested);
+  box.classList.toggle("hidden", !pending.length);
+  box.replaceChildren(el("b", { text: "Solicitudes para compartir pantalla" }), ...pending.map(p =>
+    el("div", { class: "item", "data-peer": p.id }, el("span", { class: "grow", text: p.name + " quiere compartir pantalla" }),
+      el("button", { class: "small primary", onclick: () => screenDecision(p.id, "allow"), text: "Autorizar pantalla" }),
+      el("button", { class: "small", onclick: () => screenDecision(p.id, "deny"), text: "Rechazar pantalla" }))));
+}
 function renderPeople() {
+  renderScreenRequests();
   const box = $("#people");
   box.replaceChildren();
   for (const p of peers.values()) {
@@ -402,6 +416,7 @@ function renderPeople() {
       el("span", { class: "pill", text: (p.mic ? "🎙️" : "🔇") + (p.cam ? " 📷" : "") }),
       el("button", { class: "small", onclick: () => sig.send({ type: "request", target: p.id, action: p.mic ? "mute" : "unmute" }), text: p.mic ? "Silenciar" : "Pedir audio" }),
       el("button", { class: "small", onclick: () => sig.send({ type: "request", target: p.id, action: p.cam ? "camoff" : "camon" }), text: p.cam ? "Apagar cámara" : "Pedir cámara" }),
+      p.screenAllowed ? el("button", { class: "small", onclick: () => screenDecision(p.id, "revoke"), text: "Revocar pantalla" }) : null,
       p.hand ? el("button", { class: "small", onclick: () => sig.send({ type: "request", target: p.id, action: "lowerhand" }), text: "Bajar mano" }) : null,
       el("button", { class: "small", onclick: () => openRemote(p.id), text: "🎛️ Control" }),
       el("button", { class: "small danger", onclick: () => confirm(`¿Expulsar a ${p.name}?`) && sig.send({ type: "kick", target: p.id }), text: "Expulsar" })));
