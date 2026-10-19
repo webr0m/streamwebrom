@@ -1,5 +1,15 @@
 # Cambios
 
+## v1.7.0 — Cuadrícula móvil y avisos de conexión
+
+- Los cuadros se ajustan al espacio disponible y al número de videos, se reagrupan al entrar o salir fuentes y se adaptan al girar el teléfono. Los controles y avisos reservan su espacio sin tapar los cuadros.
+- Tocar un video lo amplía en esta pantalla; otro toque o «Ver todos» restaura la cuadrícula. La salida de una fuente ampliada restaura el conjunto. No cambia el escenario del anfitrión.
+- Las interrupciones transitorias de WebRTC o señalización tienen seis segundos para recuperarse antes de mostrar una acción de reconexión. Un fallo definitivo de medios se notifica inmediatamente; un fallo inicial ofrece reintentar la entrada.
+- El ingreso espera a que termine la solicitud inicial de cámara y micrófono, incluso con autostart.
+- Cada cámara adicional usa una publicación independiente. Las miniaturas antiguas se retiran al reconectar.
+- Salir detiene también las capturas de pantalla y cámaras adicionales. Se liberan capturas cuando falla una publicación o terminan de abrirse después de salir.
+- Pruebas con 1–9 cuadros en cuatro tamaños, toques para ampliar, salida de la fuente ampliada, cámara tardía, segunda cámara, liberación de pistas y pérdida transitoria sin aviso falso.
+
 ## v1.6.6 — Volver a entrar después de salir
 
 - «Volver a entrar» fuerza una página nueva y conserva la invitación. Antes, con `#invite`, el enlace podía navegar dentro del mismo documento y dejar visible «Saliste de la sala».

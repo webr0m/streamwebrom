@@ -14,6 +14,8 @@ import { listDevices, openScreen, loadPrefs, savePrefs, openMedia, renderPanel, 
 import { remoteSnapshot, remoteStats, CAMCTL } from "./remote.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
 import { automaticRoute } from "./network.js";
+import { callGrid } from "./call-grid.js";
+import { watchConnection } from "./connection-health.js";
 
 const room = (params.get("room") || "").toLowerCase();
 if (!room) location.href = "/";
@@ -23,6 +25,7 @@ const extraCams = new Map(); // pubId -> { pub, media }
 let state = {};
 const remotes = new Map(); // streamId -> { tile, sub, video }
 const sig = new Signal();
+const gridLayout = callGrid($("#grid"), $("#restoreGrid"));
 // Even previously shared links start automatically. Manual routing is an
 // optional advanced action for this visit, never required for admission.
 sig.mediaMode = "auto";
@@ -89,14 +92,16 @@ async function onPrefChange(p, what) {
     const me = $('[data-id="me"] video'); if (me) mirrorPreview(me);
     return;
   }
-  if (!pub) return startPreview(); // still in pre-join: just reopen everything
+  if (!entered) return startPreview();
   await swapDevices(what);
+  if (!pub && !connectingMedia && sig.ws?.readyState === 1) await connectMedia();
 }
 
 /** Hot-swap camera or mic during the call (no reconnection, no renegotiation). */
 async function swapDevices(what, quiet = false) {
   const kind = what === "video" ? "video" : "audio";
   const opened = await openMedia({ ...prefs, camera: kind === "video" ? prefs.camera : "none", mic: kind === "audio" ? prefs.mic : "none" });
+  if (sig.closed) { opened.stream.getTracks().forEach(t => t.stop()); return; }
   opened.warnings.forEach((w) => toast(w, "err"));
   const fresh = kind === "video" ? opened.stream.getVideoTracks()[0] : opened.stream.getAudioTracks()[0];
   const old = kind === "video" ? media.getVideoTracks()[0] : media.getAudioTracks()[0];
@@ -117,10 +122,11 @@ async function swapDevices(what, quiet = false) {
 }
 
 onDeviceChange(() => {
+  if (sig.closed) return;
   const target = $("#devDialog")?.open ? $("#devPanel") : $("#pre").classList.contains("hidden") ? null : $("#devPre");
   if (target) renderPanel(target, prefs, onPrefChange);
 });
-startPreview();
+const previewReady = startPreview().catch(e => { $("#devWarn").textContent = explain(e); });
 
 $("#joinBtn").onclick = join;
 async function join() {
@@ -130,6 +136,7 @@ async function join() {
   $("#joinBtn").disabled = true;
   $("#networkMode").disabled = true;
   try {
+    await previewReady; // Permission can take longer than autostart's delay.
     if (sig.mediaMode === "auto") {
       const cfg = await api("/api/config");
       sig.mediaMode = await automaticRoute(cfg, mode => {
@@ -153,12 +160,13 @@ if ((params.has("autostart") || params.has("autojoin") || params.has("aj")) && $
 let entered = false, rewait = false;
 let connectingMedia = false;
 let mediaGeneration = 0, reconnectingGuest = false;
+let hadMediaConnection = false, lossTimer, stopMediaWatch = () => {};
 function connectionStatus(text, retry = false) {
+  if (sig.closed) return;
   $("#connection").classList.toggle("hidden", !text);
   $("#connectionText").textContent = text;
-  $("#retryMedia").classList.toggle("hidden", !retry);
-  $("#retryTLS").classList.toggle("hidden", !retry || sig.mediaMode === "tls");
-  $("#retryLocal").classList.toggle("hidden", !retry || sig.mediaMode === "local" || !sig.localIce.length);
+  $("#connectionActions").classList.toggle("hidden", !retry);
+  $("#retryMedia").textContent = hadMediaConnection ? "Reconectar" : "Reintentar entrada";
 }
 async function connectMedia() {
   if (connectingMedia) return;
@@ -172,15 +180,14 @@ async function connectMedia() {
     const fresh = await publish(sig, media, pubOpts($("#name").value));
     if (generation !== mediaGeneration) { fresh.stop(); return; }
     pub = fresh;
+    hadMediaConnection = true; clearTimeout(lossTimer); stopMediaWatch();
     connectionStatus(""); sendMedia(); updateStageBadge();
     const current = pub;
-    pub.pc.addEventListener("connectionstatechange", () => {
-      if (pub !== current) return;
-      if (pub.pc.connectionState === "connected") connectionStatus("");
-      else if (["failed", "disconnected"].includes(pub.pc.connectionState)) connectionStatus("Se perdió la conexión de audio y video. Puedes volver a conectarte.", true);
-    });
+    stopMediaWatch = watchConnection(pub.pc,
+      () => { if (pub === current) connectionStatus("Se perdió la conexión de audio y video. Puedes volver a conectarte.", true); },
+      () => { if (pub === current) connectionStatus(""); });
   } catch (e) { if (generation === mediaGeneration) connectionStatus(e.message, true); }
-  finally { if (generation === mediaGeneration) { connectingMedia = false; $("#retryMedia").disabled = false; } }
+  finally { if (generation === mediaGeneration) { connectingMedia = false; if (!sig.closed) $("#retryMedia").disabled = false; } }
 }
 async function reconnectGuest() {
   if (reconnectingGuest || sig.closed) return;
@@ -199,18 +206,22 @@ async function reconnectGuest() {
       }
     });
   } catch (e) { connectionStatus(`No se pudo reconectar: ${e.message}`, true); }
-  finally { reconnectingGuest = false; $("#retryMedia").disabled = false; }
+  finally { reconnectingGuest = false; if (!sig.closed) $("#retryMedia").disabled = false; }
 }
 $("#retryMedia").onclick = reconnectGuest;
-$("#retryTLS").onclick = () => selectNetwork("tls");
-$("#retryLocal").onclick = () => selectNetwork("local");
 sig.on("disconnected", () => {
   ++mediaGeneration; connectingMedia = false;
+  clearTimeout(lossTimer); stopMediaWatch();
   if (sig.closed) return; // Leave/kick already replaced the call's DOM.
   $("#retryMedia").disabled = reconnectingGuest;
   try { pub?.pc.close(); } catch {} pub = null;
   for (const id of [...remotes.keys()]) unwatch(id);
-  if (entered) connectionStatus("Reconectando con el servidor…", !reconnectingGuest);
+  if (entered) {
+    connectionStatus("Recuperando la conexión…");
+    lossTimer = setTimeout(() => {
+      if (!sig.closed && sig.ws?.readyState !== 1 && !reconnectingGuest) connectionStatus("Se perdió la conexión con el servidor.", true);
+    }, 6000);
+  }
 });
 sig.on("welcome", (m) => {
   if (rewait) { rewait = false; $("#waiting").classList.add("hidden"); $("#call").classList.remove("hidden"); resume(m); return; }
@@ -219,6 +230,7 @@ sig.on("welcome", (m) => {
 sig.on("denied", () => { document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card" }, el("h2", { text: "El anfitrión no aprobó tu ingreso." })))); });
 sig.on("kicked", () => { sig.close(); leave("El anfitrión te retiró de la sala."); });
 sig.on("reconnected", (m) => {
+  clearTimeout(lossTimer);
   if (!entered) return; // still in the waiting room: the server re-sent "waiting" and the host sees the knock again
   if (m.type === "waiting") { // the server forgot us (e.g. it restarted): wait to be let back in
     rewait = true;
@@ -228,14 +240,17 @@ sig.on("reconnected", (m) => {
   resume(m);
 });
 async function resume(m) {
+  const socket = sig.ws;
   // The server forgot our old publications: publish fresh ones.
   myId = m.peerId;
   state = m.state || state;
   try { pub?.pc.close(); } catch {}
   pub = null;
   await connectMedia();
+  if (sig.closed || sig.ws !== socket) return;
   if (screenPub) { try { screenPub.pc.close(); } catch {} screenPub = await publish(sig, screenMedia, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail" }).catch(() => null); }
-  for (const [id, x] of extraCams) { try { x.pub.pc.close(); } catch {} extraCams.delete(id); x.media.getTracks().forEach((t) => t.stop()); }
+  if (sig.closed || sig.ws !== socket) return;
+  for (const [id, x] of extraCams) { try { x.pub.pc.close(); } catch {} extraCams.delete(id); x.media.getTracks().forEach((t) => t.stop()); $(`[data-id="${id}"]`)?.remove(); }
   for (const id of [...remotes.keys()]) unwatch(id);
   for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
   $("#chatlog").replaceChildren(); for (const c of m.chat || []) addChat(c); // catch up on what we missed
@@ -253,6 +268,7 @@ async function enter(m) {
   if (params.has("videomute") || params.has("vm")) media.getVideoTracks().forEach((t) => (t.enabled = false));
   addTile("me", media, $("#name").value + " (tú)", true, levelMeter(media));
   await connectMedia();
+  if (sig.closed) return;
   setMic(micOn()); setCam(camOn());
   for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
   for (const c of m.chat || []) addChat(c);
@@ -401,7 +417,9 @@ function addTile(id, stream, name, mine, level) {
   if (mine) mirrorPreview(v); else applySink(v, prefs.speaker);
   v.play().catch(() => { v.muted = true; v.play().catch(() => {}); document.addEventListener("click", () => { v.muted = mine || deafened; v.play(); }, { once: true }); });
   const vol = mine ? null : el("input", { type: "range", min: 0, max: 1, step: 0.05, value: 1, title: "Volumen (solo para ti)", class: "tilevol", oninput: (e) => { v.volume = Number(e.target.value); } });
-  const tile = el("div", { class: "tile", "data-id": id }, v, el("span", { class: "name", text: name }), vol);
+  const tile = el("div", { class: "tile", "data-id": id, "data-name": name }, v,
+    el("button", { class: "tile-focus", type: "button", "aria-label": `Ampliar video de ${name}`, "aria-pressed": "false" }),
+    el("span", { class: "name", text: name }), vol);
   $("#grid").append(tile);
   const t = setInterval(() => { if (!tile.isConnected) return clearInterval(t); tile.classList.toggle("speaking", level() > 0.15); }, 150);
   return tile;
@@ -448,16 +466,17 @@ $("#setBtn").onclick = async () => {
 
 function stopScreen() {
   screenPub?.stop(); screenMedia?.getTracks().forEach((t) => t.stop());
-  screenPub = null; screenMedia = null; $("#screenBtn").classList.remove("on");
+  screenPub = null; screenMedia = null; $("#screenBtn")?.classList.remove("on");
 }
 $("#screenBtn").onclick = async () => {
   if (screenPub) return stopScreen();
   try {
     screenMedia = await openScreen();
+    if (sig.closed) { stopScreen(); return; }
     screenPub = await publish(sig, screenMedia, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail", codec: prefs.codec, stereo: true, audioKbps: 192 });
     $("#screenBtn").classList.add("on");
     screenMedia.getVideoTracks()[0].onended = stopScreen;
-  } catch (e) { if (e.name !== "NotAllowedError" && e.name !== "AbortError") toast(e.name === "NotSupportedError" ? e.message : explain(e), "err"); }
+  } catch (e) { stopScreen(); if (!sig.closed && e.name !== "NotAllowedError" && e.name !== "AbortError") toast(e.name === "NotSupportedError" ? e.message : explain(e), "err"); }
 };
 
 // A second (third…) camera from the same device, e.g. overhead cam or capture card.
@@ -474,10 +493,13 @@ $("#cam2Btn").onclick = async () => {
 };
 async function addExtraCam(dev) {
   const { stream, warnings } = await openMedia({ ...prefs, camera: dev.deviceId, mic: "none" });
+  if (sig.closed) { stream.getTracks().forEach(t => t.stop()); return; }
   warnings.forEach((w) => toast(w, "err"));
   if (!stream.getVideoTracks().length) return;
   const name = `${$("#name").value} · ${(dev.label || "cámara 2").slice(0, 24)}`;
-  const p = await publish(sig, stream, { ...pubOpts(name), name });
+  let p;
+  try { p = await publish(sig, stream, { ...pubOpts(name), name, stream: crypto.randomUUID() }); }
+  catch (e) { stream.getTracks().forEach(t => t.stop()); if (!sig.closed) toast(e.message, "err"); return; }
   extraCams.set(p.id, { pub: p, media: stream });
   const tile = addTile(p.id, stream, name + " (tú)", true, () => 0);
   tile.querySelector(".name").after(el("button", { class: "small tileclose", onclick: () => { p.stop(); stream.getTracks().forEach((t) => t.stop()); extraCams.delete(p.id); tile.remove(); }, text: "✕" }));
@@ -490,6 +512,9 @@ function leave(text) {
   // Closing signalling first avoids queued unpublish operations delaying the
   // server's leave cleanup when a TURN connection takes time to shut down.
   sig.close(); pub?.stop(); screenPub?.stop(); for (const x of extraCams.values()) x.pub.stop();
+  clearTimeout(lossTimer); clearInterval(meterTimer); stopMediaWatch(); gridLayout.destroy();
+  screenMedia?.getTracks().forEach(t => t.stop());
+  for (const x of extraCams.values()) x.media.getTracks().forEach(t => t.stop());
   media?.getTracks().forEach((t) => t.stop());
   // With #invite in the URL, a link to location.href is a same-document
   // navigation: it leaves this goodbye screen and the closed Signal in place.

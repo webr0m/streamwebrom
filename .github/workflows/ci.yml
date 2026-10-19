@@ -82,6 +82,7 @@ jobs:
           /tmp/streamwebrom -addr 127.0.0.1:18443 -stun= -data /tmp/swr-smoke > /tmp/swr.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://localhost:18443/api/health && break; sleep 1; done
       - run: python scripts/browser-smoke.py --url http://localhost:18443
+      - run: python scripts/call-smoke.py --url http://localhost:18443
       - name: TURN/TCP relay-only integration
         run: |
           go build -o /tmp/turn-smoke scripts/turn-smoke-server.go

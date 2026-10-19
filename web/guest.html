@@ -31,13 +31,14 @@
 <section id="waiting" class="landing hidden"><div class="card"><h2>Esperando al anfitrión…</h2><p class="muted">Te dejarán entrar en un momento.</p></div></section>
 
 <section id="call" class="call hidden">
-  <div id="connection" class="card hidden" role="status" aria-live="polite" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:20;max-width:90vw">
+  <div id="connection" class="connection-status hidden" role="status" aria-live="polite">
     <p id="connectionText"></p>
-    <button id="retryMedia" class="primary hidden">Reconectar</button>
-    <button id="retryTLS" class="hidden">Probar conexión móvil por 443</button>
-    <button id="retryLocal" class="hidden">Probar relé del anfitrión</button>
-    <a href="/diagnostics" target="_blank" rel="noopener">Diagnóstico de conexión</a>
+    <div id="connectionActions" class="hidden">
+      <button id="retryMedia" class="primary">Reintentar entrada</button>
+      <a href="/diagnostics" target="_blank" rel="noopener">Diagnóstico de conexión</a>
+    </div>
   </div>
+  <div class="call-grid-tools"><span>Toca un video para ampliarlo</span><button id="restoreGrid" class="small hidden">Ver todos</button></div>
   <div class="grid" id="grid"></div>
   <div class="bar">
     <button class="icon on" id="micBtn" data-icon="mic" title="Micrófono (M)" aria-label="Micrófono"></button>
