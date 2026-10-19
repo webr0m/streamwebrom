@@ -45,9 +45,10 @@ type Server struct {
 	sessions map[string]session // WHIP/WHEP resource id -> scoped resource
 	reqs     atomic.Uint64
 
-	ipMu    sync.Mutex
-	ipRate  map[string]*rate.Limiter // room creation per client IP
-	ipConns map[string]int           // open WebSockets per client IP
+	ipMu      sync.Mutex
+	ipRate    map[string]*rate.Limiter // room creation per client IP
+	probeRate map[string]*rate.Limiter
+	ipConns   map[string]int // open WebSockets per client IP
 }
 
 // MaxWSPerIP bounds simultaneous signalling connections from one address.
@@ -127,7 +128,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 // New creates the server.
 func New(cfg config.Config, hub *studio.Hub, static fs.FS, log *slog.Logger, iceProvider ...func() []webrtc.ICEServer) *Server {
 	s := &Server{cfg: cfg, hub: hub, static: static, log: log, start: time.Now(), sessions: map[string]session{},
-		ipRate: map[string]*rate.Limiter{}, ipConns: map[string]int{}}
+		ipRate: map[string]*rate.Limiter{}, probeRate: map[string]*rate.Limiter{}, ipConns: map[string]int{}}
 	s.assetPrefix = shellPrefix(static)
 	if len(iceProvider) > 0 {
 		s.iceProvider = iceProvider[0]
@@ -163,6 +164,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.clientConfig)
 	mux.HandleFunc("POST /api/rooms", s.createRoom)
 	mux.HandleFunc("GET /api/rooms/{room}", s.roomInfo)
+	mux.HandleFunc("POST /api/route-check", s.createRouteCheck)
+	mux.HandleFunc("DELETE /api/route-check/{room}", s.releaseRouteCheck)
 	mux.HandleFunc("GET /api/admin/stats", s.admin(s.stats))
 	mux.HandleFunc("GET /metrics", s.admin(s.metrics))
 
@@ -280,7 +283,7 @@ func (s *Server) clientConfig(w http.ResponseWriter, r *http.Request) {
 		localICE = s.LocalICEProvider()
 	}
 	writeJSON(w, 200, map[string]any{"ice": s.iceServers(), "publicURL": s.cfg.PublicURL, "version": s.cfg.Version, "layouts": studio.Layouts,
-		"localIce": localICE, "relay": relay, "capabilities": map[string]bool{"multistream": ffmpegErr == nil, "recording": true, "trickleICE": true}})
+		"localIce": localICE, "relay": relay, "capabilities": map[string]bool{"multistream": ffmpegErr == nil, "recording": true, "trickleICE": true, "automaticRouting": true}})
 }
 
 // WHIP/WHEP transports must also release allocations on a provider cutoff.

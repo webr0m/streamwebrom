@@ -49,8 +49,9 @@ type Hub struct {
 	log      *slog.Logger
 	upgrader websocket.Upgrader
 
-	mu    sync.RWMutex
-	rooms map[string]*Room
+	mu     sync.RWMutex
+	rooms  map[string]*Room
+	probes map[string]*Room
 }
 
 // NewHub creates a hub and starts the idle-room reaper.
@@ -58,7 +59,7 @@ func NewHub(ctx context.Context, o Options) *Hub {
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
-	h := &Hub{o: o, log: o.Logger, rooms: map[string]*Room{}}
+	h := &Hub{o: o, log: o.Logger, rooms: map[string]*Room{}, probes: map[string]*Room{}}
 	h.upgrader = websocket.Upgrader{
 		ReadBufferSize: 4096, WriteBufferSize: 4096,
 		CheckOrigin:       o.CheckOrigin,

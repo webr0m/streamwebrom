@@ -1,4 +1,4 @@
-# Clientes móviles 1.6.2
+# Clientes móviles 1.6.3
 
 La corrección de conexión móvil incluye cambios del servidor y de la web: actualiza también el servidor a 1.5.1. Las redes con CGNAT/UDP bloqueado necesitan un servicio TURN configurado; instalar un APK nuevo por sí solo no proporciona un relé. Ver [redes móviles](../docs/REDES-MOVILES.md).
 

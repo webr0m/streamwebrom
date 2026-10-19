@@ -1,4 +1,5 @@
-import { $, el, api, Signal, publish, subscribe, iceConfiguration, networkMode, params } from "./rtc.js";
+import { $, el, api, iceConfiguration, networkMode, params } from "./rtc.js";
+import { checkVideoRoute } from "./network.js";
 
 $("#networkMode").value = networkMode(params.get("network"));
 $("#networkMode").onchange = () => {
@@ -69,37 +70,15 @@ $("#videoRoute").onclick = async () => {
   const button = $("#videoRoute"), result = $("#videoRouteResult"), selector = $("#networkMode");
   button.disabled = selector.disabled = true;
   result.textContent = "Comprobando envío y recepción de video…";
-  let sig, pub, sub, media, timer, video;
   try {
     const mode = selector.value;
     // Validate the selected route before creating a disposable test room.
     const cfg = await api("/api/config");
     iceConfiguration(mode === "local" ? cfg.localIce || [] : cfg.ice || [], mode);
-    const keys = await api("/api/rooms", { room: `check-${crypto.randomUUID().slice(0, 12)}`, lobby: false });
-    sig = new Signal(); sig.mediaMode = mode;
-    await sig.connect({ type: "join", room: keys.room, role: "host", key: keys.hostKey, name: "Prueba de red" });
-    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 64;
-    const ctx = canvas.getContext("2d");
-    let frame = 0;
-    const draw = () => { ctx.fillStyle = `hsl(${frame++ % 360} 70% 50%)`; ctx.fillRect(0, 0, 64, 64); };
-    draw(); media = canvas.captureStream(5); timer = setInterval(draw, 200);
-    pub = await publish(sig, media, { name: "Prueba de red", videoKbps: 80, fps: 5 });
-    sub = await subscribe(sig, pub.id);
-    video = document.createElement("video"); video.muted = true; video.playsInline = true; video.srcObject = sub.stream;
-    await video.play();
-    const deadline = Date.now() + 20000;
-    let decoded = false;
-    while (Date.now() < deadline) {
-      const stats = await sub.pc.getStats();
-      if ([...stats.values()].some(s => s.type === "inbound-rtp" && s.kind === "video" && s.framesDecoded > 0)) { decoded = true; break; }
-      await new Promise(resolve => setTimeout(resolve, 250));
-    }
-    if (!decoded) throw new Error("La ruta conecta, pero el video no vuelve al navegador. Prueba otra ruta.");
+    await checkVideoRoute(mode);
     result.textContent = `✓ Video enviado al servidor y recibido correctamente · ${selector.selectedOptions[0].textContent}.`;
   } catch (e) { result.textContent = `No se completó la prueba de video: ${e.message}`; }
   finally {
-    clearInterval(timer); video?.pause(); if (video) video.srcObject = null;
-    sub?.close(); pub?.stop(); media?.getTracks().forEach(t => t.stop()); sig?.close();
     button.disabled = selector.disabled = false;
   }
 };

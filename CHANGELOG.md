@@ -1,5 +1,13 @@
 # Cambios
 
+## v1.6.3 — Selección automática antes de ingresar
+
+- El invitado comprueba una ruta de video antes de entrar a la sala. Prefiere Cloudflare TLS/443 y elige el relé local si la prueba de video no pasa, sin pedir una selección manual.
+- La prueba genera una imagen pequeña, comprueba su decodificación a través del SFU y no utiliza la cámara ni el micrófono. No confunde una asignación TURN con una ruta de medios funcional.
+- Pruebas temporales limitadas a 32 simultáneas, con caducidad de 45 segundos y limpieza autenticada que no puede borrar salas de programas.
+- Las rutas manuales quedan en opciones avanzadas; las visitas del invitado empiezan automáticamente, incluso desde enlaces anteriores.
+- Regresiones de selección previa, cambio a local con ruta principal bloqueada y recepción del video del invitado tras el ingreso automático.
+
 ## v1.6.2 — Actualizaciones web coherentes
 
 - Archivos JavaScript y CSS bajo una ruta con hash de contenido; los imports relativos conservan el mismo hash. Evita mezclar páginas nuevas con módulos antiguos guardados por el navegador o CDN.

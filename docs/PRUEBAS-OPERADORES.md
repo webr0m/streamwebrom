@@ -19,7 +19,7 @@ El alcance inicial toma como referencia los operadores de datos móviles que ide
 1. Actualizar StreamWebRom y recargar Chrome. Desactivar Wi-Fi y comprobar que el teléfono usa datos móviles. Anotar si indica 4G/LTE o 5G; repetir con cada tecnología disponible, sin dar por probada una a partir de la otra.
 2. Abrir `https://stream.webrom.lat/diagnostics?network=tls`. Pulsar «Probar video hasta el servidor» y anotar el resultado. No se utiliza la cámara ni el micrófono.
 3. Repetir en `https://stream.webrom.lat/diagnostics?network=local`. Ambos relés deben estar configurados por el anfitrión.
-4. Entrar a la sala con la ruta que pasó, usando el selector «Conexión». El anfitrión debe recibir la cámara y el micrófono, y el invitado debe ver y oír al anfitrión. Mantener una conversación al menos dos minutos.
+4. Desde 1.6.3 entrar con el enlace normal y las opciones automáticas predeterminadas, sin seleccionar una ruta. El sistema debe comprobar los medios y elegir un relé antes de entrar. El anfitrión debe recibir la cámara y el micrófono, y el invitado debe ver y oír al anfitrión. Mantener una conversación al menos dos minutos.
 5. Comprobar la admisión al backstage y la incorporación al escenario. Interrumpir los datos brevemente y verificar que reconecta sin volver a quedar bloqueado.
 6. Repetir las dos rutas. Si una falla, registrar el mensaje exacto y conservar la otra como alternativa. No cambiar APN o IPv6 durante la prueba base.
 
@@ -39,6 +39,7 @@ Backstage: pasa/falla
 Audio y video en ambos sentidos durante dos minutos: pasa/falla
 Ingreso al escenario: pasa/falla
 Reconexión al recuperar los datos: pasa/falla
+Selección automática sin elegir un relé: pasa/falla
 ```
 
 No registrar números de teléfono, IMSI/IMEI, IP, contraseñas, claves de invitación ni credenciales TURN. El diagnóstico no envía estos resultados a un tercero ni identifica automáticamente al operador. El operador se registra a partir de la línea utilizada por quien realiza la prueba.

@@ -13,6 +13,7 @@ import { $, el, toast, params, api, Signal, publish, subscribe, levelMeter } fro
 import { listDevices, openScreen, loadPrefs, savePrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain } from "./devices.js";
 import { remoteSnapshot, remoteStats, CAMCTL } from "./remote.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
+import { automaticRoute } from "./network.js";
 
 const room = (params.get("room") || "").toLowerCase();
 if (!room) location.href = "/";
@@ -22,6 +23,9 @@ const extraCams = new Map(); // pubId -> { pub, media }
 let state = {};
 const remotes = new Map(); // streamId -> { tile, sub, video }
 const sig = new Signal();
+// Even previously shared links start automatically. Manual routing is an
+// optional advanced action for this visit, never required for admission.
+sig.mediaMode = "auto";
 $("#networkMode").value = sig.mediaMode;
 function selectNetwork(mode) {
   $("#networkMode").value = mode;
@@ -124,7 +128,15 @@ async function join() {
   if (!name) return toast("Escribe tu nombre", "err");
   try { localStorage.setItem("swr.name", name); } catch {}
   $("#joinBtn").disabled = true;
+  $("#networkMode").disabled = true;
   try {
+    if (sig.mediaMode === "auto") {
+      const cfg = await api("/api/config");
+      sig.mediaMode = await automaticRoute(cfg, mode => {
+        $("#joinBtn").textContent = mode === "local" ? "Comprobando la conexión alternativa…" : "Comprobando la mejor conexión…";
+      });
+    }
+    $("#joinBtn").textContent = "Entrando…";
     const invite = new URLSearchParams(location.hash.slice(1)).get("invite") || "";
     const m = await sig.connect({ type: "join", room, role: "guest", name, password: $("#pw").value, invite });
     if (m.type === "waiting") { $("#pre").classList.add("hidden"); $("#waiting").classList.remove("hidden"); return; }
@@ -132,6 +144,8 @@ async function join() {
   } catch (e) {
     toast(e.message, "err");
     $("#joinBtn").disabled = false;
+    $("#networkMode").disabled = false;
+    $("#joinBtn").textContent = "Entrar";
   }
 }
 if ((params.has("autostart") || params.has("autojoin") || params.has("aj")) && $("#name").value) setTimeout(join, 800);

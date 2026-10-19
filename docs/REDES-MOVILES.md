@@ -46,13 +46,17 @@ Estas pruebas no representan una comprobación con cada operadora móvil.
 
 ## Rutas alternativas por participante (1.6.1)
 
+Desde 1.6.3 el invitado empieza en modo automático. Al pulsar Entrar, y antes de unirse o llamar al backstage, se comprueba video generado por Cloudflare TLS/443. Si no pasa, se comprueba el relé local y se elige el que funciona. No se pide al invitado cambiar de opción después de un ingreso fallido. Cada intento tiene un plazo de 12 segundos; si ambos fallan se informa antes de entrar. Las instalaciones sin relés TLS conservan su conexión directa habitual.
+
+La prueba no abre cámara ni micrófono y utiliza una sala temporal independiente, limitada y con caducidad. Las opciones manuales solo se muestran al abrir «Opciones avanzadas de conexión». Cada visita comienza automáticamente, también desde enlaces de invitado que conservaban `network=tls` o `network=local`; esos parámetros siguen seleccionando la prueba correspondiente en `/diagnostics`.
+
 Para verificar compañías y tecnologías sin confundir una prueba de laboratorio con una red real, usa la [matriz y protocolo de operadores](PRUEBAS-OPERADORES.md).
 
 Desde 1.6.2 las páginas cargan JavaScript/CSS mediante rutas con hash de contenido, incluidos los imports entre módulos y el service worker. Esto evita que una página nueva use código antiguo retenido por el navegador o el CDN. Tras actualizar, recarga la página antes de probar. Un botón visible que no responde puede indicar una mezcla de versiones; el número de `/api/config` por sí solo no confirma qué JavaScript cargó el teléfono.
 
 Una prueba de asignación TURN puede pasar y aun así fallar el audio/video. En `/diagnostics`, «Probar video hasta el servidor» envía una imagen generada y verifica su recepción y decodificación. No abre la cámara ni el micrófono.
 
-Prueba las opciones «Solo conexión cifrada por 443» y «Relé del equipo anfitrión por 443». En la pantalla de ingreso del invitado, el selector «Conexión» ofrece las mismas rutas. Si falla el ingreso, los botones del aviso permiten cambiar de ruta conservando el permiso de reingreso. Los enlaces pueden incluir `&network=tls` o `&network=local`; se conserva el fragmento de la invitación.
+Para comprobar cada transporte por separado, prueba las opciones «Solo conexión cifrada por 443» y «Relé del equipo anfitrión por 443» en el diagnóstico. En las opciones avanzadas del invitado, el selector «Conexión» permite forzar una ruta durante esa visita. La selección automática previa al ingreso es el comportamiento normal.
 
 `tls` excluye STUN, conexiones directas y TURN/UDP: solo utiliza `turns:` en TCP/443. `local` emplea el TURN instalado por el anfitrión y también usa TLS/443 desde el navegador. El SFU ofrece sus candidatos directos para alcanzar ese relé, aunque Cloudflare siga activo para otros participantes. No hace falta desactivar Cloudflare globalmente ni esperar al corte de consumo. Estas rutas requieren un relé TLS/443 válido; no se aceptan URLs de servidor proporcionadas por el invitado.
 

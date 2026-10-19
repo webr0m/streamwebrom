@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.6.2:** actualizaciones web sin mezclar código antiguo en caché, rutas alternativas para redes móviles (TURN cifrado por 443 y relé local por participante) y diagnóstico con envío y recepción de video generado, sin cámara. Requiere configurar la infraestructura: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.6.3:** selecciona automáticamente una ruta de video antes de ingresar: Cloudflare TLS/443 o el relé local si la prueba principal falla. Incluye diagnóstico con video generado y actualizaciones web sin mezclar código antiguo en caché. Requiere configurar la infraestructura: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 
