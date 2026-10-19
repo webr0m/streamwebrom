@@ -130,3 +130,5 @@ Referencias: [conexiones y trickle ICE](https://webrtc.org/getting-started/peer-
 ### Reconectar después de una interrupción
 
 Desde 1.6.4, el botón «Reconectar» cancela la sesión anterior, vuelve a comprobar las rutas y restablece la conexión completa sin recargar la página. Conserva el permiso de reingreso, la contraseña en memoria y los dispositivos activos con su estado de silencio. Si el servidor reinició y ya no reconoce el permiso, el anfitrión puede tener que admitir al invitado de nuevo. No restablece permisos revocados por una expulsión.
+
+Desde 1.6.5, el enlace «Volver a entrar» de la pantalla «Saliste de la sala» abre un documento nuevo conservando la invitación. No queda atascado en una navegación al mismo fragmento `#invite`. Después aparece de nuevo la pantalla de ingreso.

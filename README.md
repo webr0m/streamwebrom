@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.6.4:** corrige Reconectar para restablecer la sesión y comprobar de nuevo los relés sin recargar la página; selecciona automáticamente una ruta de video antes de ingresar: Cloudflare TLS/443 o el relé local si la prueba principal falla. Incluye diagnóstico con video generado y actualizaciones web sin mezclar código antiguo en caché. Requiere configurar la infraestructura: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.6.5:** corrige «Volver a entrar» después de salir, también desde enlaces de invitación; selecciona automáticamente una ruta de video antes de ingresar: Cloudflare TLS/443 o el relé local si la prueba principal falla. Incluye diagnóstico con video generado y actualizaciones web sin mezclar código antiguo en caché. Requiere configurar la infraestructura: [guía de conexión móvil](docs/REDES-MOVILES.md). Ver también [auditoría](docs/AUDITORIA-1.5.md), [apps móviles](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 

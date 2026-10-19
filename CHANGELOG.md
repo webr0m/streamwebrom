@@ -1,5 +1,11 @@
 # Cambios
 
+## v1.6.5 — Volver a entrar después de salir
+
+- «Volver a entrar» fuerza una página nueva y conserva la invitación. Antes, con `#invite`, el enlace podía navegar dentro del mismo documento y dejar visible «Saliste de la sala».
+- La desconexión final y los atajos de teclado ya no acceden a controles retirados de la pantalla de salida.
+- Regresión en Chromium con pantalla táctil y tamaño de móvil: salir y volver a entrar dos veces con fragmento de invitación, recuperando medios.
+
 ## v1.6.4 — Reconexión completa del invitado
 
 - El botón Reconectar cancela la sesión atascada, comprueba otra vez las rutas y abre una conexión nueva conservando el permiso de ingreso y la contraseña en memoria.

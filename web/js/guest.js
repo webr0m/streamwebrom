@@ -206,6 +206,7 @@ $("#retryTLS").onclick = () => selectNetwork("tls");
 $("#retryLocal").onclick = () => selectNetwork("local");
 sig.on("disconnected", () => {
   ++mediaGeneration; connectingMedia = false;
+  if (sig.closed) return; // Leave/kick already replaced the call's DOM.
   $("#retryMedia").disabled = reconnectingGuest;
   try { pub?.pc.close(); } catch {} pub = null;
   for (const id of [...remotes.keys()]) unwatch(id);
@@ -488,13 +489,18 @@ $("#leaveBtn").onclick = () => leave("Saliste de la sala.");
 function leave(text) {
   pub?.stop(); screenPub?.stop(); for (const x of extraCams.values()) x.pub.stop(); sig.close();
   media?.getTracks().forEach((t) => t.stop());
-  document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card col" }, el("h2", { text }), el("a", { class: "btn", href: location.href, text: "Volver a entrar" }))));
+  // With #invite in the URL, a link to location.href is a same-document
+  // navigation: it leaves this goodbye screen and the closed Signal in place.
+  // A different query forces a fresh document while preserving the invitation.
+  const back = new URL(location.href);
+  back.searchParams.set("reenter", crypto.randomUUID());
+  document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card col" }, el("h2", { text }), el("a", { class: "btn", href: back.href, text: "Volver a entrar" }))));
 }
 
 // Keyboard: M mic, V camera, hold Space = push-to-talk while muted (Discord style)
 let ptt = false;
 document.addEventListener("keydown", (e) => {
-  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName) || $("#call").classList.contains("hidden") || $("#devDialog")?.open) return;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName) || !$("#call") || $("#call").classList.contains("hidden") || $("#devDialog")?.open) return;
   if (e.key === "m") setMic(!micOn());
   if (e.key === "v") setCam(!camOn());
   if (e.code === "Space" && !micOn() && !ptt) { ptt = true; setMic(true); e.preventDefault(); }

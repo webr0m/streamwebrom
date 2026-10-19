@@ -100,7 +100,9 @@ with sync_playwright() as pw:
     expect(diagnostics.locator('#mediaResult')).to_contain_text('liberado', timeout=10000)
     diagnostics.locator('#relay').click()
     expect(diagnostics.locator('#relayResult')).to_contain_text('no tiene TURN', timeout=10000)
-    blocked = page()
+    mobile_context=browser.new_context(permissions=['camera','microphone'],service_workers='block',has_touch=True,is_mobile=True,viewport={'width':393,'height':851})
+    blocked=mobile_context.new_page()
+    blocked.on('pageerror',lambda error: errors.append(str(error)))
     blocked.add_init_script(f'({ice_network})({{delay:0,blocked:true}})')
     blocked.goto(f"{args.url}/guest?room={room}&label=SinRuta#invite={keys['inviteKey']}")
     blocked.locator('#joinBtn').click()
@@ -136,6 +138,25 @@ with sync_playwright() as pw:
     blocked.wait_for_function('() => window.__sockets.length>=4 && window.__sockets.at(-1).readyState===1',timeout=15000)
     expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
     assert blocked.evaluate("window.__pcs.some(pc=>pc.connectionState==='connected')")
+    # Exit and return from a real invitation URL. A same-URL #invite link used
+    # to leave the closed session and goodbye DOM in place, especially on phones.
+    await_return = blocked.url
+    for _ in range(2):
+        blocked.locator('#leaveBtn').click()
+        expect(blocked.get_by_role('heading',name='Saliste de la sala.')).to_be_visible()
+        blocked.keyboard.press('m') # Goodbye screen must not use removed controls.
+        back=blocked.get_by_role('link',name='Volver a entrar',exact=True)
+        target=back.get_attribute('href')
+        assert target!=await_return and '#invite=' in target
+        back.tap()
+        expect(blocked.locator('#pre')).to_be_visible(timeout=15000)
+        expect(blocked.locator('#name')).to_have_value('SinRuta')
+        blocked.evaluate('window.__blockICE=false')
+        blocked.locator('#joinBtn').tap()
+        expect(blocked.locator('#call')).to_be_visible(timeout=15000)
+        expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
+        assert blocked.evaluate("window.__pcs.some(pc=>pc.connectionState==='connected')")
+        await_return=blocked.url
     # Allocation alone is insufficient: the diagnostic must decode generated
     # video after a full publish/subscribe round trip, without opening devices.
     # Emulate a stale CDN/browser copy at every old unversioned module URL.
@@ -155,5 +176,5 @@ with sync_playwright() as pw:
     expect(safari.locator('#checks')).to_contain_text('Conectado', timeout=10000)
     safari.close(); webkit.close()
     assert not errors, errors
-    print(json.dumps({'ok':True, 'checks':['corrupt storage', 'host camera', 'lobby admission', 'late trickle ICE in both directions', 'guest publication', 'stage', 'OBS media', 'signalling reconnect', 'preflight', 'missing TURN detection', 'blocked ICE deadline and retry', 'media-only reconnect preserves camera, mute and admission', 'WebKit diagnostics'], 'pageErrors':errors}, ensure_ascii=False))
-    context.close(); browser.close()
+    print(json.dumps({'ok':True, 'checks':['corrupt storage', 'host camera', 'lobby admission', 'late trickle ICE in both directions', 'guest publication', 'stage', 'OBS media', 'signalling reconnect', 'preflight', 'missing TURN detection', 'blocked ICE deadline and retry', 'media-only reconnect preserves camera, mute and admission', 'exit and return twice with invitation fragment', 'WebKit diagnostics'], 'pageErrors':errors}, ensure_ascii=False))
+    mobile_context.close(); context.close(); browser.close()
