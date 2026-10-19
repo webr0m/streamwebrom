@@ -111,9 +111,29 @@ with sync_playwright() as pw:
     blocked.evaluate('window.__blockICE=false')
     blocked.locator('#retryMedia').click()
     expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
+    assert blocked.evaluate('window.__sockets.length===2'), 'Retry must replace the signalling socket'
     assert blocked.evaluate("window.__pcs.some(pc=>pc.connectionState==='connected')")
+    # Lose just the media transport while signalling is still open, as on a
+    # mobile network handover. Clicking reconnect must republish on a new socket
+    # and keep the muted microphone and the existing live camera track.
+    blocked.locator('#micBtn').click()
+    blocked.evaluate("""() => {
+      window.__camera=document.querySelector('[data-id="me"] video').srcObject.getVideoTracks()[0];
+      const pc=window.__pcs.find(p=>p.connectionState==='connected'&&p.getSenders().some(s=>s.track));
+      pc.close();Object.defineProperty(pc,'connectionState',{value:'failed'});
+      pc.dispatchEvent(new Event('connectionstatechange'));
+    }""")
+    expect(blocked.locator('#retryMedia')).to_be_visible()
+    blocked.locator('#retryMedia').click()
+    expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
+    assert blocked.evaluate('window.__sockets.length===3')
+    expect(blocked.locator('#waiting')).to_be_hidden()
+    assert blocked.evaluate("""() => {
+      const media=document.querySelector('[data-id="me"] video').srcObject;
+      return media.getVideoTracks()[0]===window.__camera&&window.__camera.readyState==='live'&&media.getAudioTracks().every(t=>!t.enabled);
+    }""")
     blocked.evaluate('window.__sockets.at(-1).close()')
-    blocked.wait_for_function('() => window.__sockets.length>=2 && window.__sockets.at(-1).readyState===1',timeout=15000)
+    blocked.wait_for_function('() => window.__sockets.length>=4 && window.__sockets.at(-1).readyState===1',timeout=15000)
     expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
     assert blocked.evaluate("window.__pcs.some(pc=>pc.connectionState==='connected')")
     # Allocation alone is insufficient: the diagnostic must decode generated
@@ -135,5 +155,5 @@ with sync_playwright() as pw:
     expect(safari.locator('#checks')).to_contain_text('Conectado', timeout=10000)
     safari.close(); webkit.close()
     assert not errors, errors
-    print(json.dumps({'ok':True, 'checks':['corrupt storage', 'host camera', 'lobby admission', 'late trickle ICE in both directions', 'guest publication', 'stage', 'OBS media', 'signalling reconnect', 'preflight', 'missing TURN detection', 'blocked ICE deadline and retry', 'WebKit diagnostics'], 'pageErrors':errors}, ensure_ascii=False))
+    print(json.dumps({'ok':True, 'checks':['corrupt storage', 'host camera', 'lobby admission', 'late trickle ICE in both directions', 'guest publication', 'stage', 'OBS media', 'signalling reconnect', 'preflight', 'missing TURN detection', 'blocked ICE deadline and retry', 'media-only reconnect preserves camera, mute and admission', 'WebKit diagnostics'], 'pageErrors':errors}, ensure_ascii=False))
     context.close(); browser.close()

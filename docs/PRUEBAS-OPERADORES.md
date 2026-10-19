@@ -6,7 +6,7 @@ Estado al 18 de octubre de 2026. Una prueba desde otra conexión, un simulador o
 
 | Operador | Video con Cloudflare TLS/443 | Video con relé local TLS/443 | Ingreso a backstage | Evidencia |
 |---|---|---|---|---|
-| Movistar Chile | Confirmado | Confirmado | Confirmado | Usuario, Chrome en teléfono con datos móviles, 18-10-2026, versión 1.6.1. Tecnología exacta de la última prueba no registrada; falta separar 4G y 5G. |
+| Movistar Chile | Confirmado | Confirmado | Confirmado | Usuario, Chrome en teléfono con datos móviles, 18-10-2026, versión 1.6.1; ingreso automático confirmado por el usuario en 1.6.3. Tecnología exacta de la última prueba no registrada; falta separar 4G y 5G. |
 | Entel | Pendiente | Pendiente | Pendiente | Se necesita prueba desde una línea real. |
 | Claro / VTR | Pendiente | Pendiente | Pendiente | Registrar la marca y línea probadas por separado. |
 | WOM | Pendiente | Pendiente | Pendiente | Se necesita prueba desde una línea real. |
@@ -20,7 +20,7 @@ El alcance inicial toma como referencia los operadores de datos móviles que ide
 2. Abrir `https://stream.webrom.lat/diagnostics?network=tls`. Pulsar «Probar video hasta el servidor» y anotar el resultado. No se utiliza la cámara ni el micrófono.
 3. Repetir en `https://stream.webrom.lat/diagnostics?network=local`. Ambos relés deben estar configurados por el anfitrión.
 4. Desde 1.6.3 entrar con el enlace normal y las opciones automáticas predeterminadas, sin seleccionar una ruta. El sistema debe comprobar los medios y elegir un relé antes de entrar. El anfitrión debe recibir la cámara y el micrófono, y el invitado debe ver y oír al anfitrión. Mantener una conversación al menos dos minutos.
-5. Comprobar la admisión al backstage y la incorporación al escenario. Interrumpir los datos brevemente y verificar que reconecta sin volver a quedar bloqueado.
+5. Comprobar la admisión al backstage y la incorporación al escenario. Interrumpir los datos brevemente y verificar que reconecta sin volver a quedar bloqueado. Desde 1.6.4, si aparece «Reconectar», pulsarlo y comprobar que regresa sin recargar ni elegir relé; conservar cámara y estado de silencio.
 6. Repetir las dos rutas. Si una falla, registrar el mensaje exacto y conservar la otra como alternativa. No cambiar APN o IPv6 durante la prueba base.
 
 ## Registro de una nueva prueba

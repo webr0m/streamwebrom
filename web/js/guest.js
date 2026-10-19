@@ -152,6 +152,7 @@ if ((params.has("autostart") || params.has("autojoin") || params.has("aj")) && $
 
 let entered = false, rewait = false;
 let connectingMedia = false;
+let mediaGeneration = 0, reconnectingGuest = false;
 function connectionStatus(text, retry = false) {
   $("#connection").classList.toggle("hidden", !text);
   $("#connectionText").textContent = text;
@@ -160,13 +161,17 @@ function connectionStatus(text, retry = false) {
   $("#retryLocal").classList.toggle("hidden", !retry || sig.mediaMode === "local" || !sig.localIce.length);
 }
 async function connectMedia() {
-  if (connectingMedia || !media.getTracks().length) return;
+  if (connectingMedia) return;
+  if (!media.getTracks().length) { connectionStatus(""); return; }
+  const generation = ++mediaGeneration;
   connectingMedia = true;
   $("#retryMedia").disabled = true;
   connectionStatus("Conectando audio y video…");
   try {
     pub?.stop(); pub = null;
-    pub = await publish(sig, media, pubOpts($("#name").value));
+    const fresh = await publish(sig, media, pubOpts($("#name").value));
+    if (generation !== mediaGeneration) { fresh.stop(); return; }
+    pub = fresh;
     connectionStatus(""); sendMedia(); updateStageBadge();
     const current = pub;
     pub.pc.addEventListener("connectionstatechange", () => {
@@ -174,13 +179,38 @@ async function connectMedia() {
       if (pub.pc.connectionState === "connected") connectionStatus("");
       else if (["failed", "disconnected"].includes(pub.pc.connectionState)) connectionStatus("Se perdió la conexión de audio y video. Puedes volver a conectarte.", true);
     });
-  } catch (e) { connectionStatus(e.message, true); }
-  finally { connectingMedia = false; $("#retryMedia").disabled = false; }
+  } catch (e) { if (generation === mediaGeneration) connectionStatus(e.message, true); }
+  finally { if (generation === mediaGeneration) { connectingMedia = false; $("#retryMedia").disabled = false; } }
 }
-$("#retryMedia").onclick = connectMedia;
+async function reconnectGuest() {
+  if (reconnectingGuest || sig.closed) return;
+  reconnectingGuest = true; $("#retryMedia").disabled = true;
+  connectionStatus("Comprobando la conexión para volver a entrar…");
+  try {
+    await sig.reconnect(async () => {
+      const cfg = await api("/api/config");
+      sig.mediaMode = await automaticRoute(cfg, mode => connectionStatus(mode === "local" ? "Comprobando la conexión alternativa…" : "Comprobando la mejor conexión…"));
+      if (media.getTracks().length && media.getTracks().every(t => t.readyState === "ended")) {
+        const mic = micOn(), cam = camOn();
+        media = await open();
+        media.getAudioTracks().forEach(t => { t.enabled = mic; });
+        media.getVideoTracks().forEach(t => { t.enabled = cam; });
+        const me = $('[data-id="me"] video'); if (me) me.srcObject = media;
+      }
+    });
+  } catch (e) { connectionStatus(`No se pudo reconectar: ${e.message}`, true); }
+  finally { reconnectingGuest = false; $("#retryMedia").disabled = false; }
+}
+$("#retryMedia").onclick = reconnectGuest;
 $("#retryTLS").onclick = () => selectNetwork("tls");
 $("#retryLocal").onclick = () => selectNetwork("local");
-sig.on("disconnected", () => { if (entered) connectionStatus("Reconectando con el servidor…"); });
+sig.on("disconnected", () => {
+  ++mediaGeneration; connectingMedia = false;
+  $("#retryMedia").disabled = reconnectingGuest;
+  try { pub?.pc.close(); } catch {} pub = null;
+  for (const id of [...remotes.keys()]) unwatch(id);
+  if (entered) connectionStatus("Reconectando con el servidor…", !reconnectingGuest);
+});
 sig.on("welcome", (m) => {
   if (rewait) { rewait = false; $("#waiting").classList.add("hidden"); $("#call").classList.remove("hidden"); resume(m); return; }
   if (!entered && !$("#waiting").classList.contains("hidden")) enter(m);
@@ -199,6 +229,7 @@ sig.on("reconnected", (m) => {
 async function resume(m) {
   // The server forgot our old publications: publish fresh ones.
   myId = m.peerId;
+  state = m.state || state;
   try { pub?.pc.close(); } catch {}
   pub = null;
   await connectMedia();
@@ -347,13 +378,15 @@ function ask(text, btn, fn) {
 
 async function watch(id, kind, owner, name) {
   if (kind === "program" || owner === myId || remotes.has(id) || id === pub?.id || id === screenPub?.id || extraCams.has(id)) return;
-  remotes.set(id, {});
+  const pending = {};
+  remotes.set(id, pending);
   try {
     const sub = await subscribe(sig, id);
+    if (remotes.get(id) !== pending) { sub.close(); return; }
     const lvl = sub.stream.getAudioTracks().length ? levelMeter(sub.stream) : () => 0;
     const tile = addTile(id, sub.stream, sub.name || name || "Invitado", false, lvl);
     remotes.set(id, { sub, tile, video: tile.querySelector("video") });
-  } catch { remotes.delete(id); }
+  } catch { if (remotes.get(id) === pending) remotes.delete(id); }
 }
 function unwatch(id) {
   const r = remotes.get(id);

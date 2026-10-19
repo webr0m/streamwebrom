@@ -126,3 +126,7 @@ Se exige configurar también el local. En **Diagnóstico**, «Proveedor TURN» i
 Referencias de infraestructura: [credenciales Cloudflare](https://developers.cloudflare.com/realtime/turn/generate-credentials/), [analíticas TURN](https://developers.cloudflare.com/realtime/turn/analytics/), [precios y cuota compartida](https://developers.cloudflare.com/realtime/sfu/platform/pricing/), [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel), [reenvío TCP/TLS](https://tailscale.com/docs/reference/tailscale-cli/funnel).
 
 Referencias: [conexiones y trickle ICE](https://webrtc.org/getting-started/peer-connections), [servidores TURN](https://webrtc.org/getting-started/turn-server), [coturn](https://github.com/coturn/coturn).
+
+### Reconectar después de una interrupción
+
+Desde 1.6.4, el botón «Reconectar» cancela la sesión anterior, vuelve a comprobar las rutas y restablece la conexión completa sin recargar la página. Conserva el permiso de reingreso, la contraseña en memoria y los dispositivos activos con su estado de silencio. Si el servidor reinició y ya no reconoce el permiso, el anfitrión puede tener que admitir al invitado de nuevo. No restablece permisos revocados por una expulsión.

@@ -1,5 +1,13 @@
 # Cambios
 
+## v1.6.4 — Reconexión completa del invitado
+
+- El botón Reconectar cancela la sesión atascada, comprueba otra vez las rutas y abre una conexión nueva conservando el permiso de ingreso y la contraseña en memoria.
+- Conserva las pistas activas de cámara y micrófono y sus estados de silencio; si el navegador terminó ambas pistas, vuelve a abrir los dispositivos.
+- Cancela negociaciones pendientes y evita que una respuesta o limpieza tardía de la conexión antigua retire las fuentes de la nueva sesión.
+- Recupera suscripciones remotas y estado de la sala; los reintentos simultáneos comparten un solo intento.
+- Pruebas de reconexión con señalización y medios interrumpidos, cámara conservada, micrófono silenciado y permiso de reingreso.
+
 ## v1.6.3 — Selección automática antes de ingresar
 
 - El invitado comprueba una ruta de video antes de entrar a la sala. Prefiere Cloudflare TLS/443 y elige el relé local si la prueba de video no pasa, sin pedir una selección manual.

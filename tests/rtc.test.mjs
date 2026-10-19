@@ -15,7 +15,7 @@ class Socket {
 }
 globalThis.WebSocket = Socket;
 const source = await readFile(new URL('../web/js/rtc.js', import.meta.url), 'utf8');
-const { Signal, readStored, waitConnected, iceConfiguration } = await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const { Signal, readStored, waitConnected, iceConfiguration, publish, subscribe } = await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 const signals=[];
 
 test('restricted mobile mode uses only TLS/443 relay candidates',()=>{
@@ -59,6 +59,63 @@ test('close cancels a scheduled reconnect',async t=>{
   t.mock.timers.enable({apis:['setTimeout','setInterval']});
   const s=signal(),ws=await connected(s);ws.close();s.close();t.mock.timers.tick(20000);
   assert.equal(Socket.sockets.length,1);
+});
+
+test('manual reconnect replaces a live socket after checking the new route, preserving admission',async()=>{
+  const s=signal(),old=await connected(s);s.joinMsg.password='in-memory';
+  const pending=assert.rejects(s.request({type:'publish'}),/connection restarted/);
+  let finish;const prepared=new Promise(resolve=>{finish=resolve});
+  let resumed=0;s.on('reconnected',()=>resumed++);
+  const restart=s.reconnect(async()=>{await prepared;s.mediaMode='local'});
+  assert.equal(s.reconnect(),restart,'double clicks must share a single attempt');
+  await pending;assert.equal(old.readyState,3);assert.equal(s.pending.size,0);
+  assert.equal(Socket.sockets.length,1,'do not join before route selection finishes');
+  finish();await new Promise(resolve=>setImmediate(resolve));
+  const fresh=Socket.sockets.at(-1);assert.notEqual(fresh,old);fresh.open();
+  assert.equal(fresh.sent[0].route,'local');assert.equal(fresh.sent[0].rejoin,'pass');
+  assert.equal(fresh.sent[0].password,'in-memory');
+  // A delayed callback from the old socket cannot cancel the fresh connection.
+  old.onclose();old.receive({type:'kicked'});assert.equal(s.closed,false);
+  fresh.receive({type:'welcome',ice:[],peerId:'new-peer'});
+  await restart;assert.equal(resumed,1);assert.equal(s.restarting,null);
+});
+
+test('manual reconnect cancels automatic backoff and an unresponsive joining socket',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','setInterval']});
+  const s=signal(),old=await connected(s);old.close();
+  const restart=s.reconnect();await new Promise(resolve=>setImmediate(resolve));
+  const stalled=Socket.sockets.at(-1);
+  t.mock.timers.tick(501);assert.equal(Socket.sockets.length,2,'backoff was cancelled');
+  // Replacing a stalled join must settle its promise instead of hanging.
+  const failed=assert.rejects(restart,/connection closed/);s.close();await failed;
+  assert.equal(stalled.readyState,3);
+});
+
+test('failed route preparation can be retried, but leaving or being kicked cannot revive a guest',async()=>{
+  const s=signal();await connected(s);
+  await assert.rejects(s.reconnect(()=>{throw new Error('no route')}),/no route/);
+  assert.equal(s.restarting,null);
+  const restart=s.reconnect();await new Promise(resolve=>setImmediate(resolve));
+  const fresh=Socket.sockets.at(-1);fresh.open();fresh.receive({type:'welcome',ice:[]});await restart;
+  fresh.receive({type:'kicked'});
+  await assert.rejects(s.reconnect(),/connection closed/);
+  assert.equal(Socket.sockets.length,2);
+});
+
+test('cleanup of old publications and subscriptions cannot remove media on a new socket',async t=>{
+  class Peer extends EventTarget {
+    connectionState='connected';iceGatheringState='complete';localDescription={type:'offer',sdp:''};
+    async createOffer(){return this.localDescription} async createAnswer(){return this.localDescription}
+    async setLocalDescription(){} async setRemoteDescription(){} close(){this.connectionState='closed'}
+  }
+  globalThis.RTCPeerConnection=Peer;globalThis.MediaStream=class {};
+  t.after(()=>{delete globalThis.RTCPeerConnection;delete globalThis.MediaStream});
+  const s=signal(),old=await connected(s);s.trickle=true;
+  s.request=async()=>({stream:'camera',sdp:{type:'answer',sdp:''}});
+  const p=await publish(s,{getTracks:()=>[]});const sub=await subscribe(s,'remote');
+  const count=old.sent.length;s.ws=new Socket();s.ws.open();
+  p.stop();sub.close();
+  assert.equal(old.sent.length,count);assert.deepEqual(s.ws.sent,[]);
 });
 test('a rejected password permits an explicit retry without retry storms',async()=>{
   const s=signal();const initial=s.connect({type:'join',room:'test-room',password:'wrong'});

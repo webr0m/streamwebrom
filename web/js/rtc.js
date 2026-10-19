@@ -107,18 +107,20 @@ export class Signal extends EventTarget {
         reject(new Error("El servidor no respondió. Revisa tu conexión e inténtalo de nuevo."));
         ws.close();
       }, 20000);
+      this.cancelJoin = (reason = "connection restarted") => { clearTimeout(deadline); reject(new Error(reason)); };
       ws.onopen = () => { if (this.ws === ws) ws.send(JSON.stringify(joinMsg)); };
       ws.onmessage = (ev) => {
         if (this.ws !== ws) return;
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === "welcome") {
+          this.cancelJoin = null;
           clearTimeout(deadline);
           this.retry = 0; welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.localIce = m.localIce || []; this.trickle = m.trickle === true; this.flush(); resolve(m);
           if (m.rejoin) { this.joinMsg = { ...this.joinMsg, rejoin: m.rejoin }; try { passKey && sessionStorage.setItem(passKey, m.rejoin); } catch {} }
         }
         // Waiting in the lobby counts as connected: if the socket drops while
         // waiting, reconnect and knock again instead of leaving a dead page.
-        if (m.type === "waiting") { clearTimeout(deadline); welcomed = true; this.everWelcomed = true; resolve(m); }
+        if (m.type === "waiting") { this.cancelJoin = null; clearTimeout(deadline); welcomed = true; this.everWelcomed = true; resolve(m); }
         if (m.type === "error" && !welcomed && !m.reqId) {
           // Authentication failure is terminal, including after a reconnect.
           terminal = true; reject(new Error(m.error)); ws.close();
@@ -141,6 +143,7 @@ export class Signal extends EventTarget {
       ws.onclose = () => {
         clearTimeout(deadline);
         if (this.ws !== ws) return;
+        this.cancelJoin = null;
         clearInterval(this.keepalive);
         this.queue = [];
         for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error("disconnected")); }
@@ -163,6 +166,25 @@ export class Signal extends EventTarget {
   }
 
   on(type, fn) { this.addEventListener(type, (e) => fn(e.detail)); return this; }
+
+  reconnect(prepare) {
+    if (this.restarting) return this.restarting;
+    if (this.closed || !this.joinMsg) return Promise.reject(new Error("connection closed"));
+    const join = this.joinMsg, old = this.ws;
+    clearTimeout(this.reconnectTimer); clearInterval(this.keepalive);
+    this.cancelJoin?.(); this.cancelJoin = null;
+    this.ws = null; this.queue = [];
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error("connection restarted")); }
+    this.pending.clear();
+    this.dispatchEvent(new CustomEvent("disconnected"));
+    old?.close();
+    this.restarting = Promise.resolve().then(() => prepare?.()).then(() => {
+      if (this.closed) throw new Error("connection closed");
+      return this.connect(join);
+    }).then(m => { this.dispatchEvent(new CustomEvent("reconnected", { detail: m })); return m; })
+      .finally(() => { this.restarting = null; });
+    return this.restarting;
+  }
 
   useNetwork(mode) {
     this.mediaMode = networkMode(mode);
@@ -190,6 +212,7 @@ export class Signal extends EventTarget {
   }
 
   close() {
+    this.cancelJoin?.("connection closed"); this.cancelJoin = null;
     this.closed = true; clearInterval(this.keepalive); clearTimeout(this.reconnectTimer); this.queue = [];
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error("connection closed")); }
     this.pending.clear(); this.ws && this.ws.close();
@@ -281,6 +304,7 @@ function prefer(tr, mime) {
  * opts: { kind, stream, name, videoKbps, audioKbps, codec, contentHint }
  */
 export async function publish(sig, media, opts = {}) {
+  const socket = sig.ws;
   const pc = new RTCPeerConnection(iceConfiguration(sig.ice, sig.mediaMode));
   const ice = incrementalICE(sig, pc);
   const senders = {};
@@ -294,6 +318,7 @@ export async function publish(sig, media, opts = {}) {
   try {
     await pc.setLocalDescription(await pc.createOffer());
     if (!sig.trickle) await gathered(pc, 10000);
+    if (sig.ws !== socket || ice.signal.aborted) throw new Error("Se perdió la conexión con el servidor.");
     res = await sig.request({ type: "publish", kind: opts.kind || "camera", stream: opts.stream || "", name: opts.name || "", sdp: pc.localDescription, ...ice.fields });
     const answer = opts.stereo ? { type: res.sdp.type, sdp: stereoOpus(res.sdp.sdp, opts.audioKbps || 256) } : res.sdp;
     await pc.setRemoteDescription(answer);
@@ -302,13 +327,13 @@ export async function publish(sig, media, opts = {}) {
   } catch (e) {
     ice.close();
     pc.close(); // do not leak a half-open connection (and its camera reference)
-    if (res?.stream) sig.send({ type: "unpublish", stream: res.stream });
+    if (res?.stream && sig.ws === socket) sig.send({ type: "unpublish", stream: res.stream });
     throw e;
   }
   await tune(senders, opts);
   return {
     id: res.stream, pc, senders, opts,
-    stop() { ice.close(); try { sig.send({ type: "unpublish", stream: res.stream }); } catch {} pc.close(); },
+    stop() { ice.close(); try { if (sig.ws === socket) sig.send({ type: "unpublish", stream: res.stream }); } catch {} pc.close(); },
     /** Hot-swap a device without renegotiating (falls back to null = silence/black). */
     async replaceTrack(kind, track) {
       if (!senders[kind]) return false;
@@ -352,6 +377,7 @@ async function tune(senders, opts) {
 
 /** Subscribe to a stream id. Resolves with { stream, pc, close() }. */
 export async function subscribe(sig, id) {
+  const socket = sig.ws;
   const pc = new RTCPeerConnection(iceConfiguration(sig.ice, sig.mediaMode));
   const ice = incrementalICE(sig, pc);
   const media = new MediaStream();
@@ -366,16 +392,17 @@ export async function subscribe(sig, id) {
     await pc.setRemoteDescription(offer.sdp);
     await pc.setLocalDescription(await pc.createAnswer());
     if (!sig.trickle) await gathered(pc, 10000);
+    if (sig.ws !== socket || ice.signal.aborted) throw new Error("Se perdió la conexión con el servidor.");
     sig.send({ type: "answer", stream: id, sdp: pc.localDescription });
     ice.ready();
     await waitConnected(pc, sig.ice, 30000, ice.signal);
   } catch (e) {
     ice.close();
     pc.close();
-    if (offer) sig.send({ type: "unsubscribe", stream: id });
+    if (offer && sig.ws === socket) sig.send({ type: "unsubscribe", stream: id });
     throw e;
   }
-  return { id, name: offer.name, stream: media, pc, close() { ice.close(); sig.send({ type: "unsubscribe", stream: id }); pc.close(); } };
+  return { id, name: offer.name, stream: media, pc, close() { ice.close(); if (sig.ws === socket) sig.send({ type: "unsubscribe", stream: id }); pc.close(); } };
 }
 
 /** Audio level 0..1 for a stream, polled by the caller. */
