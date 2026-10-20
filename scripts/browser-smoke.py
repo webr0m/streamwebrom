@@ -74,7 +74,7 @@ with sync_playwright() as pw:
       const reports=await Promise.all(window.__pcs.filter(pc=>pc.connectionState==='connected').map(pc=>pc.getStats()));
       return reports.some(r=>[...r.values()].some(s=>s.type==='inbound-rtp' && s.kind==='video' && s.framesDecoded>0));
     }""", timeout=25000)
-    host.locator('#backstage .stagebtn').filter(has_text='Al escenario').first.click(force=True)
+    host.locator('#backstage .stagebtn').filter(has_text='Al escenario').first.click()
     expect(host.locator('#backstage .stagebtn.on')).to_have_count(2)
     expect(guest.locator('#stageState')).to_contain_text('escenario', timeout=10000)
     viewer = page()
