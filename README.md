@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.10.0:** Guardar sala visible en la barra del anfitrión; temas Día, Noche y Automático; paneles plegables independientes y una interfaz más clara para PC, tablet y móvil. Conserva salas con contraseña persistentes y enlaces OBS estables. [Interfaz y controles](docs/INTERFAZ.md), [salas persistentes](docs/SALAS-PERSISTENTES.md), [estudio y OBS](docs/ESTUDIO-Y-OBS.md), [efectos](docs/EFECTOS.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.10.1:** El servidor sigue disponible con el relé local si se daña el registro de consumo TURN; Cloudflare queda en pausa sin reiniciar la cuota. Conserva Guardar sala visible, temas Día/Noche/Automático, paneles plegables, salas persistentes y enlaces OBS estables. [Interfaz y controles](docs/INTERFAZ.md), [salas persistentes](docs/SALAS-PERSISTENTES.md), [estudio y OBS](docs/ESTUDIO-Y-OBS.md), [efectos](docs/EFECTOS.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 

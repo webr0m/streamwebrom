@@ -95,8 +95,11 @@ jobs:
           /tmp/streamwebrom -addr 127.0.0.1:18444 -stun= -turn 'turn:127.0.0.1:13478?transport=tcp' -turn-user swr-test -turn-pass test-only -data /tmp/swr-relay > /tmp/swr-relay.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://localhost:18444/api/health && break; sleep 1; done
           python scripts/relay-smoke.py --url http://localhost:18444
-      - name: native authenticated TURN relay
+      - name: native TURN keeps media available with corrupt Cloudflare quota
         run: |
-          SWR_RELAY_SECRET=test-local-secret-at-least-32-characters /tmp/streamwebrom -addr 127.0.0.1:18445 -stun= -udp-port 15000 -relay-listen 127.0.0.1:13479 -relay-public-ip 127.0.0.1 -relay-min 25160 -relay-max 25223 -data /tmp/swr-native > /tmp/swr-native.log 2>&1 &
+          mkdir -p /tmp/swr-native
+          python -c "from pathlib import Path; Path('/tmp/swr-native/turn-quota.json').write_bytes(bytes(568))"
+          SWR_CF_ACCOUNT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa SWR_CF_TURN_KEY_ID=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb SWR_CF_TURN_KEY_TOKEN=test-only SWR_CF_ANALYTICS_TOKEN=test-only SWR_RELAY_SECRET=test-local-secret-at-least-32-characters /tmp/streamwebrom -addr 127.0.0.1:18445 -stun= -udp-port 15000 -relay-listen 127.0.0.1:13479 -relay-public-ip 127.0.0.1 -relay-min 25160 -relay-max 25223 -data /tmp/swr-native > /tmp/swr-native.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://localhost:18445/api/health && break; sleep 1; done
           python scripts/relay-smoke.py --url http://localhost:18445 --tcp-only --expect-provider local
+          python -c "import json, urllib.request; from pathlib import Path; c=json.load(urllib.request.urlopen('http://localhost:18445/api/config')); assert c['relay']['reason']=='state-unavailable'; assert Path('/tmp/swr-native/turn-quota.json').read_bytes()==bytes(568)"

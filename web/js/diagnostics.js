@@ -24,7 +24,7 @@ async function check() {
     box.append(row("Multistream", cfg.capabilities?.multistream, cfg.capabilities?.multistream ? "ffmpeg disponible en el servidor" : "Instala ffmpeg en el servidor para enviar a RTMP/SRT"));
     const turn = (cfg.ice || []).some((server) => [server.urls].flat().some((url) => /^turns?:/.test(url)));
     box.append(row("Relé TURN", turn, turn ? "Configurado" : "Sin TURN; algunas redes restrictivas pueden impedir el video"));
-    if (cfg.relay?.provider) box.append(row("Proveedor TURN", turn, cfg.relay.provider === "cloudflare" ? "Cloudflare · consumo bajo el corte preventivo" : `Equipo local · ${cfg.relay.reason === "quota" ? "corte preventivo mensual alcanzado" : cfg.relay.reason === "configured" ? "configurado" : "Cloudflare no disponible o consumo sin verificar"}`));
+    if (cfg.relay?.provider) box.append(row("Proveedor TURN", turn, cfg.relay.provider === "cloudflare" ? "Cloudflare · consumo bajo el corte preventivo" : `Equipo local · ${cfg.relay.reason === "quota" ? "corte preventivo mensual alcanzado" : cfg.relay.reason === "configured" ? "configurado" : cfg.relay.reason === "state-unavailable" ? "registro de consumo no disponible; Cloudflare en pausa" : "Cloudflare no disponible o consumo sin verificar"}`));
   } catch (e) { box.append(row("Servidor", false, e.message)); }
 }
 $("#refresh").onclick = check;

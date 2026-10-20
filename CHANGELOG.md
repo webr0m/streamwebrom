@@ -1,5 +1,12 @@
 # Cambios
 
+## v1.10.1 — Recuperación del servidor ante un registro TURN dañado
+
+- Un registro de cuota TURN corrupto o ilegible ya no impide arrancar el servidor: se utiliza el relé local y Cloudflare queda en pausa hasta reparar y verificar el estado.
+- Se conserva el archivo original, sin reiniciar contadores ni emitir nuevas credenciales de Cloudflare. También se rechazan estados vacíos, meses inválidos y estimaciones inferiores al máximo registrado.
+- Se sincroniza el archivo temporal con el disco antes de sustituir el último registro válido de consumo.
+- Diagnóstico explica cuándo Cloudflare está en pausa por el registro de consumo. Pruebas con archivos llenos de ceros, truncados, vacíos e ilegibles, reinicios y cambio de mes.
+
 ## v1.10.0 — Guardar sala visible, temas y paneles plegables
 
 - Guardar sala en la barra superior y acceso Sala en el riel; diálogo con estado, caducidad y enlaces, sin desplegables ocultos en Marca.

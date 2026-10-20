@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -62,6 +63,9 @@ type Cloudflare struct {
 	refreshAt time.Time
 	active    atomic.Bool
 	traffic   atomic.Uint64
+	// An unreadable quota must not reset a cutoff or take the studio offline.
+	// Keep the original file untouched and use local TURN until it is repaired.
+	stateUnavailable bool
 }
 
 // RecordMedia provides a conservative local guard while account analytics lag.
@@ -92,14 +96,26 @@ func NewCloudflare(o CloudflareOptions) (*Cloudflare, error) {
 	if o.StateFile != "" {
 		b, err := os.ReadFile(o.StateFile)
 		if err == nil {
-			if err = json.Unmarshal(b, &c.state); err != nil {
-				return nil, errors.New("invalid persisted TURN quota state")
+			var restored quotaState
+			if err = json.Unmarshal(b, &restored); err != nil || !validQuotaState(restored) {
+				c.stateUnavailable = true
+			} else {
+				c.state = restored
 			}
 		} else if !os.IsNotExist(err) {
-			return nil, errors.New("cannot read TURN quota state")
+			c.stateUnavailable = true
 		}
 	}
+	if c.stateUnavailable {
+		c.disable("state-unavailable")
+		slog.Warn("TURN quota state unreadable or invalid; Cloudflare disabled, using local relay; original state preserved")
+	}
 	return c, nil
+}
+
+func validQuotaState(s quotaState) bool {
+	month, err := time.Parse("2006-01", s.Month)
+	return err == nil && month.Format("2006-01") == s.Month && s.EstimatedUsage >= s.HighWater
 }
 
 func (c *Cloudflare) Status() RelayStatus { c.mu.RLock(); defer c.mu.RUnlock(); return c.status }
@@ -142,7 +158,7 @@ func (c *Cloudflare) Check(ctx context.Context, now time.Time) bool {
 	c.poll.Lock()
 	defer c.poll.Unlock()
 	c.mu.RLock()
-	w := &Cloudflare{o: c.o, state: c.state, status: c.status, ice: cloneICE(c.ice), refreshAt: c.refreshAt}
+	w := &Cloudflare{o: c.o, state: c.state, status: c.status, ice: cloneICE(c.ice), refreshAt: c.refreshAt, stateUnavailable: c.stateUnavailable}
 	w.state.Leases = append([]lease(nil), c.state.Leases...)
 	c.mu.RUnlock()
 	changed := w.check(ctx, now, c.traffic.Swap(0))
@@ -158,6 +174,11 @@ func (c *Cloudflare) Check(ctx context.Context, now time.Time) bool {
 func (c *Cloudflare) check(ctx context.Context, now time.Time, traffic uint64) bool {
 	previous := c.status.Provider
 	month := now.UTC().Format("2006-01")
+	if c.stateUnavailable {
+		c.status.Month = month
+		c.disable("state-unavailable")
+		return previous == "cloudflare"
+	}
 	if c.state.Month != month {
 		c.state.Month = month
 		c.state.HighWater = 0
@@ -237,6 +258,9 @@ func (c *Cloudflare) disable(reason string) {
 	c.refreshAt = time.Time{}
 }
 func (c *Cloudflare) save() error {
+	if c.stateUnavailable {
+		return errors.New("TURN quota state unavailable; original file preserved")
+	}
 	if c.o.StateFile == "" {
 		return nil
 	}
@@ -248,7 +272,18 @@ func (c *Cloudflare) save() error {
 		return err
 	}
 	tmp := c.o.StateFile + ".new"
-	if err = os.WriteFile(tmp, b, 0600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if _, err = f.Write(b); err == nil {
+		err = f.Sync() // flush contents before replacing the last valid state
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
 		return err
 	}
 	return os.Rename(tmp, c.o.StateFile)

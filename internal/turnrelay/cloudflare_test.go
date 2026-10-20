@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -106,6 +107,7 @@ func TestCloudflareRestoredLeaseRevokedWhenAnalyticsFails(t *testing.T) {
 	defer api.Close()
 	o := CloudflareOptions{AccountID: strings.Repeat("a", 32), KeyID: strings.Repeat("b", 32), KeyToken: "private", AnalyticsToken: "read", BudgetBytes: 100, StateFile: filepath.Join(t.TempDir(), "quota.json"), rtcURL: api.URL, graphURL: api.URL}
 	c, _ := NewCloudflare(o)
+	c.state.Month = time.Now().UTC().Format("2006-01")
 	c.state.Leases = []lease{{"issued-before-restart", time.Now().Add(time.Hour)}}
 	if err := c.save(); err != nil {
 		t.Fatal(err)
@@ -114,5 +116,63 @@ func TestCloudflareRestoredLeaseRevokedWhenAnalyticsFails(t *testing.T) {
 	c.Check(context.Background(), time.Now())
 	if !revoked || c.Status().Provider != "local" {
 		t.Fatal("restored credential not revoked")
+	}
+}
+
+func TestCloudflareInvalidQuotaKeepsStudioAvailableWithoutReset(t *testing.T) {
+	for name, content := range map[string]string{
+		"zeroed-after-restart": strings.Repeat("\x00", 568),
+		"truncated":            `{"Month":"2026-10","Blocked":true`,
+		"null":                 `null`,
+		"empty-object":         `{}`,
+		"invalid-month":        `{"Month":"2026-99"}`,
+		"lost-estimate":        `{"Month":"2026-10","HighWater":100,"EstimatedUsage":0}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			requests := 0
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				t.Error("invalid quota must not issue credentials or query/reset usage")
+				w.WriteHeader(500)
+			}))
+			defer api.Close()
+			path := filepath.Join(t.TempDir(), "quota.json")
+			if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			o := CloudflareOptions{AccountID: strings.Repeat("a", 32), KeyID: strings.Repeat("b", 32), KeyToken: "private", AnalyticsToken: "read", BudgetBytes: 100, StateFile: path, rtcURL: api.URL, graphURL: api.URL}
+			for restart := 0; restart < 2; restart++ {
+				c, err := NewCloudflare(o)
+				if err != nil {
+					t.Fatal("quota corruption must not stop the server", err)
+				}
+				now := time.Now().UTC()
+				c.Check(context.Background(), now)
+				c.RecordMedia(500)
+				c.Check(context.Background(), now.AddDate(0, 1, 0))
+				if c.save() == nil {
+					t.Fatal("corrupt state must not be overwritten")
+				}
+				if c.Status().Provider != "local" || c.Status().Reason != "state-unavailable" || len(c.ICE()) != 0 || c.active.Load() {
+					t.Fatal("corrupt quota reenabled Cloudflare", c.Status())
+				}
+				got, err := os.ReadFile(path)
+				if err != nil || string(got) != content || requests != 0 {
+					t.Fatal("original quota was changed or Cloudflare contacted", err, requests)
+				}
+			}
+		})
+	}
+}
+
+func TestCloudflareUnreadableQuotaFallsBack(t *testing.T) {
+	o := CloudflareOptions{AccountID: strings.Repeat("a", 32), KeyID: strings.Repeat("b", 32), KeyToken: "private", AnalyticsToken: "read", BudgetBytes: 100, StateFile: t.TempDir()}
+	c, err := NewCloudflare(o)
+	if err != nil {
+		t.Fatal("unreadable quota must not stop the server", err)
+	}
+	c.Check(context.Background(), time.Now().UTC())
+	if c.Status().Provider != "local" || c.Status().Reason != "state-unavailable" {
+		t.Fatal(c.Status())
 	}
 }
