@@ -44,7 +44,8 @@ with sync_playwright() as pw:
     host.locator('#backstage [data-id="portrait"] .stagebtn').click()
     host.locator('#status').click()
     host.mouse.move(0,0)
-    host.wait_for_function("()=>getComputedStyle(document.querySelector('#backstage .tools')).opacity==='0'")
+    # Controls now live below the camera or in the enlarged options dialog.
+    assert host.locator('#backstage .tools').count() == 0
     guest = page()
     guest.goto(args.url+'/guest?room='+keys['room']+'&label=Prueba&autostart=1#invite='+keys['inviteKey'])
     expect(guest.locator('#call')).to_be_visible(timeout=20000)
