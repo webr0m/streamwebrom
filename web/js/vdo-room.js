@@ -1,11 +1,11 @@
 import { $, copy, readStored, writeStored, toast } from "./rtc.js";
-import { VDO_ORIGIN, vdoRoomLinks, vdoHostPath } from "./vdo.js";
+import { VDO_ORIGIN, vdoRoomID, vdoRoomLinks, vdoHostPath } from "./vdo.js";
 import { immersive } from "./immersive.js";
 
 const query = new URLSearchParams(location.search), fragment = new URLSearchParams(location.hash.slice(1));
-const room = query.get("room") || "", guest = query.get("role") === "guest";
+const requestedRoom = query.get("room") || "", guest = query.get("role") === "guest";
 const stored = readStored("swr.vdoRooms",{},true);
-const config = { room, password:fragment.get("p") || stored[room]?.password || "", directorKey:guest ? "" : fragment.get("directorKey") || stored[room]?.directorKey || "", title:fragment.get("title") || stored[room]?.title || "Sala VDO.Ninja", created:stored[room]?.created || Date.now() };
+const config = { room:requestedRoom, password:fragment.get("p") || stored[requestedRoom]?.password || "", directorKey:guest ? "" : fragment.get("directorKey") || stored[requestedRoom]?.directorKey || "", title:fragment.get("title") || stored[requestedRoom]?.title || "Sala VDO.Ninja", created:stored[requestedRoom]?.created || Date.now() };
 let cinema;
 const frames = [];
 function frame(url, title, mount, capture = false) {
@@ -16,10 +16,13 @@ function frame(url, title, mount, capture = false) {
   $(mount).append(f); frames.push(f); return f;
 }
 try {
+  const room = vdoRoomID(requestedRoom);
+  config.room = room;
   const links = vdoRoomLinks(config);
   if (!guest) {
     if (!links.host) throw new Error("Falta el enlace privado del anfitrión. Abre el enlace que guardaste al crear la sala.");
     stored[room] = config;
+    if (room !== requestedRoom) delete stored[requestedRoom];
     if (writeStored("swr.vdoRooms",stored,true)) history.replaceState(null,"",`/vdo?room=${encodeURIComponent(room)}`);
   }
   $("#vdoRoomTitle").textContent = config.title; $("#vdoRoomID").textContent = room;

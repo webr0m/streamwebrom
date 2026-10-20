@@ -1,6 +1,6 @@
 """First-party UI/RTC regression. Official VDO frames are stubbed deliberately;
 this verifies interoperability URLs and permissions, not external TURN latency."""
-import argparse, json, time
+import argparse, json, time, urllib.parse
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
@@ -14,17 +14,39 @@ with sync_playwright() as pw:
     creates=[];page.on('request',lambda r:creates.append(r.url) if r.method=='POST' and r.url.endswith('/api/rooms') else None)
     page.goto(args.url+'/');page.locator('#roomEngine').select_option('vdo');expect(page.locator('#lobby')).to_be_disabled()
     page.locator('#title').fill('Producción independiente');page.locator('#pw').fill('VdoTestOnly')
+    page.locator('#room').fill('a'*32)
     page.locator('#create').click();expect(page.locator('#vdoDirectorMount iframe')).to_be_attached()
     assert '/vdo?room=' in page.url and not creates,'VDO mode created a local SFU room'
     assert len(page.locator('iframe').all())==2
     src=page.locator('#vdoDirectorMount iframe').get_attribute('src')
     assert src.startswith('https://vdo.ninja/?director=') and '#p=' in src and 'codirector=' in src
+    room=urllib.parse.parse_qs(urllib.parse.urlsplit(src).query)['director'][0]
+    assert room.isalnum() and len(room)<=30,'Official application would trim the room name'
+    assert urllib.parse.parse_qs(urllib.parse.urlsplit(page.locator('#vdoSceneMount iframe').get_attribute('src')).query)['room']==[room]
     for w,h in [(1440,1000),(1024,768),(390,844),(844,390)]:
         page.set_viewport_size({'width':w,'height':h});assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),(w,h,page.evaluate('Array.from(document.querySelectorAll("body *")).filter(e=>e.getBoundingClientRect().right>innerWidth+1).map(e=>({id:e.id,tag:e.tagName,cls:e.className,right:e.getBoundingClientRect().right})).slice(0,10)'))
         rect=page.locator('#vdoStage').bounding_box();assert abs(rect['width']/rect['height']-16/9)<.02
     page.locator('#vdoRoomSidebar').click();expect(page.locator('#vdoRoomSide')).to_be_hidden()
     page.locator('#vdoRoomFullscreen').click();expect(page.locator('#vdoStage')).to_have_class('vdo-room-stage cinema')
     page.locator('#vdoExitFullscreen').click()
+
+    # A v1.11.0 room could exceed the upstream limit before its random suffix.
+    # Both the saved host and an old guest invitation must recover the same ID.
+    legacy={'room':'a'*32+'-'+'0123456789abcdef0123456789abcdef','password':'VdoTestOnly','directorKey':'f'*32,'title':'Previous room'}
+    page.evaluate('r=>sessionStorage.setItem("swr.vdoRooms",JSON.stringify({[r.room]:r}))',legacy)
+    page.goto(args.url+'/vdo?room='+legacy['room'])
+    expect(page.locator('#vdoDirectorMount iframe')).to_be_attached()
+    repaired=urllib.parse.parse_qs(urllib.parse.urlsplit(page.locator('#vdoDirectorMount iframe').get_attribute('src')).query)['director'][0]
+    assert repaired.isalnum() and len(repaired)<=30
+    assert urllib.parse.parse_qs(urllib.parse.urlsplit(page.url).query)['room']==[repaired]
+    assert page.evaluate('old=>!JSON.parse(sessionStorage.getItem("swr.vdoRooms"))[old]',legacy['room'])
+    page.reload();expect(page.locator('#vdoDirectorMount iframe')).to_be_attached()
+    page.goto(args.url+'/vdo?room='+legacy['room']+'&role=guest#p=VdoTestOnly')
+    expect(page.locator('#vdoSceneMount iframe')).to_be_attached()
+    assert page.locator('#vdoDirectorMount iframe').count()==0
+    assert urllib.parse.parse_qs(urllib.parse.urlsplit(page.locator('#vdoSceneMount iframe').get_attribute('src')).query)['room']==[repaired]
+    page.evaluate('()=>sessionStorage.setItem("swr.vdoRooms",JSON.stringify({broken:{room:"bad room",password:"test",directorKey:"test"}}))')
+    page.goto(args.url+'/');expect(page.locator('#create')).to_be_enabled()
 
     k=ctx.request.post(args.url+'/api/rooms',data={'room':'options-'+str(time.time_ns()),'password':'RoomTestOnly'}).json()
     page.set_viewport_size({'width':1440,'height':1000})

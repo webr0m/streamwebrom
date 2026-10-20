@@ -1,5 +1,11 @@
 # Cambios
 
+## v1.11.1 — Creación de salas VDO.Ninja
+
+- Se generan identificadores alfanuméricos de hasta 30 caracteres, conservando 128 bits aleatorios, para evitar el aviso y recorte de nombres en la aplicación oficial.
+- Los enlaces largos generados por v1.11.0 se convierten de forma consistente para anfitrión, invitados y OBS; se conservan contraseña y clave del director. Las entradas antiguas inválidas del historial ya no interrumpen la página de inicio.
+- Pruebas de regresión con prefijos máximos, enlaces anteriores y coincidencia entre las vistas del director, invitados y escena.
+
 ## v1.11.0 — Conexión protegida, salas VDO.Ninja independientes y backstage ampliado
 
 - Las salas nuevas utilizan el relé local. Solo el anfitrión puede activar Cloudflare en una sala con contraseña tras validar la maestra en el servidor; bcrypt, límite de intentos y ausencia de credenciales Cloudflare en la configuración pública.

@@ -1,8 +1,10 @@
 import { $, el, api, toast, readStored, writeStored } from "./rtc.js";
-import { newVdoRoom, vdoHostPath } from "./vdo.js";
+import { newVdoRoom, vdoHostPath, vdoRoomID } from "./vdo.js";
 
 $("#roomEngine").onchange = () => {
   const vdo = $("#roomEngine").value === "vdo";
+  $("#room").maxLength = vdo ? 32 : 48;
+  document.querySelector('label[for="room"]').textContent = vdo ? "Prefijo de sala (opcional)" : "ID de sala (opcional)";
   $("#roomEngineHelp").textContent = vdo ? "Sala separada en la aplicación oficial de VDO.Ninja. Conserva nuestro marco visual, temas y accesos; sus controles de producción son propios. No usa el relé ni la cuota Cloudflare de este servidor. Al crearla se carga el servicio externo, sujeto a sus condiciones y privacidad." : "Nuestro estudio completo, con relé local. El anfitrión puede habilitar Cloudflare desde una sala con contraseña.";
   $("#lobby").disabled = vdo;
 };
@@ -61,5 +63,7 @@ const persistent=rooms.filter(r=>r.persistent);
 if (persistent.length) $("#savedStudios").append(el("h3",{text:"Salas guardadas"}),...persistent.map(studioCard));
 const recent=rooms.filter(r=>!r.persistent).slice(0,5);
 if (recent.length) $("#recent").append(el("h3",{text:"Estudios recientes"}),...recent.map(studioCard));
-const vdoRecent = Object.values(readStored("swr.vdoRooms",{},true)).filter(r => r && r.directorKey && r.password).sort((a,b) => b.created-a.created).slice(0,5);
+const vdoRecent = Object.values(readStored("swr.vdoRooms",{},true)).filter(r => {
+  try { return !!(r && r.directorKey && r.password && vdoRoomID(r.room) && vdoHostPath(r)); } catch { return false; }
+}).sort((a,b) => b.created-a.created).slice(0,5);
 if (vdoRecent.length) $("#recent").append(el("h3",{text:"VDO.Ninja · esta sesión del navegador"}),...vdoRecent.map(r => el("div",{class:"studio-card"},el("strong",{class:"grow",text:r.title || r.room}),el("a",{class:"btn small",href:vdoHostPath(r),text:"Abrir sala VDO.Ninja"}))));

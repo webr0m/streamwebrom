@@ -1,4 +1,4 @@
-# Conexión, cuota y alternativa VDO.Ninja (v1.11.0)
+# Conexión, cuota y alternativa VDO.Ninja (v1.11.1)
 
 Al crear un estudio elige **StreamWebRom · relé local** o **VDO.Ninja · sala independiente**. Son salas distintas: crear una sala VDO.Ninja no crea una sala en el SFU local ni usa las credenciales Cloudflare del servidor StreamWebRom.
 
@@ -62,3 +62,7 @@ No se han creado cuentas ni añadido credenciales de ExpressTURN/Metered. Ningú
 Fuentes de integración: [licencia y servicio](https://github.com/steveseguin/vdo.ninja/blob/develop/LICENCE.md), [API iframe](https://docs.vdo.ninja/guides/iframe-api-documentation), [fragmentos privados](https://docs.vdo.ninja/help/privacy-and-security-details/fragment-url-parameters), [condiciones VDO.Ninja](https://docs.vdo.ninja/help/privacy-and-security-details/vdo.ninja-terms-of-service).
 
 Pruebas automatizadas: permisos y contraseña maestra del backend, cuota compartida y aviso previo al corte, perfiles reales de envío, suscripciones OBS por escena y panel ampliado sin superposición en cinco tamaños. El flujo de VDO.Ninja usa un iframe simulado en la regresión de interfaz; esa prueba no certifica una llamada real por su infraestructura ni su latencia.
+
+### Identificadores de sala
+
+Desde v1.11.1 los IDs VDO tienen como máximo 30 caracteres alfanuméricos. Se conservan 128 bits de aleatoriedad, codificados en base 36; se usan hasta cinco letras o números del prefijo opcional. El título del programa conserva su nombre completo. Los enlaces largos de v1.11.0 se convierten al mismo ID para director, invitado y escena; vuelve a copiar el enlace OBS desde la sala actualizada si habías copiado el enlace directo del servicio anterior.
