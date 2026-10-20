@@ -37,7 +37,7 @@ with sync_playwright() as pw:
     large=page.locator('#sourceSettingsVideo').bounding_box();assert large['width']>small['width']*2
     for w,h in [(1440,1000),(1024,768),(390,844),(320,740),(844,390)]:
         page.set_viewport_size({'width':w,'height':h})
-        assert page.locator('#sourceSettings').evaluate('e=>e.scrollWidth<=e.clientWidth+1')
+        assert page.locator('#sourceSettings').evaluate('e=>e.scrollWidth<=e.clientWidth+1'),(w,h,page.locator('#sourceSettings').evaluate('e=>({scroll:e.scrollWidth,client:e.clientWidth,children:[...e.querySelectorAll("*")].filter(c=>c.getBoundingClientRect().right>e.getBoundingClientRect().right).map(c=>({tag:c.tagName,id:c.id,cls:c.className}))})'))
         rects=page.locator('#sourceSettingsActions button').evaluate_all('es=>es.map(e=>{let r=e.getBoundingClientRect();return {l:r.left,r:r.right,t:r.top,b:r.bottom}})')
         for i,a in enumerate(rects):
             for b in rects[i+1:]:assert not (min(a['r'],b['r'])>max(a['l'],b['l'])+1 and min(a['b'],b['b'])>max(a['t'],b['t'])+1),'overlapping source controls'
