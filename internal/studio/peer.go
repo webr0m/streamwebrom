@@ -12,13 +12,17 @@ import (
 
 	"github.com/webr0m/streamwebrom/internal/restream"
 	"github.com/webr0m/streamwebrom/internal/sfu"
+	"github.com/webr0m/streamwebrom/internal/turnrelay"
 )
 
 // Msg is the single signalling envelope (JSON over WebSocket).
 type Msg struct {
-	Type        string           `json:"type"`
-	Persistent  bool             `json:"persistent,omitempty"`
-	Persistence *PersistenceInfo `json:"persistence,omitempty"`
+	Type          string                 `json:"type"`
+	Persistent    bool                   `json:"persistent,omitempty"`
+	Persistence   *PersistenceInfo       `json:"persistence,omitempty"`
+	Relay         *turnrelay.RelayStatus `json:"relay,omitempty"`
+	RelayProvider string                 `json:"relayProvider,omitempty"`
+	RelayAccess   *RelayAccess           `json:"relayAccess,omitempty"`
 
 	// identity / auth
 	Room     string `json:"room,omitempty"`

@@ -155,7 +155,7 @@ async function join() {
       const cfg = await api("/api/config");
       sig.mediaMode = await automaticRoute(cfg, mode => {
         $("#joinBtn").textContent = mode === "local" ? "Comprobando la conexión alternativa…" : "Comprobando la mejor conexión…";
-      });
+      }, { room, password: $("#pw").value });
     }
     $("#joinBtn").textContent = "Entrando…";
     const invite = new URLSearchParams(location.hash.slice(1)).get("invite") || "";
@@ -210,7 +210,7 @@ async function reconnectGuest() {
   try {
     await sig.reconnect(async () => {
       const cfg = await api("/api/config");
-      sig.mediaMode = await automaticRoute(cfg, mode => connectionStatus(mode === "local" ? "Comprobando la conexión alternativa…" : "Comprobando la mejor conexión…"));
+      sig.mediaMode = await automaticRoute(cfg, mode => connectionStatus(mode === "local" ? "Comprobando la conexión alternativa…" : "Comprobando la mejor conexión…"), { room, password: sig.joinMsg?.password || $("#pw").value });
       if (media.getTracks().length && media.getTracks().every(t => t.readyState === "ended")) {
         const mic = micOn(), cam = camOn();
         media = await open();

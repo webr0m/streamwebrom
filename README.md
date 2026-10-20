@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.10.1:** El servidor sigue disponible con el relé local si se daña el registro de consumo TURN; Cloudflare queda en pausa sin reiniciar la cuota. Conserva Guardar sala visible, temas Día/Noche/Automático, paneles plegables, salas persistentes y enlaces OBS estables. [Interfaz y controles](docs/INTERFAZ.md), [salas persistentes](docs/SALAS-PERSISTENTES.md), [estudio y OBS](docs/ESTUDIO-Y-OBS.md), [efectos](docs/EFECTOS.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.11.0:** Salas con relé local por defecto; Cloudflare opcional para el anfitrión en salas con contraseña y validación de contraseña maestra. Incluye control de cuota compartida, avisos y respaldo local, perfiles de ahorro, OBS que recibe solo su escena, cámaras ampliadas al abrir sus opciones y una alternativa independiente mediante la aplicación oficial de VDO.Ninja. [Conexión y VDO.Ninja](docs/CONEXION-Y-VDO.md), [interfaz](docs/INTERFAZ.md), [salas persistentes](docs/SALAS-PERSISTENTES.md), [estudio y OBS](docs/ESTUDIO-Y-OBS.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 

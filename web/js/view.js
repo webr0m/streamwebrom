@@ -12,6 +12,7 @@ import { $, params, hashParams, Signal, subscribe } from "./rtc.js";
 import { singleOutput } from "./output-quality.js";
 import { watchConnection } from "./connection-health.js";
 import { Compositor, programGain } from "./compositor.js";
+import { needsOutputSource } from "./bandwidth.js";
 
 const room = (params.get("room") || "").toLowerCase();
 const key = hashParams.get("key") || params.get("key") || "";
@@ -46,8 +47,9 @@ const sig = new Signal();
 let compositor, output, switching = false, triedLocal = false;
 const explicitRoute = params.has("network");
 const configureRoute = () => {
-  if (!explicitRoute && !triedLocal && sig.ice.some(s => [s.urls].flat().some(u => /^turns:.*:443(?:\?|$)/i.test(u)))) sig.mediaMode = "tls";
+  if (!explicitRoute && !triedLocal) sig.mediaMode = sig.relayProvider === "cloudflare" ? "auto" : sig.ice.some(s => [s.urls].flat().some(u => /^turns:.*:443(?:\?|$)/i.test(u))) ? "tls" : "auto";
 };
+const needed = info => needsOutputSource(info, state, only, sceneName);
 if (only && params.has("quality")) {
   const canvas = $("#singleOut"); canvas.classList.remove("hidden");
   single.classList.add("output-input"); canvas.style.transform = single.style.transform;
@@ -86,6 +88,7 @@ function syncAudio() {
 
 async function watch(info) {
   if (!available.has(info.id)) return;
+  if (!needed(info)) return;
   if (info.kind === "program" && scene) return;
   if (only && info.id !== only) return;
   if (sources.has(info.id)) return;
@@ -125,9 +128,18 @@ function resetMedia() {
   for (const audio of audios.values()) { audio.pause(); audio.srcObject = null; audio.remove(); }
   audios.clear(); single.srcObject = null;
 }
-function discover(streams) { for (const info of streams || []) { available.set(info.id, info); watch(info); } }
+function discard(id) {
+  clearTimeout(retries.get(id)); retries.delete(id);
+  const s = sources.get(id); s?.stopWatch?.(); clearTimeout(s?.frameTimer); s?.sub?.close(); if (s) s.video.srcObject = null; sources.delete(id);
+  const audio = audios.get(id); if (audio) { audio.pause(); audio.srcObject = null; audio.remove(); audios.delete(id); }
+}
+function syncSubscriptions() {
+  for (const [id] of sources) if (!available.has(id) || !needed(available.get(id))) discard(id);
+  for (const info of available.values()) if (needed(info)) watch(info);
+}
+function discover(streams) { for (const info of streams || []) available.set(info.id, info); syncSubscriptions(); }
 
-sig.on("state", (m) => { state = m.state; syncAudio(); });
+sig.on("state", (m) => { state = m.state; syncSubscriptions(); syncAudio(); });
 sig.on("stream-added", (m) => discover([m.info]));
 sig.on("stream-removed", (m) => {
   available.delete(m.stream); clearTimeout(retries.get(m.stream)); retries.delete(m.stream);

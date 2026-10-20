@@ -41,6 +41,7 @@ type Config struct {
 	CFKeyToken         string
 	CFAnalyticsToken   string
 	CFBudget           uint64
+	CFMasterHash       string
 	PublicIPs          []string      // NAT 1:1 public IPs for the SFU
 	UDPPort            int           // single UDP port for all media (0 = ephemeral range)
 	UDPPortMin         int           // ephemeral range min
@@ -105,6 +106,7 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.StringVar(&c.CFKeyToken, "cf-turn-key-token", "", "Cloudflare TURN API token (use SWR_CF_TURN_KEY_TOKEN)")
 	fs.StringVar(&c.CFAnalyticsToken, "cf-analytics-token", "", "Cloudflare Account Analytics Read token (use SWR_CF_ANALYTICS_TOKEN)")
 	fs.Uint64Var(&c.CFBudget, "cf-turn-budget", 900000000000, "preventive monthly account TURN cutoff in bytes (not a billing cap)")
+	fs.StringVar(&c.CFMasterHash, "cf-master-hash", "", "bcrypt master password hash for host Cloudflare access (use SWR_CF_MASTER_HASH)")
 	fs.StringVar(&pubIPs, "public-ip", "", "comma separated public IPs announced by the SFU (NAT 1:1)")
 	fs.IntVar(&c.UDPPort, "udp-port", 0, "single UDP port for all WebRTC media (recommended behind firewalls/Docker)")
 	fs.IntVar(&c.UDPPortMin, "udp-min", 0, "minimum ephemeral UDP port")

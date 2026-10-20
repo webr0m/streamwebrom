@@ -599,3 +599,44 @@ body:has(.studio.cinema) #toasts { display:none; }
 .railhead > button { font-size:22px; line-height:1; padding:0 7px; }
 .scene-restore { position:absolute; top:8px; left:4px; z-index:8; box-shadow:var(--shadow); padding:6px; background:var(--panel); }
 .studio.cinema .scene-restore { display:none; }
+.relay-banner { display:flex; align-items:center; gap:10px; padding:8px 12px; margin-bottom:10px; background:var(--panel); border:1px solid var(--line); border-radius:10px; font-size:12px; }
+.relay-banner > div { display:flex; flex:1; min-width:0; gap:3px; flex-direction:column; }
+.relay-banner span { color:var(--muted); }
+.relay-banner.quota-warning { border-color:#e6a52b; background:var(--panel); }
+.studio.cinema .relay-banner { display:none; }
+.studio.cinema .relay-banner.quota-warning { display:flex; position:fixed; top:12px; left:12px; right:12px; z-index:100; max-width:720px; margin:auto; }
+.vdo-dialog { width: min(920px, 95vw); }
+.vdo-preview { width: 100%; aspect-ratio: 16/9; background: #000; overflow: hidden; border-radius: 8px; margin: 12px 0; }
+.vdo-preview iframe { display: block; border: 0; width: 100%; height: 100%; }
+.vdo-dialog .row { flex-wrap: wrap; }
+.vdo-dialog input { min-width: 160px; flex: 1; }
+.backstage .tile { aspect-ratio: auto; }
+.backstage .tile > video { height: auto; aspect-ratio: 16/9; cursor: zoom-in; }
+.backstage .tile .name, .backstage .tile .scenes { bottom: 51px; }
+.source-quick-actions { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px; padding: 6px; background: var(--panel); color: var(--text); }
+.source-quick-actions button { padding: 7px 8px; min-height: 34px; min-width: 0; font-size: 12px; }
+.source-quick-actions .stagebtn.on { background: var(--accent-soft); border-color: var(--accent); }
+.source-settings-dialog { width: min(940px, 95vw); }
+.source-settings-preview { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 9px; overflow: hidden; }
+.source-settings-preview video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.source-settings-actions { display: grid; grid-template-columns: repeat(auto-fit,minmax(165px,1fr)); gap: 8px; margin-top: 14px; }
+.source-settings-actions button { white-space: normal; min-height: 42px; }
+.source-settings-quality { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.source-settings-quality > label { flex: 1 1 220px; color: var(--text); font-size: 13px; padding: 8px; background: var(--panel-2); }
+.source-settings-quality .source-quality select { width: auto; min-width: 90px; font-size: 13px; padding: 8px; }
+.vdo-room { min-height: 100dvh; background:var(--bg); }
+.vdo-room .page-toolbar { gap:12px; flex-wrap:wrap; }
+.vdo-room-layout { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:16px; padding:16px; align-items:start; }
+.vdo-room.sidebar-hidden .vdo-room-layout { grid-template-columns:minmax(0,1fr); }
+.vdo-room-main { min-width:0; }
+.vdo-room .controlbar { margin:10px 0; width:100%; padding:8px; flex-wrap:wrap; }
+.vdo-room #vdoRoomSide { min-width:0; overflow-wrap:anywhere; }
+.vdo-room #vdoRoomTitle { min-width:0; overflow-wrap:anywhere; }
+.vdo-room-stage { position:relative; width:100%; aspect-ratio:16/9; background:#000; overflow:hidden; border-radius:10px; }
+#vdoSceneMount, #vdoSceneMount iframe { width:100%; height:100%; border:0; display:block; }
+.vdo-director-mount { height:520px; width:100%; }
+.vdo-director-mount iframe { width:100%; height:100%; border:1px solid var(--line); border-radius:10px; }
+.vdo-room-stage.cinema { display:flex; align-items:center; justify-content:center; border-radius:0; }
+.vdo-room-stage.cinema #vdoSceneMount { width:min(100vw,177.777778dvh); height:auto; aspect-ratio:16/9; }
+#vdoExitFullscreen { position:absolute; z-index:10; right:12px; top:12px; }
+@media(max-width:850px) { .vdo-room-layout { grid-template-columns:minmax(0,1fr); padding:8px; } .vdo-room .controlbar { flex-wrap:wrap; } }

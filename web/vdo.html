@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sala VDO.Ninja · StreamWebRom</title><link rel="icon" href="/img/logo.svg"><script src="/js/appearance.js"></script><link rel="stylesheet" href="/css/app.css"></head>
+<body class="sy"><div class="vdo-room" id="vdoRoomRoot">
+  <header class="page-toolbar"><a class="brand" href="/"><img src="/img/logo.svg" alt="">StreamWebRom</a><strong id="vdoRoomTitle" class="grow">Sala VDO.Ninja</strong><span class="pill">VDO.Ninja · independiente</span><label class="appearance-control"><span>Tema visual</span><select data-theme-picker aria-label="Tema visual"><option value="light">Día</option><option value="dark">Noche</option><option value="auto">Automático</option></select></label></header>
+  <main class="vdo-room-layout"><section class="vdo-room-main">
+    <p id="vdoRoomStatus" role="status">Preparando sala…</p>
+    <div class="vdo-room-stage" id="vdoStage"><div id="vdoSceneMount"></div><button id="vdoExitFullscreen" class="small hidden">Volver al estudio</button></div>
+    <div class="controlbar"><button id="vdoRoomFullscreen" class="ctl" data-icon="tv">Escenario completo</button><button id="vdoRoomSidebar" class="ctl" data-icon="settings" aria-expanded="true">Panel lateral</button><a id="vdoDirect" class="btn" target="_blank" rel="noopener noreferrer">Abrir aplicación oficial</a><button id="vdoLeave" class="ctl">Salir</button></div>
+    <section id="vdoDirectorSection"><h2>Control de producción de VDO.Ninja</h2><p class="muted">Administra participantes, micrófonos, cámaras y escenas con sus controles oficiales.</p><div id="vdoDirectorMount" class="vdo-director-mount"></div></section>
+  </section><aside id="vdoRoomSide" class="card col">
+    <h2>Tu sala independiente</h2><p id="vdoRoomID" class="muted"></p>
+    <div id="vdoHostActions" class="col"><button id="vdoRoomInvite" class="primary">Copiar invitación</button><button id="vdoRoomOBS">Copiar escena para OBS</button><button id="vdoRoomHostLink">Guardar enlace del anfitrión</button><p class="muted">Guarda ese enlace de forma privada para volver a la misma sala. El historial de este modo dura la sesión del navegador.</p></div>
+    <p>Esta sala utiliza el servicio oficial de <a href="https://vdo.ninja/" target="_blank" rel="noopener noreferrer">VDO.Ninja</a>, con sus <a href="https://docs.vdo.ninja/help/privacy-and-security-details/vdo.ninja-terms-of-service" target="_blank" rel="noopener noreferrer">condiciones</a> y <a href="https://docs.vdo.ninja/help/privacy-and-security-details" target="_blank" rel="noopener noreferrer">privacidad</a>.</p>
+    <p class="muted">Nuestro marco visual y la vista del escenario en 16:9 se conservan. Los controles dentro de la aplicación y la composición de las cámaras corresponden a VDO.Ninja. El branding, multistream, grabación y persistencia del estudio StreamWebRom están disponibles en las salas StreamWebRom.</p>
+    <p class="muted">Si tu app móvil bloquea la cámara incrustada, pulsa «Abrir aplicación oficial» para usar el navegador.</p>
+  </aside></main>
+</div><script type="module" src="/js/vdo-room.js"></script></body></html>

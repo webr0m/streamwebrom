@@ -13,6 +13,72 @@ import (
 	"time"
 )
 
+func TestSharedRealtimeQuotaWarnsBeforeSwitchAndFailsClosedOnMissingUsage(t *testing.T) {
+	turnUsed, sfuUsed := uint64(20), uint64(5)
+	missing, revoked := false, 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/graphql" {
+			if missing {
+				fmt.Fprint(w, `{"data":{"viewer":{"accounts":[{"callsTurnUsageAdaptiveGroups":[]}]}}}`)
+				return
+			}
+			fmt.Fprintf(w, `{"data":{"viewer":{"accounts":[{"callsTurnUsageAdaptiveGroups":[{"sum":{"egressBytes":%d}}],"callsUsageAdaptiveGroups":[{"sum":{"egressBytes":%d}}]}]}}}`, turnUsed, sfuUsed)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/revoke") {
+			revoked++
+			w.WriteHeader(204)
+			return
+		}
+		fmt.Fprint(w, `{"iceServers":[{"urls":["turn:cloud.test:3478"],"username":"lease","credential":"test"}]}`)
+	}))
+	defer api.Close()
+	o := CloudflareOptions{AccountID: strings.Repeat("a", 32), KeyID: strings.Repeat("b", 32), KeyToken: "test", AnalyticsToken: "test", BudgetBytes: 100, SwitchDelay: 15 * time.Second, rtcURL: api.URL, graphURL: api.URL + "/graphql", StateFile: filepath.Join(t.TempDir(), "quota.json")}
+	c, err := NewCloudflare(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	c.Check(context.Background(), now)
+	if c.Status().UsageBytes != 25 {
+		t.Fatal("SFU and TURN allowance not combined", c.Status())
+	}
+	sfuUsed = 80
+	if c.Check(context.Background(), now.Add(time.Second)) {
+		t.Fatal("switched before warning")
+	}
+	st := c.Status()
+	if st.Provider != "cloudflare" || st.SwitchAt != now.Add(16*time.Second).UnixMilli() || revoked != 0 {
+		t.Fatal("missing pre-switch warning", st, revoked)
+	}
+	c.Check(context.Background(), now.Add(15*time.Second))
+	if c.Status().Provider != "cloudflare" {
+		t.Fatal("countdown shortened")
+	}
+	if !c.Check(context.Background(), now.Add(16*time.Second)) || c.Status().Provider != "local" || revoked != 1 {
+		t.Fatal("deadline did not enforce local fallback")
+	}
+	// A persisted cutoff must not restart the grace period after a crash.
+	restored, err := NewCloudflare(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored.Check(context.Background(), now.Add(17*time.Second))
+	if restored.Status().Provider != "local" {
+		t.Fatal("restart bypassed cutoff")
+	}
+	// A missing dataset means unknown account usage, never zero SFU usage.
+	o.StateFile = ""
+	turnUsed, sfuUsed = 1, 1
+	c, _ = NewCloudflare(o)
+	c.Check(context.Background(), now)
+	missing = true
+	c.Check(context.Background(), now.Add(time.Second))
+	if c.Status().Provider != "local" || c.Status().SwitchAt != 0 || c.Status().Reason != "analytics-unavailable" {
+		t.Fatal("unknown usage waited or was treated as free", c.Status())
+	}
+}
+
 func TestCloudflareQuotaFailoverRevokesAndSurvivesRestart(t *testing.T) {
 	used := uint64(25)
 	fail := false
@@ -26,7 +92,7 @@ func TestCloudflareQuotaFailoverRevokesAndSurvivesRestart(t *testing.T) {
 				w.WriteHeader(503)
 				return
 			}
-			fmt.Fprintf(w, `{"data":{"viewer":{"accounts":[{"callsTurnUsageAdaptiveGroups":[{"sum":{"egressBytes":%d}}]}]}},"errors":null}`, used)
+			fmt.Fprintf(w, `{"data":{"viewer":{"accounts":[{"callsTurnUsageAdaptiveGroups":[{"sum":{"egressBytes":%d}}],"callsUsageAdaptiveGroups":[]}]}},"errors":null}`, used)
 			return
 		}
 		if r.Header.Get("Authorization") != "Bearer turn-private" {

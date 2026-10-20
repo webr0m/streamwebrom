@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: '5.0'
-    MARKETING_VERSION: '1.10.1'
-    CURRENT_PROJECT_VERSION: '11001'
+    MARKETING_VERSION: '1.11.0'
+    CURRENT_PROJECT_VERSION: '11100'
 targets:
   StreamWebRom:
     type: application

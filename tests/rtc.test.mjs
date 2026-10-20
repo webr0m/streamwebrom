@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { moduleURL } from './module-url.mjs';
 
 globalThis.location = { search: '', hash: '', protocol: 'https:', host: 'studio.test' };
 const storage = new Map();
@@ -14,8 +15,7 @@ class Socket {
   close() { this.readyState = 3; this.onclose?.(); }
 }
 globalThis.WebSocket = Socket;
-const source = await readFile(new URL('../web/js/rtc.js', import.meta.url), 'utf8');
-const { Signal, readStored, waitConnected, iceConfiguration, publish, subscribe } = await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+const { Signal, readStored, waitConnected, iceConfiguration, publish, subscribe } = await import(await moduleURL('rtc.js'));
 const signals=[];
 
 test('restricted mobile mode uses only TLS/443 relay candidates',()=>{

@@ -1,4 +1,11 @@
-import { $, el, api, toast } from "./rtc.js";
+import { $, el, api, toast, readStored, writeStored } from "./rtc.js";
+import { newVdoRoom, vdoHostPath } from "./vdo.js";
+
+$("#roomEngine").onchange = () => {
+  const vdo = $("#roomEngine").value === "vdo";
+  $("#roomEngineHelp").textContent = vdo ? "Sala separada en la aplicación oficial de VDO.Ninja. Conserva nuestro marco visual, temas y accesos; sus controles de producción son propios. No usa el relé ni la cuota Cloudflare de este servidor. Al crearla se carga el servicio externo, sujeto a sus condiciones y privacidad." : "Nuestro estudio completo, con relé local. El anfitrión puede habilitar Cloudflare desde una sala con contraseña.";
+  $("#lobby").disabled = vdo;
+};
 
 const saved = () => {
   try {
@@ -11,6 +18,12 @@ $("#create").addEventListener("click", async () => {
   const btn = $("#create");
   btn.disabled = true;
   try {
+    if ($("#roomEngine").value === "vdo") {
+      const config = newVdoRoom($("#room").value.trim().toLowerCase(), $("#pw").value, $("#title").value.trim());
+      const rooms = readStored("swr.vdoRooms",{},true); rooms[config.room] = config;
+      writeStored("swr.vdoRooms",rooms,true);
+      location.href = vdoHostPath(config); return;
+    }
     if (new TextEncoder().encode($("#pw").value).length > 72) throw new Error("La contraseña admite hasta 72 bytes (los acentos y emojis ocupan más de uno).");
     const keys = await api("/api/rooms", {
       room: $("#room").value.trim().toLowerCase(),
@@ -48,3 +61,5 @@ const persistent=rooms.filter(r=>r.persistent);
 if (persistent.length) $("#savedStudios").append(el("h3",{text:"Salas guardadas"}),...persistent.map(studioCard));
 const recent=rooms.filter(r=>!r.persistent).slice(0,5);
 if (recent.length) $("#recent").append(el("h3",{text:"Estudios recientes"}),...recent.map(studioCard));
+const vdoRecent = Object.values(readStored("swr.vdoRooms",{},true)).filter(r => r && r.directorKey && r.password).sort((a,b) => b.created-a.created).slice(0,5);
+if (vdoRecent.length) $("#recent").append(el("h3",{text:"VDO.Ninja · esta sesión del navegador"}),...vdoRecent.map(r => el("div",{class:"studio-card"},el("strong",{class:"grow",text:r.title || r.room}),el("a",{class:"btn small",href:vdoHostPath(r),text:"Abrir sala VDO.Ninja"}))));

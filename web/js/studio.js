@@ -1,6 +1,8 @@
 import { workspace } from "./workspace.js";
 import { $, $$, el, toast, copy, params, hashParams, api, Signal, publish, subscribe, levelMeter, fmtTime, readStored, writeStored } from "./rtc.js";
 import { roomTelemetry, metricText } from "./telemetry.js";
+import { relayMonitor } from "./relay-status.js";
+import { mountVdo } from "./vdo.js";
 import { immersive } from "./immersive.js";
 import { Compositor, AudioMixer } from "./compositor.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
@@ -37,6 +39,43 @@ let peers = new Map();       // peerId -> info
 const sources = new Map();   // streamId -> { video, stream, name, kind, level, owner, sub }
 const local = new Map();     // streamId -> publication (host's own)
 const sig = new Signal();
+const relayUI = relayMonitor(sig, { banner: $("#relayBanner"), label: $("#relayLabel"), text: $("#relayText"), details: $("#relayUsage") }, message => toast(message, "err"));
+for (const id of ["relayInfo", "relayDetails"]) $("#" + id).onclick = () => $("#relayDialog").showModal();
+$("#closeRelayDialog").onclick = () => $("#relayDialog").close();
+$("#bandwidthMode").onchange = () => setState({ bandwidth: $("#bandwidthMode").value });
+let relayAccess = {}, changingRelay = false;
+function renderRelayAccess() {
+  const cloud = state.connection === "cloudflare";
+  $("#relayChoiceStatus").textContent = cloud ? "Cloudflare seleccionado · con respaldo local y control de cuota" : "Relé local seleccionado";
+  $("#relayChoiceHelp").textContent = !relayAccess.password ? "Cloudflare solo se puede activar en salas creadas con contraseña." : !relayAccess.available ? "El administrador debe configurar Cloudflare y la contraseña maestra en este servidor." : "Solo el anfitrión puede activar Cloudflare, validando la contraseña maestra en el servidor.";
+  $("#cloudflareControls").classList.toggle("hidden", !relayAccess.password || !relayAccess.available);
+  $("#useCloudflare").disabled = changingRelay || cloud;
+  $("#useLocalRelay").disabled = changingRelay || !cloud;
+}
+async function changeRelay(provider) {
+  const password = $("#cloudflareMaster").value;
+  $("#cloudflareMaster").value = "";
+  changingRelay = true; renderRelayAccess();
+  try {
+    await sig.request({ type: "relay", value: { provider, ...(provider === "cloudflare" ? { password } : {}) } });
+    toast("Preferencia guardada. Reconectando la sala…");
+  } catch (e) { toast(e.message, "err"); }
+  finally { changingRelay = false; renderRelayAccess(); }
+}
+$("#useCloudflare").onclick = () => changeRelay("cloudflare");
+$("#useLocalRelay").onclick = () => changeRelay("local");
+$("#relayDialog").addEventListener("close", () => { $("#cloudflareMaster").value = ""; });
+window.addEventListener("pagehide", () => relayUI.destroy());
+const vdoUI = mountVdo({ root: $("#vdoDialog"), copy, notify: message => toast(message,"err"), onCapture: async () => {
+  const media = await openScreen();
+  const id = await addLocal(media, "camera", "VDO.Ninja", { stream:"host-vdo-" + crypto.randomUUID().slice(0,20), videoKbps: 1500, fps: 24 });
+  if (id) {
+    if (!media.getAudioTracks().length) toast("Se agregó el video. Para recibir audio, vuelve a capturar la pestaña y activa Compartir audio.","err");
+    $("#vdoDialog").close(); toast("Fuente VDO.Ninja agregada al backstage. Puedes pasarla al escenario.");
+  }
+} });
+$("#addVdo").onclick = () => $("#vdoDialog").showModal();
+window.addEventListener("pagehide", () => vdoUI.destroy());
 let program = null;          // publication of the composed program
 let liveSince = 0;
 const cinema = immersive($("#studioRoot"), $("#stageView"), $("#exitFullscreen"), { native: false });
@@ -118,6 +157,8 @@ sig.on("reconnected", async (m) => {
 
 function onWelcome(m) {
   state = m.state; keys = m.keys || keys; myId = m.peerId || myId;
+  relayAccess = m.relayAccess || {}; renderRelayAccess();
+  $("#bandwidthMode").value = state.bandwidth || "balanced";
   renderInvite();
   if (m.persistence) renderPersistence(m.persistence, true);
   $("#chatlog").replaceChildren();
@@ -131,7 +172,7 @@ sig.connect({ type: "join", room, role: "host", key: hostKey, name: "Anfitrión"
   .then((m) => { onWelcome(m); setStatus("conectado", "green"); })
   .catch((e) => { setStatus("error", "red"); toast("No se pudo entrar: " + e.message, "err"); });
 
-sig.on("state", (m) => { state = m.state; renderState(); });
+sig.on("state", (m) => { state = m.state; $("#bandwidthMode").value = state.bandwidth || "balanced"; renderRelayAccess(); renderState(); });
 sig.on("peer-joined", (m) => { peers.set(m.peer.id, m.peer); renderPeople(); toast(`${m.peer.name} entró`); });
 sig.on("peer-updated", (m) => {
   const wasPending = peers.get(m.peer.id)?.screenRequested;
@@ -397,6 +438,47 @@ function sourceQuality(id, source) {
   };
   return el("label", { class: "source-quality" }, "Calidad de envío ", select);
 }
+let sourceSettingsId = "";
+function openSourceSettings(id) {
+  if (!sources.has(id)) return;
+  sourceSettingsId = id; renderSourceSettings(); $("#sourceSettings").showModal();
+}
+$("#closeSourceSettings").onclick = () => $("#sourceSettings").close();
+$("#sourceSettings").addEventListener("close", () => {
+  const id = sourceSettingsId; sourceSettingsId = "";
+  $("#sourceSettingsVideo").pause(); $("#sourceSettingsVideo").srcObject = null;
+  document.querySelector(`#backstage [data-id="${CSS.escape(id)}"] .source-options`)?.focus();
+});
+function renderSourceSettings() {
+  if (!sourceSettingsId) return;
+  const id = sourceSettingsId, s = sources.get(id), dlg = $("#sourceSettings");
+  if (!s) { dlg.close(); return; }
+  const owner = peers.get(s.owner), muted = !!state.muted?.[id], hidden = !!state.hidden?.[id];
+  $("#sourceSettingsTitle").textContent = state.labels?.[id] || s.name;
+  const video = $("#sourceSettingsVideo");
+  if (video.srcObject !== s.stream) { video.srcObject = s.stream; video.play().catch(() => {}); }
+  video.style.opacity = hidden || s.camOff ? "0" : "1";
+  const button = (text, action, attrs = {}) => el("button", { text, onclick: action, ...attrs });
+  const actions = [
+    button(onStage(id) ? "Quitar del escenario" : "Pasar al escenario", () => toggleStage(id)),
+    button(sceneOf(editScene).featured === id ? "Quitar destacado" : "Destacar en esta escena", () => setScene(editScene, { featured: sceneOf(editScene).featured === id ? "" : id })),
+    button(muted ? "Activar audio del programa" : "Silenciar en el programa", () => toggleMap("muted", id)),
+    button(hidden ? "Mostrar video" : "Ocultar video", () => toggleMap("hidden", id), { title: hidden ? "Mostrar video" : "Ocultar video en escenario y backstage (mantiene el audio)" }),
+    button("Copiar enlace OBS", () => keys.viewKey ? copy(obsURL(id)) : toast("Aún conectando…", "err")),
+    button("Renombrar", () => rename(id, s)),
+  ];
+  if (!s.local) actions.push(
+    button(owner?.mic === false ? "Pedir micrófono" : "Silenciar micrófono", () => sig.send({ type:"request", target:s.owner, action:owner?.mic === false ? "unmute" : "mute" })),
+    button(owner?.cam === false ? "Pedir cámara" : "Apagar cámara", () => sig.send({ type:"request", target:s.owner, action:owner?.cam === false ? "camon" : s.kind === "screen" ? "screenoff" : "camoff" })),
+    button("Control remoto", () => { dlg.close(); if (owner) openRemote(owner.id); }),
+    button("Expulsar participante", () => { if (owner && confirm(`¿Expulsar a ${owner.name}?`)) sig.send({ type:"kick", target:owner.id }); })
+  );
+  else actions.push(button("Detener esta fuente", () => stopLocal(id)));
+  $("#sourceSettingsActions").replaceChildren(...actions);
+  const vol = el("input", { type:"range", min:0, max:2, step:.05, value:state.volumes?.[id] ?? 1, "aria-label":"Volumen en el programa" });
+  vol.onchange = () => setState({ volumes:{ ...(state.volumes || {}), [id]:Number(vol.value) } });
+  $("#sourceSettingsQuality").replaceChildren(...(s.kind === "camera" ? [sourceQuality(id,s)] : []), el("label",{},"Volumen del programa",vol));
+}
 function renderBackstage() {
   $("#sourceCount").textContent=`${sources.size} ${sources.size===1 ? "fuente" : "fuentes"}`;
   const box = $("#backstage");
@@ -411,35 +493,22 @@ function renderBackstage() {
     }
     if (s.preview.srcObject !== s.stream) { s.preview.srcObject = s.stream; s.preview.play().catch(() => {}); }
     const progMuted = !!state.muted?.[id], hidden = !!state.hidden?.[id];
-    const vol = el("input", { type: "range", min: 0, max: 2, step: 0.05, value: state.volumes?.[id] ?? 1, title: "Volumen en el programa", class: "tilevol" });
-    vol.onchange = () => setState({ volumes: { ...(state.volumes || {}), [id]: Number(vol.value) } });
-    const remoteTools = s.local ? [] : [
-      el("button", { title: owner?.mic === false ? "Pedir que active el micrófono" : "Silenciar su micrófono", onclick: () => sig.send({ type: "request", target: s.owner, action: owner?.mic === false ? "unmute" : "mute" }), text: owner?.mic === false ? "🎙️✕" : "🎙️" }),
-      el("button", { title: owner?.cam === false ? "Pedir que encienda la cámara" : "Apagar su cámara", onclick: () => sig.send({ type: "request", target: s.owner, action: owner?.cam === false ? "camon" : (s.kind === "screen" ? "screenoff" : "camoff") }), text: owner?.cam === false ? "📷✕" : "📷" }),
-      el("button", { title: "Control remoto: calidad, cámara, micrófono, estadísticas", onclick: () => owner && openRemote(owner.id), text: "🎛️" }),
-      el("button", { title: "Cámaras y micrófonos de todos", onclick: (e) => allMenu(e.currentTarget), text: "👥" }),
-      el("button", { title: "Expulsar", onclick: () => owner && confirm(`¿Expulsar a ${owner.name}?`) && sig.send({ type: "kick", target: owner.id }), text: "🚫" }),
-    ];
+    s.preview.onclick = () => openSourceSettings(id);
+    s.preview.tabIndex = 0; s.preview.setAttribute("aria-label", "Ampliar " + s.name);
+    s.preview.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSourceSettings(id); } };
     const tile = el("div", { class: "tile" + (onStage(id) ? " stage" : "") + (progMuted ? " progmuted" : "") + (hidden ? " video-hidden" : ""), "data-id": id, "data-kind": s.kind, "data-peer": s.local ? myId : s.owner },
       s.preview,
       el("span", { class: "tile-latency", title: "RTT del participante al servidor (ida y vuelta)", text: "RTT —" }),
       owner?.hand ? el("span", { class: "hand", text: "✋" }) : null,
       scenesWith(id).length ? el("span", { class: "scenes", title: "Escenas donde aparece", text: scenesWith(id).map((n) => n === "1" ? "P" : n).join(" ") }) : null,
       el("span", { class: "name", text: ((state.labels && state.labels[id]) || s.name + (s.kind === "screen" ? " · pantalla" : "")) + (owner && owner.mic === false ? " 🔇" : "") }),
-      el("div", { class: "tools" },
+      el("div", { class: "source-quick-actions" },
         el("button", { class: "stagebtn " + (onStage(id) ? "on" : ""), onclick: () => toggleStage(id), text: onStage(id) ? "Quitar" : (editScene === "1" ? "Al escenario" : `A escena ${editScene}`) }),
-        el("button", { title: "Destacar en esta escena", onclick: () => setScene(editScene, { featured: sceneOf(editScene).featured === id ? "" : id }), text: sceneOf(editScene).featured === id ? "★" : "☆" }),
-        el("button", { class: progMuted ? "off" : "", title: progMuted ? "Activar en el programa" : "Silenciar en el programa (el invitado no se entera)", onclick: () => toggleMap("muted", id), text: progMuted ? "🔈✕" : "🔈" }),
-        el("button", { class: hidden ? "off" : "", title: hidden ? "Mostrar video" : "Ocultar video en escenario y backstage (mantiene el audio)", onclick: () => toggleMap("hidden", id), text: hidden ? "🙈" : "👁" }),
-        el("button", { title: "Copiar link de OBS de esta cámara", onclick: () => keys.viewKey ? copy(obsURL(id)) : toast("Aún no hay clave de vista", "err"), text: "🔗 OBS" }),
-        el("button", { title: "Renombrar", onclick: () => rename(id, s), text: "✎" }),
-        s.kind === "camera" ? sourceQuality(id, s) : null,
-        ...remoteTools,
-        s.local ? el("button", { title: "Detener", onclick: () => stopLocal(id), text: "✕" }) : null),
-      el("div", { class: "row tilevolrow" }, el("span", { text: "🔊" }), vol));
+        el("button", { class:"source-options", "aria-haspopup":"dialog", onclick:() => openSourceSettings(id), text:"Opciones" })));
     box.append(tile);
   }
   telemetry.refresh();
+  renderSourceSettings();
 }
 
 function rename(id, s) {

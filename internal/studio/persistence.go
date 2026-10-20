@@ -242,6 +242,9 @@ func (h *Hub) loadRooms() {
 		r.pushKey = s.PushKey
 		r.inviteKey = s.InviteKey
 		r.state, _ = cloneState(s.State)
+		if r.state.Connection != "cloudflare" {
+			r.state.Connection = "local"
+		}
 		r.state.Live = false
 		r.state.Recording = nil
 		r.state.Restream = nil

@@ -91,6 +91,8 @@ type State struct {
 	Volumes    map[string]float64 `json:"volumes"`    // stream id -> gain 0..2
 	StageMuted bool               `json:"stageMuted"` // whole stage muted
 	Hidden     map[string]bool    `json:"hidden"`     // stream id -> video hidden, audio kept
+	Bandwidth  string             `json:"bandwidth"`  // eco | balanced | quality; applies to camera/screen senders
+	Connection string             `json:"connection"` // local by default; cloudflare requires host/master authorization
 }
 
 // Scene is a saved layout + stage combination (one-click switching).
@@ -140,6 +142,7 @@ type Room struct {
 	streamOwners   map[string]string
 	onSave         func()
 	closed         bool
+	probeCloud     bool // short-lived check cloned only after room authentication
 }
 
 // Keys returned once to the creator.
@@ -175,7 +178,7 @@ func newRoom(id, guestPassword string, lobby bool, title string) (*Room, Keys, e
 		viewKey: token(16), pushKey: token(20), inviteKey: token(16),
 		peers: map[string]*Peer{}, waiting: map[string]*Peer{}, passes: map[string]bool{}, streams: map[string]*sfu.Stream{},
 		emptyAt: time.Now(), participants: map[string]string{}, savedSources: map[string]sfu.Info{}, streamOwners: map[string]string{},
-		state: State{Title: title, Layout: "grid", Lobby: lobby, Scenes: map[string]Scene{},
+		state: State{Title: title, Layout: "grid", Lobby: lobby, Connection: "local", Bandwidth: "balanced", Scenes: map[string]Scene{},
 			Labels: map[string]string{},
 			Brand:  Brand{Color: "#7c5cff", Background: "#0b0b12", Theme: "bubble", ShowNames: true}},
 	}

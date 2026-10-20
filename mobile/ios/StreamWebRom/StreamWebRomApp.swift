@@ -102,6 +102,7 @@ struct StudioWebView: UIViewRepresentable {
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard let target = action.request.url else { decisionHandler(.cancel); return }
             if target.absoluteString == "about:blank" || matches(target) { decisionHandler(.allow); return }
+            if action.targetFrame?.isMainFrame == false && officialVdo(target) { decisionHandler(.allow); return }
             if action.navigationType == .linkActivated && target.scheme == "https" {
                 UIApplication.shared.open(target)
             }
@@ -110,10 +111,16 @@ struct StudioWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                      initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                      decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-            let permitted = !suspended && UIApplication.shared.applicationState == .active
-                && origin.protocol == "https" && origin.host.lowercased() == self.origin.host?.lowercased()
+            let localOrigin = origin.protocol == "https" && origin.host.lowercased() == self.origin.host?.lowercased()
                 && (origin.port == 0 ? 443 : origin.port) == (self.origin.port ?? 443)
+            let embeddedVdo = origin.protocol == "https" && origin.host.lowercased() == "vdo.ninja"
+                && (origin.port == 0 || origin.port == 443) && webView.url.map { matches($0) && $0.path == "/vdo" } == true
+            let permitted = !suspended && UIApplication.shared.applicationState == .active && (localOrigin || embeddedVdo)
             decisionHandler(permitted ? .prompt : .deny)
+        }
+        func officialVdo(_ url: URL) -> Bool {
+            url.scheme?.lowercased() == "https" && url.host?.lowercased() == "vdo.ninja"
+                && (url.port ?? 443) == 443 && url.user == nil && url.password == nil
         }
     }
 }

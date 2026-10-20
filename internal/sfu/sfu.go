@@ -117,6 +117,13 @@ func WithLocalRelay(ctx context.Context) context.Context {
 	return context.WithValue(ctx, localRelayContextKey{}, true)
 }
 
+func (e *Engine) trafficRecorder(ctx context.Context) func(int) {
+	if local, _ := ctx.Value(localRelayContextKey{}).(bool); local {
+		return nil
+	}
+	return e.opts.RecordTraffic
+}
+
 func (e *Engine) newPC(ctx context.Context) (*webrtc.PeerConnection, error) {
 	configuration := webrtc.Configuration{ICEServers: e.opts.ICEServers}
 	if local, _ := ctx.Value(localRelayContextKey{}).(bool); local {
@@ -314,7 +321,7 @@ func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webr
 
 	pc.OnTrack(func(tr *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		f := &Forwarder{
-			recordTraffic: e.opts.RecordTraffic,
+			recordTraffic: e.trafficRecorder(ctx),
 			ID:            tr.ID(), StreamID: id, Kind: tr.Kind(), Codec: tr.Codec().RTPCodecCapability,
 			PT: uint8(tr.PayloadType()), remote: tr, pc: pc,
 		}
@@ -486,7 +493,7 @@ func (sub *Subscriber) Done() <-chan struct{} { return sub.done }
 // PC exposes the underlying peer connection (for answer handling).
 func (sub *Subscriber) PC() *webrtc.PeerConnection { return sub.pc }
 
-func (e *Engine) attach(s *Stream, pc *webrtc.PeerConnection) (*Subscriber, error) {
+func (e *Engine) attach(ctx context.Context, s *Stream, pc *webrtc.PeerConnection) (*Subscriber, error) {
 	sub := &Subscriber{pc: pc, done: make(chan struct{})}
 	for _, f := range s.Forwarders() {
 		local, err := webrtc.NewTrackLocalStaticRTP(f.Codec, f.ID, s.ID)
@@ -518,8 +525,8 @@ func (e *Engine) attach(s *Stream, pc *webrtc.PeerConnection) (*Subscriber, erro
 			}
 		}()
 		var sink Sink = local
-		if e.opts.RecordTraffic != nil {
-			sink = &meteredSink{Sink: local, record: e.opts.RecordTraffic}
+		if record := e.trafficRecorder(ctx); record != nil {
+			sink = &meteredSink{Sink: local, record: record}
 		}
 		sub.removes = append(sub.removes, f.AddSink(sink))
 	}
@@ -549,7 +556,7 @@ func (e *Engine) SubscribeOffer(ctx context.Context, s *Stream, onICE ...func(we
 	if err != nil {
 		return nil, nil, err
 	}
-	sub, err := e.attach(s, pc)
+	sub, err := e.attach(ctx, s, pc)
 	if err != nil {
 		_ = pc.Close()
 		return nil, nil, err
@@ -586,7 +593,7 @@ func (e *Engine) SubscribeAnswer(ctx context.Context, s *Stream, offer webrtc.Se
 		_ = pc.Close()
 		return nil, nil, fmt.Errorf("remote description: %w", err)
 	}
-	sub, err := e.attach(s, pc)
+	sub, err := e.attach(ctx, s, pc)
 	if err != nil {
 		_ = pc.Close()
 		return nil, nil, err

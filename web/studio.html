@@ -28,6 +28,7 @@
           <button id="stageView" aria-pressed="false">Solo escenario</button>
           <button id="stageFullscreen" aria-pressed="false">Pantalla completa</button>
           <span class="section-label">Conexión</span>
+          <button id="relayInfo" aria-haspopup="dialog">Conexión y ahorro</button>
           <span class="pill" id="roomPing" title="Ping de señalización entre tu equipo y la sala">Sala —</span>
           <button id="networkToggle" aria-pressed="true">Mostrar latencias</button>
         </div>
@@ -45,6 +46,7 @@
   </aside>
 
   <section class="main">
+    <div class="relay-banner" id="relayBanner" role="status" aria-live="polite"><div><strong id="relayLabel">Conexión y ahorro</strong><span id="relayText"></span></div><button id="relayDetails" class="small" aria-haspopup="dialog">Detalles</button></div>
     <button id="restoreScenes" class="small scene-restore hidden" data-icon="layers" title="Mostrar escenas" aria-label="Mostrar escenas" aria-controls="scenesRail" aria-expanded="false">›</button>
     <div class="stagearea">
       <div class="program-wrap">
@@ -88,6 +90,7 @@
       <button id="addCam" class="ctl" data-icon="cam" title="Agregar tu cámara">Cámara</button>
       <button id="addScreen" class="ctl" data-icon="screen" title="Compartir pantalla">Pantalla</button>
       <button id="addMedia" class="ctl" data-icon="media" title="Video o imagen local">Medio</button>
+      <button id="addVdo" class="ctl" data-icon="cam" title="Conectar una cámara mediante el servicio oficial de VDO.Ninja">VDO.Ninja</button>
       <input type="file" id="mediaFile" accept="video/*,image/*" class="hidden">
       <button id="virtual" class="ctl" data-icon="tv" title="Pantalla virtual: salida limpia del programa en otra ventana (captúrala, ponla a pantalla completa o úsala como cámara virtual)">Pantalla virtual</button>
       <button id="settings" class="ctl" data-icon="settings" title="Cámara, micrófono y audífonos">Ajustes</button>
@@ -213,6 +216,42 @@
 
     <div class="room-access"><h3>Acceso del anfitrión</h3><p class="muted">Conserva tu enlace privado para volver a administrar la sala.</p><button id="copyHostLink" class="small" data-icon="obs">Copiar enlace del anfitrión</button></div>
   </div>
+</dialog>
+<dialog id="relayDialog" class="card room-dialog" aria-labelledby="relayDialogTitle">
+  <header class="dialog-heading"><h2 id="relayDialogTitle">Conexión y consumo</h2><button id="closeRelayDialog" class="ghost" aria-label="Cerrar consumo">×</button></header>
+  <p id="relayUsage" class="muted"></p>
+  <p id="relayChoiceStatus" role="status">Relé local seleccionado</p>
+  <p id="relayChoiceHelp" class="muted"></p>
+  <div id="cloudflareControls" class="hidden">
+    <label for="cloudflareMaster">Contraseña maestra para activar Cloudflare</label>
+    <input id="cloudflareMaster" type="password" autocomplete="off" maxlength="72" spellcheck="false">
+    <button id="useCloudflare" class="primary">Activar Cloudflare en esta sala</button>
+  </div>
+  <button id="useLocalRelay">Usar relé local</button>
+  <p class="muted">Cambiar el relé vuelve a conectar a los participantes de esta sala. Las salas nuevas utilizan el relé local.</p>
+  <label for="bandwidthMode">Uso de ancho de banda de la sala</label>
+  <select id="bandwidthMode"><option value="balanced">Equilibrado · cámaras hasta 720p, 24 fps</option><option value="eco">Ahorro máximo · cámaras hasta 540p, 20 fps</option><option value="quality">Calidad original · sin límites adicionales</option></select>
+  <p class="muted">Se aplica al anfitrión, invitados y cámaras adicionales. Las pantallas compartidas conservan hasta 1080p con menos cuadros por segundo en los perfiles de ahorro. Puedes cambiar de perfil durante la sesión.</p>
+  <p class="muted">El encuadre 16:9 y la resolución elegida para el programa y OBS se mantienen. El detalle de las cámaras depende de la calidad de envío. OBS recibe únicamente las fuentes de su escena.</p>
+</dialog>
+<dialog id="sourceSettings" class="card room-dialog source-settings-dialog" aria-labelledby="sourceSettingsTitle">
+  <header class="dialog-heading"><h2 id="sourceSettingsTitle">Opciones de la cámara</h2><button id="closeSourceSettings" class="ghost" aria-label="Cerrar opciones de la cámara">×</button></header>
+  <div class="source-settings-preview"><video id="sourceSettingsVideo" muted autoplay playsinline></video></div>
+  <div id="sourceSettingsActions" class="source-settings-actions"></div>
+  <div id="sourceSettingsQuality" class="source-settings-quality"></div>
+</dialog>
+<dialog id="vdoDialog" class="card room-dialog vdo-dialog" aria-labelledby="vdoTitle">
+  <header class="dialog-heading"><h2 id="vdoTitle">Cámara externa · VDO.Ninja</h2><button id="vdoClose" class="ghost" aria-label="Cerrar VDO.Ninja">×</button></header>
+  <p>Conecta mediante la aplicación oficial de <a href="https://vdo.ninja/" target="_blank" rel="noopener noreferrer">VDO.Ninja</a>. Al crear o conectar una cámara se carga su servicio externo, sujeto a sus <a href="https://docs.vdo.ninja/help/privacy-and-security-details/vdo.ninja-terms-of-service" target="_blank" rel="noopener noreferrer">condiciones</a> y <a href="https://docs.vdo.ninja/help/privacy-and-security-details" target="_blank" rel="noopener noreferrer">privacidad</a>.</p>
+  <button id="vdoNew" class="primary">Crear invitación VDO.Ninja</button>
+  <label for="vdoURL">O pega un enlace de visualización de VDO.Ninja</label>
+  <div class="row"><input id="vdoURL" type="url" autocomplete="off" placeholder="https://vdo.ninja/?view=…"><button id="vdoConnect">Conectar vista</button></div>
+  <p class="muted">Estos enlaces dan acceso a la cámara: compártelos solo con personas de confianza. La contraseña de tu sala StreamWebRom se mantiene independiente.</p>
+  <div id="vdoPreview" class="vdo-preview hidden"></div>
+  <div class="row"><button id="vdoCopyInvite" disabled>Copiar invitación al panelista</button><button id="vdoOpenView" disabled>Abrir visor</button><button id="vdoCopyOBS" disabled>Copiar enlace OBS</button></div>
+  <p id="vdoCaptureHelp" class="muted">Crea o conecta una cámara para preparar la vista previa.</p>
+  <button id="vdoCapture" class="primary" disabled>Capturar pestaña para el escenario</button>
+  <p class="muted">La vista previa no se incorpora sola al programa. La captura del visor agrega audio y video como una fuente normal, en 16:9, que el anfitrión puede colocar en el escenario. La captura añade procesamiento; el enlace OBS directo evita esa captura adicional.</p>
 </dialog>
 <script type="module" src="/js/studio.js"></script>
 <script type="module" src="/js/pwa.js"></script>

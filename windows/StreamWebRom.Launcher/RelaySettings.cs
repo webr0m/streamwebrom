@@ -22,6 +22,7 @@ public sealed class RelaySettings
     public string CloudflareTurnKeyId { get; set; } = "";
     public string CloudflareTurnKeyProtected { get; set; } = "";
     public string CloudflareAnalyticsTokenProtected { get; set; } = "";
+    public string CloudflareMasterHashProtected { get; set; } = "";
     public ulong BudgetBytes { get; set; } = 900000000000;
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("StreamWebRom.Tunnel.v1");
     private static string FileName => Path.Combine(ServerProcess.DataDir, "relay-credentials.json");
@@ -60,5 +61,6 @@ public sealed class RelaySettings
         psi.Environment["SWR_CF_TURN_KEY_TOKEN"] = Decrypt(CloudflareTurnKeyProtected);
         psi.Environment["SWR_CF_ANALYTICS_TOKEN"] = Decrypt(CloudflareAnalyticsTokenProtected);
         psi.Environment["SWR_CF_TURN_BUDGET"] = BudgetBytes.ToString();
+        psi.Environment["SWR_CF_MASTER_HASH"] = Decrypt(CloudflareMasterHashProtected);
     }
 }

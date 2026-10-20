@@ -4,7 +4,9 @@ export function routeCandidates(cfg) {
   const hasTLS = servers => { try { iceConfiguration(servers || [], "tls"); return true; } catch { return false; } };
   const local = hasTLS(cfg.localIce);
   if (cfg.relay?.provider === "local" && local) return ["local"];
-  return [...(hasTLS(cfg.ice) ? ["tls"] : []), ...(local ? ["local"] : [])];
+  // Cloudflare on the SFU side already provides the public relay. Let the
+  // browser try UDP/direct-to-that-relay first, avoiding a second relay leg.
+  return [...(cfg.relay?.provider === "cloudflare" ? ["auto"] : []), ...(hasTLS(cfg.ice) ? ["tls"] : []), ...(local ? ["local"] : [])];
 }
 
 export async function chooseRoute(cfg, probe, progress = () => {}) {
@@ -59,10 +61,11 @@ async function probeVideo(keys, mode, timeout = 12000) {
   }
 }
 
-export async function automaticRoute(cfg, progress) {
+export async function automaticRoute(cfg, progress, roomAuth = {}) {
   if (!cfg.capabilities?.automaticRouting || !routeCandidates(cfg).length) return "auto";
-  const keys = await api("/api/route-check", {});
-  try { return await chooseRoute(cfg, mode => probeVideo(keys, mode), progress); }
+	const keys = await api("/api/route-check", roomAuth);
+	const scoped = { ...cfg, ice: keys.ice || cfg.ice, relay: keys.relay || cfg.relay };
+	try { return await chooseRoute(scoped, mode => probeVideo(keys, mode), progress); }
   finally { await release(keys); }
 }
 

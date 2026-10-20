@@ -38,12 +38,14 @@ with sync_playwright() as pw:
     assert '⚡' not in host_guest.locator('.tile-latency').inner_text()
 
     # Hiding a camera must also hide its backstage picture without stopping audio.
-    host_guest.locator('button[title="Ocultar video en escenario y backstage (mantiene el audio)"]').click()
+    host_guest.locator('.source-options').click()
+    host.locator('#sourceSettings button[title="Ocultar video en escenario y backstage (mantiene el audio)"]').click()
     expect(host_guest).to_have_class(__import__('re').compile('video-hidden'))
     expect(host_guest.locator('video')).to_have_css('opacity','0')
     expect(guest.locator('[data-id="me"]')).to_have_class(__import__('re').compile('video-hidden'))
-    host_guest.locator('button[title="Mostrar video"]').click()
+    host.locator('#sourceSettings button[title="Mostrar video"]').click()
     expect(host_guest.locator('video')).to_have_css('opacity','1')
+    host.locator('#closeSourceSettings').click()
     # Persist actual UI options and confirm stored roster links survive a reload.
     host.locator('#openRoomDialog').click()
     host.locator('#persistDays').select_option('90')
@@ -72,8 +74,9 @@ with sync_playwright() as pw:
     guest.locator('#exitFullscreen').tap();expect(guest.locator('#call')).not_to_have_class('call cinema')
 
     # Changing camera send quality modifies the publisher, not only CSS size.
-    host_guest.hover();host_guest.get_by_role('combobox').select_option('360')
+    host_guest.locator('.source-options').click();host.locator('#sourceSettingsQuality select').select_option('360')
     guest.wait_for_function("()=>document.querySelector('[data-id=me] video').srcObject.getVideoTracks()[0].getSettings().height===360",timeout=15000)
+    host.locator('#closeSourceSettings').click()
     host_guest=host.locator('#backstage .tile').filter(has=host.locator('.name').filter(has_text='Panelista'))
     stream_id=host_guest.get_attribute('data-id')
     host_guest.locator('.stagebtn').click()

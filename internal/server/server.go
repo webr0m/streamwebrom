@@ -196,10 +196,14 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/whip/") || strings.HasPrefix(r.URL.Path, "/whep/") {
 			h.Set("Cache-Control", "no-store")
 		}
-		h.Set("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self), autoplay=(self)")
+		permissions := "camera=(self), microphone=(self), display-capture=(self), autoplay=(self \"https://vdo.ninja\")"
+		if r.URL.Path == "/vdo" || r.URL.Path == "/vdo.html" {
+			permissions = "camera=(self \"https://vdo.ninja\"), microphone=(self \"https://vdo.ninja\"), display-capture=(self \"https://vdo.ninja\"), autoplay=(self \"https://vdo.ninja\")"
+		}
+		h.Set("Permissions-Policy", permissions)
 		// Pages are embeddable by OBS (which is not a browser frame), but
 		// not by arbitrary websites: protects against clickjacking.
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: mediastream:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: mediastream:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; frame-src 'self' https://vdo.ninja; frame-ancestors 'self'; base-uri 'none'; form-action 'self'")
 		if r.TLS != nil {
 			h.Set("Strict-Transport-Security", "max-age=31536000")
 		}
@@ -221,7 +225,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 // pages maps pretty URLs (/studio, /guest, /view) to their HTML files.
 func (s *Server) pages(files http.Handler) http.Handler {
-	routes := map[string]string{"/": "/index.html", "/studio": "/studio.html", "/guest": "/guest.html", "/view": "/view.html", "/join": "/guest.html", "/diagnostics": "/diagnostics.html"}
+	routes := map[string]string{"/": "/index.html", "/studio": "/studio.html", "/guest": "/guest.html", "/view": "/view.html", "/join": "/guest.html", "/diagnostics": "/diagnostics.html", "/vdo": "/vdo.html"}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if p, ok := routes[r.URL.Path]; ok {
 			s.serveShell(w, r, strings.TrimPrefix(p, "/"), false)
@@ -296,6 +300,23 @@ func (s *Server) RefreshRoutes() {
 	s.mu.Unlock()
 	for _, session := range sessions {
 		session.close()
+	}
+}
+
+// RefreshRoomRoutes releases only the HTTP transports of the changed room.
+func (s *Server) RefreshRoomRoutes(room string) {
+	s.mu.Lock()
+	var closeFns []func()
+	for id, resource := range s.sessions {
+		parts := strings.Split(resource.path, "/")
+		if len(parts) > 2 && parts[2] == room {
+			closeFns = append(closeFns, resource.close)
+			delete(s.sessions, id)
+		}
+	}
+	s.mu.Unlock()
+	for _, closeFn := range closeFns {
+		closeFn()
 	}
 }
 
@@ -431,7 +452,11 @@ func (s *Server) writeAnswer(w http.ResponseWriter, r *http.Request, ans *webrtc
 	w.Header().Set("Content-Type", "application/sdp")
 	w.Header().Set("Location", r.URL.Path+"/"+id)
 	w.Header().Set("ETag", `"`+id+`"`)
-	for _, ice := range s.iceServers() {
+	servers := s.iceServers()
+	if room := s.hub.Room(r.PathValue("room")); room != nil {
+		servers, _ = s.hub.RoomICE(room, "")
+	}
+	for _, ice := range servers {
 		for _, u := range ice.URLs {
 			link := "<" + u + `>; rel="ice-server"`
 			if ice.Username != "" {

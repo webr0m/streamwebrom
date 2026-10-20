@@ -1,6 +1,7 @@
 // Signalling + WebRTC helpers shared by every page.
 // One WebSocket per page; one RTCPeerConnection per published or received stream
 // (no renegotiation dance, which is the #1 source of flakiness in mesh apps).
+import { senderProfile } from "./bandwidth.js";
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -82,6 +83,8 @@ export class Signal extends EventTarget {
     this.ice = [];
     this.localIce = [];
     this.mediaMode = networkMode(params.get("network"));
+    this.bandwidthMode = "balanced";
+    this.relayProvider = "";
     this.retry = 0;
     this.closed = false;
     this.everWelcomed = false; // once in, keep retrying until close()
@@ -113,11 +116,14 @@ export class Signal extends EventTarget {
         if (this.ws !== ws) return;
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === "welcome") {
+          this.bandwidthMode = m.state?.bandwidth || "balanced";
+          this.relayProvider = m.relayProvider || "";
           this.cancelJoin = null;
           clearTimeout(deadline);
           this.retry = 0; welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.localIce = m.localIce || []; this.trickle = m.trickle === true; this.flush(); resolve(m);
           if (m.rejoin) { this.joinMsg = { ...this.joinMsg, rejoin: m.rejoin }; try { if (passKey) { sessionStorage.setItem(passKey, m.rejoin); if (m.persistent) localStorage.setItem(passKey, m.rejoin); } } catch {} }
         }
+        if (m.type === "state" && m.state) this.bandwidthMode = m.state.bandwidth || "balanced";
         // Waiting in the lobby counts as connected: if the socket drops while
         // waiting, reconnect and knock again instead of leaving a dead page.
         if (m.type === "room-persistent" && joinMsg.role === "guest" && passKey) {
@@ -333,10 +339,15 @@ export async function publish(sig, media, opts = {}) {
     if (res?.stream && sig.ws === socket) sig.send({ type: "unpublish", stream: res.stream });
     throw e;
   }
-  await tune(senders, opts);
+  let tuning = Promise.resolve(), appliedMode = sig.bandwidthMode;
+  const retune = () => (tuning = tuning.catch(() => {}).then(() => pc.connectionState === "closed" ? cleanup() : tune(senders, opts, sig.bandwidthMode)));
+  const onMode = () => { if (appliedMode !== sig.bandwidthMode) { appliedMode = sig.bandwidthMode; retune(); } };
+  const cleanup = () => { sig.removeEventListener("state", onMode); sig.removeEventListener("disconnected", cleanup); };
+  await retune();
+  sig.addEventListener("state", onMode); sig.addEventListener("disconnected", cleanup);
   return {
     id: res.stream, pc, senders, opts,
-    stop() { ice.close(); try { if (sig.ws === socket) sig.send({ type: "unpublish", stream: res.stream }); } catch {} pc.close(); },
+    stop() { cleanup(); ice.close(); try { if (sig.ws === socket) sig.send({ type: "unpublish", stream: res.stream }); } catch {} pc.close(); },
     /** Hot-swap a device without renegotiating (falls back to null = silence/black). */
     async replaceTrack(kind, track) {
       if (!senders[kind]) return false;
@@ -344,7 +355,7 @@ export async function publish(sig, media, opts = {}) {
       await senders[kind].replaceTrack(track || null);
       return true;
     },
-    async setBitrate(videoKbps, fps) { Object.assign(opts, { videoKbps, fps: fps || opts.fps }); await tune(senders, opts); },
+    async setBitrate(videoKbps, fps) { Object.assign(opts, { videoKbps, fps: fps || opts.fps }); await retune(); },
   };
 }
 
@@ -358,21 +369,23 @@ export function stereoOpus(sdp, kbps) {
     : sdp.replace(m[0], `${m[0]}\r\na=fmtp:${pt} ${extra}`);
 }
 
-async function tune(senders, opts) {
+async function tune(senders, opts, mode = "balanced") {
   const v = senders.video, a = senders.audio;
+  const profile = senderProfile(mode, opts, v?.track?.getSettings?.() || {});
   try {
     if (v) {
       const p = v.getParameters();
       p.encodings = p.encodings?.length ? p.encodings : [{}];
-      p.encodings[0].maxBitrate = (opts.videoKbps || 4000) * 1000;
-      p.encodings[0].maxFramerate = opts.fps || 30;
+      p.encodings[0].maxBitrate = profile.videoKbps * 1000;
+      p.encodings[0].maxFramerate = profile.fps;
+      p.encodings[0].scaleResolutionDownBy = profile.scale;
       p.degradationPreference = opts.contentHint === "detail" ? "maintain-resolution" : "balanced";
       await v.setParameters(p);
     }
     if (a) {
       const p = a.getParameters();
       p.encodings = p.encodings?.length ? p.encodings : [{}];
-      p.encodings[0].maxBitrate = (opts.audioKbps || 128) * 1000;
+      p.encodings[0].maxBitrate = profile.audioKbps * 1000;
       await a.setParameters(p);
     }
   } catch (e) { console.warn("tune", e); }

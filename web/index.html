@@ -22,6 +22,7 @@
     </section>
     <section class="card col">
       <span class="section-label">Tu próxima transmisión</span><h2>Crear estudio</h2>
+      <div><label for="roomEngine">Servicio de la sala</label><select id="roomEngine"><option value="local">StreamWebRom · relé local</option><option value="vdo">VDO.Ninja · sala independiente</option></select><p id="roomEngineHelp" class="muted">Nuestro estudio completo, con relé local. El anfitrión puede habilitar Cloudflare desde una sala con contraseña.</p></div>
       <div><label for="title">Nombre del programa</label><input id="title" placeholder="Mi show en vivo" maxlength="120"></div>
       <div><label for="room">ID de sala (opcional)</label><input id="room" placeholder="se genera automáticamente" maxlength="48" pattern="[a-z0-9_-]+"></div>
       <div><label for="pw">Contraseña para invitados (opcional)</label><input id="pw" type="password" maxlength="128" autocomplete="new-password"></div>

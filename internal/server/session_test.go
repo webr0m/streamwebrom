@@ -48,3 +48,14 @@ func TestSessionScopeAndDeletion(t *testing.T) {
 		t.Fatal("valid DELETE did not release resource")
 	}
 }
+
+func TestRouteRefreshPreservesOtherRoomHTTPTransports(t *testing.T) {
+	s := &Server{sessions: map[string]session{}}
+	closedA, closedB := false, false
+	s.sessions["a"] = session{path: "/whip/cloud-room/cam/a", close: func() { closedA = true }}
+	s.sessions["b"] = session{path: "/whep/local-room/cam/b", close: func() { closedB = true }}
+	s.RefreshRoomRoutes("cloud-room")
+	if !closedA || closedB || len(s.sessions) != 1 {
+		t.Fatal("route refresh interrupted another room")
+	}
+}

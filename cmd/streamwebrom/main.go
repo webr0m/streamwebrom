@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/pion/webrtc/v4"
 	"golang.org/x/crypto/acme/autocert"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/webr0m/streamwebrom/internal/config"
 	"github.com/webr0m/streamwebrom/internal/record"
@@ -43,6 +45,28 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "hash-master" {
+		// Read only from standard input so the password never appears in argv.
+		password, err := io.ReadAll(io.LimitReader(os.Stdin, 74))
+		if err != nil {
+			return errors.New("could not read master password")
+		}
+		for len(password) > 0 && (password[len(password)-1] == '\n' || password[len(password)-1] == '\r') {
+			password = password[:len(password)-1]
+		}
+		if len(password) < 10 || len(password) > 72 {
+			return errors.New("master password must contain 10 to 72 bytes")
+		}
+		hash, err := bcrypt.GenerateFromPassword(password, bcrypt.DefaultCost)
+		for i := range password {
+			password[i] = 0
+		}
+		if err != nil {
+			return errors.New("could not hash master password")
+		}
+		fmt.Println(string(hash))
+		return nil
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "-version" || os.Args[1] == "--version") {
 		fmt.Println("streamwebrom", version, runtime.GOOS+"/"+runtime.GOARCH)
 		return nil
@@ -91,7 +115,7 @@ func run() error {
 	}
 	var cloudRelay *turnrelay.Cloudflare
 	if cfg.CFAccount != "" {
-		cloudRelay, err = turnrelay.NewCloudflare(turnrelay.CloudflareOptions{AccountID: cfg.CFAccount, KeyID: cfg.CFKeyID, KeyToken: cfg.CFKeyToken, AnalyticsToken: cfg.CFAnalyticsToken, BudgetBytes: cfg.CFBudget, StateFile: filepath.Join(cfg.DataDir, "turn-quota.json")})
+		cloudRelay, err = turnrelay.NewCloudflare(turnrelay.CloudflareOptions{AccountID: cfg.CFAccount, KeyID: cfg.CFKeyID, KeyToken: cfg.CFKeyToken, AnalyticsToken: cfg.CFAnalyticsToken, BudgetBytes: cfg.CFBudget, SwitchDelay: 15 * time.Second, StateFile: filepath.Join(cfg.DataDir, "turn-quota.json")})
 		if err != nil {
 			return err
 		}
@@ -113,18 +137,6 @@ func run() error {
 		}
 		return webrtc.Configuration{ICEServers: out, ICETransportPolicy: policy}
 	}
-	clientICE := func() []webrtc.ICEServer {
-		out := append([]webrtc.ICEServer(nil), ice...)
-		var cloud []webrtc.ICEServer
-		if cloudRelay != nil {
-			cloud = cloudRelay.ICE()
-			out = append(out, cloud...)
-		}
-		if localRelay != nil && len(cloud) == 0 {
-			out = append(out, localRelay.ICE()...)
-		}
-		return out
-	}
 	var recordTraffic func(int)
 	var localICE func() []webrtc.ICEServer
 	var localServerICE func() webrtc.Configuration
@@ -133,6 +145,24 @@ func run() error {
 		// The authenticated local relay reaches this SFU directly. Do not force
 		// a Cloudflare allocation on the server side of this alternative route.
 		localServerICE = func() webrtc.Configuration { return webrtc.Configuration{} }
+	}
+	// Anonymous config and all new rooms use only the local relay. Cloudflare
+	// ICE is supplied separately after authenticated room authorization.
+	defaultICE := func() []webrtc.ICEServer {
+		if localICE != nil {
+			return localICE()
+		}
+		return append([]webrtc.ICEServer(nil), ice...)
+	}
+	var protectedCloudICE func() []webrtc.ICEServer
+	if cloudRelay != nil {
+		protectedCloudICE = func() []webrtc.ICEServer {
+			cloud := cloudRelay.ICE()
+			if len(cloud) == 0 {
+				return nil
+			}
+			return append(append([]webrtc.ICEServer(nil), ice...), cloud...)
+		}
 	}
 	if cloudRelay != nil {
 		recordTraffic = cloudRelay.RecordMedia
@@ -144,8 +174,22 @@ func run() error {
 	}
 	defer engine.Close()
 
+	var front *server.Server
 	hub := studio.NewHub(ctx, studio.Options{
-		StoreDir: filepath.Join(cfg.DataDir, "rooms"), Engine: engine, Recorder: record.New(cfg.DataDir, cfg.FFmpeg), FFmpeg: cfg.FFmpeg, ICE: ice, ICEProvider: clientICE, LocalICEProvider: localICE,
+		CloudflareICEProvider: protectedCloudICE, CloudflareMasterHash: cfg.CFMasterHash,
+		RoomRoutesChanged: func(id string) {
+			if front != nil {
+				front.RefreshRoomRoutes(id)
+			}
+		},
+		RelayStatus: func() *turnrelay.RelayStatus {
+			if cloudRelay == nil {
+				return nil
+			}
+			st := cloudRelay.Status()
+			return &st
+		},
+		StoreDir: filepath.Join(cfg.DataDir, "rooms"), Engine: engine, Recorder: record.New(cfg.DataDir, cfg.FFmpeg), FFmpeg: cfg.FFmpeg, ICE: ice, ICEProvider: defaultICE, LocalICEProvider: localICE,
 		MaxRooms: cfg.MaxRooms, MaxPeers: cfg.MaxPeers, MaxMsgBytes: cfg.MaxMsgBytes,
 		MsgRate: cfg.MsgRate, MsgBurst: cfg.MsgBurst, RoomTTL: cfg.IdleRoomTTL, RejoinGrace: 30 * time.Second,
 		CheckOrigin: server.CheckOrigin(cfg), Logger: log,
@@ -155,18 +199,16 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	front := server.New(cfg, hub, static, log, clientICE)
+	front = server.New(cfg, hub, static, log, defaultICE)
 	front.LocalICEProvider = localICE
 	if cloudRelay != nil {
 		front.RelayStatus = func() map[string]string {
-			st := cloudRelay.Status()
-			return map[string]string{"provider": st.Provider, "reason": st.Reason}
+			return map[string]string{"provider": "local", "reason": "room-auth-required"}
 		}
 		go cloudRelay.Run(ctx, func() {
 			log.Info("TURN route changed", "provider", cloudRelay.Status().Provider, "reason", cloudRelay.Status().Reason)
-			hub.RefreshRoutes()
-			front.RefreshRoutes()
-		})
+			hub.RefreshCloudflareRoutes()
+		}, hub.NotifyRelay)
 	} else if localRelay != nil {
 		front.RelayStatus = func() map[string]string { return map[string]string{"provider": "local", "reason": "configured"} }
 	}

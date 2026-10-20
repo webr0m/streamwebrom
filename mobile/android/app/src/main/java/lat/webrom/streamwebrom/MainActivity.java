@@ -90,6 +90,7 @@ public final class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 if (sameOrigin(r.getUrl())) return false;
+                if (!r.isForMainFrame() && officialVdo(r.getUrl())) return false;
                 if (r.isForMainFrame() && r.hasGesture() && valid(r.getUrl())) external(r.getUrl());
                 return true;
             }
@@ -120,7 +121,7 @@ public final class MainActivity extends Activity {
         web.loadUrl(url);
     }
     private void requestMedia(PermissionRequest r) {
-        if (!active || !sameOrigin(r.getOrigin())) { r.deny(); return; }
+        if (!active || !permittedMediaOrigin(r.getOrigin())) { r.deny(); return; }
         denyPending(); pending = r;
         ArrayList<String> permissions = new ArrayList<>();
         for (String resource : r.getResources()) {
@@ -135,7 +136,7 @@ public final class MainActivity extends Activity {
     private void grantPending() {
         PermissionRequest r = pending; pending = null;
         if (r == null) return;
-        if (!active || !sameOrigin(r.getOrigin())) { r.deny(); return; }
+        if (!active || !permittedMediaOrigin(r.getOrigin())) { r.deny(); return; }
         ArrayList<String> allowed = new ArrayList<>();
         for (String resource : r.getResources()) {
             if (resource.equals(PermissionRequest.RESOURCE_VIDEO_CAPTURE) && checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) allowed.add(resource);
@@ -144,6 +145,15 @@ public final class MainActivity extends Activity {
         if (allowed.size() == r.getResources().length) r.grant(allowed.toArray(new String[0])); else r.deny();
     }
     private void denyPending() { if (pending != null) { pending.deny(); pending = null; } }
+    private boolean officialVdo(Uri u) {
+        return "https".equalsIgnoreCase(u.getScheme()) && "vdo.ninja".equalsIgnoreCase(u.getHost())
+            && (u.getPort() == -1 || u.getPort() == 443) && u.getUserInfo() == null;
+    }
+    private boolean permittedMediaOrigin(Uri u) {
+        if (sameOrigin(u)) return true;
+        Uri top = web == null || web.getUrl() == null ? null : Uri.parse(web.getUrl());
+        return officialVdo(u) && top != null && sameOrigin(top) && "/vdo".equals(top.getPath());
+    }
     @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
         if (code == 10) grantPending();

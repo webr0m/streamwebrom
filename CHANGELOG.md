@@ -1,5 +1,16 @@
 # Cambios
 
+## v1.11.0 — Conexión protegida, salas VDO.Ninja independientes y backstage ampliado
+
+- Las salas nuevas utilizan el relé local. Solo el anfitrión puede activar Cloudflare en una sala con contraseña tras validar la maestra en el servidor; bcrypt, límite de intentos y ausencia de credenciales Cloudflare en la configuración pública.
+- Pruebas automáticas, WebSocket y WHIP/WHEP respetan la elección de la sala. El cambio de proveedor reconecta únicamente las salas afectadas.
+- Se suma el consumo SFU/TURN de la cuenta. Aviso desde 800 GB y corte preventivo máximo 900 GB con cuenta atrás de 15 segundos para el anfitrión; fallback inmediato ante uso desconocido, y bloqueo mensual persistente.
+- Perfiles Equilibrado/Ahorro máximo/Calidad original aplicados al envío real de cámaras, pantallas y audio. OBS suscribe solo las fuentes de la escena seleccionada, conservando audio oculto y enlaces individuales.
+- El selector de creación ofrece una sala independiente con la aplicación oficial VDO.Ninja incrustada. Conserva el marco visual, temas, panel plegable y escenario 16:9; los controles de producción internos pertenecen a VDO.Ninja. No se redistribuye su código ni se usan sus relés con clientes propios.
+- Enlaces VDO con contraseñas en fragmentos, clave de director separada y permisos móviles limitados al dominio oficial dentro de `/vdo`. También se puede incorporar un visor VDO como fuente mediante captura de pestaña en computador.
+- El backstage muestra dos acciones por miniatura. Tocar la cámara o abrir Opciones amplía la vista y separa los controles de calidad, audio, video y moderación; se corrigen superposiciones y se libera la reproducción al cerrar.
+- Regresión con medios WebRTC reales, cambios de bitrate/FPS, rotación/tamaños móviles, suscripciones OBS por escena, seguridad del relé y cuota compartida. Los iframes VDO se simulan en la prueba de interfaz; su infraestructura externa requiere validación de llamada real.
+
 ## v1.10.1 — Recuperación del servidor ante un registro TURN dañado
 
 - Un registro de cuota TURN corrupto o ilegible ya no impide arrancar el servidor: se utiliza el relé local y Cloudflare queda en pausa hasta reparar y verificar el estado.

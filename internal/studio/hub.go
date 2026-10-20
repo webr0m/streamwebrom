@@ -23,27 +23,48 @@ import (
 	"github.com/webr0m/streamwebrom/internal/record"
 	"github.com/webr0m/streamwebrom/internal/restream"
 	"github.com/webr0m/streamwebrom/internal/sfu"
+	"github.com/webr0m/streamwebrom/internal/turnrelay"
 )
 
 // Options for the hub.
 type Options struct {
-	StoreDir         string
-	Engine           *sfu.Engine
-	Recorder         *record.Recorder
-	FFmpeg           string
-	ICE              []webrtc.ICEServer
-	ICEProvider      func() []webrtc.ICEServer
-	LocalICEProvider func() []webrtc.ICEServer
-	MaxRooms         int
-	MaxPeers         int
-	MaxMsgBytes      int64
-	MsgRate          float64
-	MsgBurst         int
-	RoomTTL          time.Duration
+	StoreDir              string
+	Engine                *sfu.Engine
+	Recorder              *record.Recorder
+	FFmpeg                string
+	ICE                   []webrtc.ICEServer
+	ICEProvider           func() []webrtc.ICEServer
+	LocalICEProvider      func() []webrtc.ICEServer
+	CloudflareICEProvider func() []webrtc.ICEServer
+	CloudflareMasterHash  string
+	RoomRoutesChanged     func(string)
+	RelayStatus           func() *turnrelay.RelayStatus
+	MaxRooms              int
+	MaxPeers              int
+	MaxMsgBytes           int64
+	MsgRate               float64
+	MsgBurst              int
+	RoomTTL               time.Duration
 	// RejoinGrace keeps a reconnecting guest's place on stage (0 = drop at once).
 	RejoinGrace time.Duration
 	CheckOrigin func(*http.Request) bool
 	Logger      *slog.Logger
+}
+
+// NotifyRelay sends account usage only to authenticated hosts, never viewers
+// or guests. Warnings precede the later forced route refresh.
+func (h *Hub) NotifyRelay(status turnrelay.RelayStatus) {
+	h.mu.RLock()
+	rooms := make([]*Room, 0, len(h.rooms))
+	for _, r := range h.rooms {
+		rooms = append(rooms, r)
+	}
+	h.mu.RUnlock()
+	for _, r := range rooms {
+		if r.CloudflareEnabled() {
+			r.toHosts(Msg{Type: "relay-status", Relay: &status})
+		}
+	}
 }
 
 // Hub owns all rooms.
@@ -56,6 +77,7 @@ type Hub struct {
 	mu        sync.RWMutex
 	rooms     map[string]*Room
 	probes    map[string]*Room
+	relayRate *rate.Limiter
 }
 
 // NewHub creates a hub and starts the idle-room reaper.
@@ -63,7 +85,7 @@ func NewHub(ctx context.Context, o Options) *Hub {
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
-	h := &Hub{o: o, log: o.Logger, rooms: map[string]*Room{}, probes: map[string]*Room{}}
+	h := &Hub{o: o, log: o.Logger, rooms: map[string]*Room{}, probes: map[string]*Room{}, relayRate: rate.NewLimiter(rate.Every(10*time.Second), 3)}
 	h.upgrader = websocket.Upgrader{
 		ReadBufferSize: 4096, WriteBufferSize: 4096,
 		CheckOrigin:       o.CheckOrigin,
@@ -504,8 +526,14 @@ func (h *Hub) welcome(p *Peer) {
 	role := p.role()
 	w := Msg{Type: "welcome", PeerID: p.ID, Role: role, Room: r.ID, State: &st,
 		Peers: r.Peers(), Streams: r.Streams(), Chat: r.history(), ICE: h.o.ICE, Trickle: true}
-	if h.o.ICEProvider != nil {
-		w.ICE = h.o.ICEProvider()
+	w.ICE, w.RelayProvider = h.RoomICE(r, p.route)
+	if r.CloudflareEnabled() && h.o.RelayStatus != nil {
+		st := h.o.RelayStatus()
+		if st != nil {
+			if role == RoleHost {
+				w.Relay = st
+			}
+		}
 	}
 	if h.o.LocalICEProvider != nil {
 		w.LocalICE = h.o.LocalICEProvider()
@@ -525,6 +553,7 @@ func (h *Hub) welcome(p *Peer) {
 	}
 	if role == RoleHost {
 		w.Persistence = r.persistenceInfo(h.o.StoreDir != "", true)
+		w.RelayAccess = h.relayAccess(r)
 		w.Keys = &Keys{Room: r.ID, ViewKey: r.viewKey, PushKey: r.pushKey, InviteKey: r.inviteKey}
 		r.mu.RLock()
 		for _, wp := range r.waiting {
@@ -650,9 +679,7 @@ func (h *Hub) dropStreams(r *Room, pubs map[string]*sfu.Stream, fromStage bool) 
 }
 
 func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
-	if p.route == "local" {
-		ctx = sfu.WithLocalRelay(ctx)
-	}
+	ctx = h.mediaContext(ctx, p.room, p.route)
 	role := p.role()
 	if role == RoleViewer {
 		return errors.New("viewers cannot publish")
@@ -787,9 +814,7 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 }
 
 func (h *Hub) subscribe(ctx context.Context, p *Peer, m Msg) error {
-	if p.route == "local" {
-		ctx = sfu.WithLocalRelay(ctx)
-	}
+	ctx = h.mediaContext(ctx, p.room, p.route)
 	s := p.room.Stream(m.Stream)
 	if s == nil {
 		return fmt.Errorf("stream %q not found", m.Stream)
@@ -872,6 +897,8 @@ func (h *Hub) peerByID(r *Room, id string) *Peer {
 func (h *Hub) hostAction(host *Peer, m Msg) error {
 	r := host.room
 	switch m.Type {
+	case "relay":
+		return h.setRelay(host, m)
 	case "save-room":
 		return h.saveRoom(host, m)
 	case "forget-room":
@@ -1068,6 +1095,14 @@ func (h *Hub) setState(r *Room, m Msg) error {
 				}
 			case "lobby":
 				err = json.Unmarshal(v, &st.Lobby)
+			case "bandwidth":
+				var mode string
+				if err = json.Unmarshal(v, &mode); err == nil {
+					if !slices.Contains([]string{"eco", "balanced", "quality"}, mode) {
+						return errors.New("invalid bandwidth mode")
+					}
+					st.Bandwidth = mode
+				}
 			case "scenes":
 				var sc map[string]Scene
 				if err = json.Unmarshal(v, &sc); err == nil {
@@ -1341,7 +1376,7 @@ func (h *Hub) PublishWHIP(ctx context.Context, r *Room, streamID string, offer w
 		return nil, nil, err
 	}
 	defer release()
-	s, ans, err := h.o.Engine.Publish(ctx, streamID, "whip", "whip", offer)
+	s, ans, err := h.o.Engine.Publish(h.mediaContext(ctx, r, ""), streamID, "whip", "whip", offer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1357,5 +1392,5 @@ func (h *Hub) SubscribeWHEP(ctx context.Context, r *Room, streamID string, offer
 	if s == nil {
 		return nil, nil, errors.New("stream not found")
 	}
-	return h.o.Engine.SubscribeAnswer(ctx, s, offer)
+	return h.o.Engine.SubscribeAnswer(h.mediaContext(ctx, r, ""), s, offer)
 }

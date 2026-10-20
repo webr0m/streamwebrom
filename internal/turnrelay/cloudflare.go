@@ -29,6 +29,7 @@ type CloudflareOptions struct {
 	AnalyticsToken string
 	StateFile      string
 	BudgetBytes    uint64
+	SwitchDelay    time.Duration // warn hosts before a preventive quota handover
 	Client         *http.Client
 	// Endpoints are injectable for deterministic API tests, never user input.
 	rtcURL, graphURL string
@@ -39,19 +40,26 @@ type lease struct {
 	Expires time.Time
 }
 type quotaState struct {
-	Month          string
-	HighWater      uint64
-	EstimatedUsage uint64
-	Blocked        bool
-	Leases         []lease
+	Month           string
+	HighWater       uint64
+	EstimatedUsage  uint64
+	Blocked         bool
+	Leases          []lease
+	RecoveryReserve uint64 `json:",omitempty"`
 }
 type RelayStatus struct {
-	Provider    string    `json:"provider"`
-	Reason      string    `json:"reason"`
-	Month       string    `json:"month"`
-	UsageBytes  uint64    `json:"usageBytes"`
-	BudgetBytes uint64    `json:"budgetBytes"`
-	CheckedAt   time.Time `json:"checkedAt"`
+	Provider        string    `json:"provider"`
+	Reason          string    `json:"reason"`
+	Month           string    `json:"month"`
+	UsageBytes      uint64    `json:"usageBytes"`
+	BudgetBytes     uint64    `json:"budgetBytes"`
+	CheckedAt       time.Time `json:"checkedAt"`
+	EstimatedBytes  uint64    `json:"estimatedBytes"`
+	WarningBytes    uint64    `json:"warningBytes"`
+	FreeBytes       uint64    `json:"freeBytes"`
+	RecoveryReserve uint64    `json:"recoveryReserve"`
+	Warning         bool      `json:"warning"`
+	SwitchAt        int64     `json:"switchAt,omitempty"`
 }
 type Cloudflare struct {
 	o         CloudflareOptions
@@ -83,6 +91,10 @@ func NewCloudflare(o CloudflareOptions) (*Cloudflare, error) {
 	if !identifier.MatchString(o.AccountID) || !identifier.MatchString(o.KeyID) || o.KeyToken == "" || o.AnalyticsToken == "" || o.BudgetBytes == 0 {
 		return nil, errors.New("Cloudflare TURN requires account/key IDs, both API tokens, and a positive budget")
 	}
+	if o.BudgetBytes > 900000000000 {
+		o.BudgetBytes = 900000000000
+		slog.Warn("TURN preventive cutoff limited to 900 GB to retain a free-tier safety margin")
+	}
 	if o.Client == nil {
 		o.Client = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
@@ -92,7 +104,7 @@ func NewCloudflare(o CloudflareOptions) (*Cloudflare, error) {
 	if o.graphURL == "" {
 		o.graphURL = "https://api.cloudflare.com/client/v4/graphql"
 	}
-	c := &Cloudflare{o: o, status: RelayStatus{Provider: "local", Reason: "checking", BudgetBytes: o.BudgetBytes}}
+	c := &Cloudflare{o: o, status: RelayStatus{Provider: "local", Reason: "checking", BudgetBytes: o.BudgetBytes, WarningBytes: o.BudgetBytes / 9 * 8, FreeBytes: 1000000000000}}
 	if o.StateFile != "" {
 		b, err := os.ReadFile(o.StateFile)
 		if err == nil {
@@ -137,15 +149,27 @@ func cloneICE(in []webrtc.ICEServer) []webrtc.ICEServer {
 
 // Run is the sole writer. Readers never wait for an external API request.
 // The caller performs one synchronous Check before accepting connections.
-func (c *Cloudflare) Run(ctx context.Context, changed func()) {
-	t := time.NewTicker(30 * time.Second)
+func (c *Cloudflare) Run(ctx context.Context, changed func(), notify func(RelayStatus)) {
+	t := time.NewTicker(time.Second)
 	defer t.Stop()
+	next := time.Now().Add(30 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if c.Check(ctx, time.Now().UTC()) && changed != nil {
+			now := time.Now().UTC()
+			st := c.Status()
+			if now.Before(next) && (st.SwitchAt == 0 || now.UnixMilli() < st.SwitchAt) {
+				continue
+			}
+			routeChanged := c.Check(ctx, now)
+			next = now.Add(30 * time.Second)
+			// Quota warnings reach hosts before a later route refresh closes sockets.
+			if notify != nil {
+				notify(c.Status())
+			}
+			if routeChanged && changed != nil {
 				changed()
 			}
 		}
@@ -184,6 +208,7 @@ func (c *Cloudflare) check(ctx context.Context, now time.Time, traffic uint64) b
 		c.state.HighWater = 0
 		c.state.EstimatedUsage = 0
 		c.state.Blocked = false
+		c.state.RecoveryReserve = 0
 	}
 	c.status.Month = month
 	used, err := c.usage(ctx, now)
@@ -197,8 +222,14 @@ func (c *Cloudflare) check(ctx context.Context, now time.Time, traffic uint64) b
 		c.status.UsageBytes = c.state.HighWater
 		c.status.CheckedAt = now
 	}
-	if c.state.EstimatedUsage < c.state.HighWater {
-		c.state.EstimatedUsage = c.state.HighWater
+	floor := c.state.HighWater
+	if ^uint64(0)-floor < c.state.RecoveryReserve {
+		floor = ^uint64(0)
+	} else {
+		floor += c.state.RecoveryReserve
+	}
+	if c.state.EstimatedUsage < floor {
+		c.state.EstimatedUsage = floor
 	}
 	if ^uint64(0)-c.state.EstimatedUsage < traffic {
 		c.state.EstimatedUsage = ^uint64(0)
@@ -208,7 +239,25 @@ func (c *Cloudflare) check(ctx context.Context, now time.Time, traffic uint64) b
 	if c.state.EstimatedUsage >= c.o.BudgetBytes {
 		c.state.Blocked = true
 	}
+	c.status.EstimatedBytes = c.state.EstimatedUsage
+	c.status.RecoveryReserve = c.state.RecoveryReserve
+	c.status.Warning = c.state.EstimatedUsage >= c.status.WarningBytes
 	if err != nil || c.state.Blocked {
+		// The 100 GB installation margin allows a short, visible warning before
+		// the preventive cutoff. Unknown usage and the free allowance itself
+		// never wait. A blocked restart also remains blocked immediately.
+		if err == nil && previous == "cloudflare" && c.o.SwitchDelay > 0 && c.state.EstimatedUsage < c.status.FreeBytes {
+			if c.status.SwitchAt == 0 {
+				c.status.SwitchAt = now.Add(c.o.SwitchDelay).UnixMilli()
+			}
+			if now.UnixMilli() < c.status.SwitchAt {
+				c.status.Reason = "quota-warning"
+				if c.save() == nil {
+					return false
+				}
+				reason = "state-unavailable"
+			}
+		}
 		c.disable(reason)
 		c.revoke(ctx, now)
 		_ = c.save()
@@ -248,6 +297,7 @@ func (c *Cloudflare) check(ctx context.Context, now time.Time, traffic uint64) b
 	}
 	c.status.Provider = "cloudflare"
 	c.status.Reason = "within-budget"
+	c.status.SwitchAt = 0
 	return previous != "cloudflare" || rotated
 }
 
@@ -256,6 +306,7 @@ func (c *Cloudflare) disable(reason string) {
 	c.status.Reason = reason
 	c.ice = nil
 	c.refreshAt = time.Time{}
+	c.status.SwitchAt = 0
 }
 func (c *Cloudflare) save() error {
 	if c.stateUnavailable {
@@ -315,16 +366,19 @@ func (c *Cloudflare) post(ctx context.Context, endpoint, token string, body any,
 }
 func (c *Cloudflare) usage(ctx context.Context, now time.Time) (uint64, error) {
 	// Aggregate the entire account's TURN traffic, not just this app's key.
-	query := fmt.Sprintf(`{viewer{accounts(filter:{accountTag:%q}){callsTurnUsageAdaptiveGroups(limit:1,filter:{date_geq:%q,date_leq:%q}){sum{egressBytes}}}}}`, c.o.AccountID, now.UTC().Format("2006-01")+"-01", now.UTC().Format("2006-01-02"))
+	filter := fmt.Sprintf(`limit:1,filter:{date_geq:%q,date_leq:%q}`, now.UTC().Format("2006-01")+"-01", now.UTC().Format("2006-01-02"))
+	query := fmt.Sprintf(`{viewer{accounts(filter:{accountTag:%q}){callsTurnUsageAdaptiveGroups(%s){sum{egressBytes}} callsUsageAdaptiveGroups(%s){sum{egressBytes}}}}}`, c.o.AccountID, filter, filter)
+	type usageGroup struct {
+		Sum struct {
+			Egress *uint64 `json:"egressBytes"`
+		}
+	}
 	var response struct {
 		Data struct {
 			Viewer struct {
 				Accounts []struct {
-					Usage *[]struct {
-						Sum struct {
-							Egress *uint64 `json:"egressBytes"`
-						}
-					} `json:"callsTurnUsageAdaptiveGroups"`
+					Usage    *[]usageGroup `json:"callsTurnUsageAdaptiveGroups"`
+					SFUUsage *[]usageGroup `json:"callsUsageAdaptiveGroups"`
 				}
 			}
 		}
@@ -337,13 +391,16 @@ func (c *Cloudflare) usage(ctx context.Context, now time.Time) (uint64, error) {
 		return 0, errors.New("Cloudflare analytics unavailable")
 	}
 	var total uint64
-	usage := response.Data.Viewer.Accounts[0].Usage
-	if usage == nil {
+	account := response.Data.Viewer.Accounts[0]
+	if account.Usage == nil || account.SFUUsage == nil {
 		return 0, errors.New("missing usage dataset")
 	}
-	for _, r := range *usage {
+	for _, r := range append(*account.Usage, (*account.SFUUsage)...) {
 		if r.Sum.Egress == nil {
 			return 0, errors.New("missing usage metric")
+		}
+		if ^uint64(0)-total < *r.Sum.Egress {
+			return 0, errors.New("usage overflow")
 		}
 		total += *r.Sum.Egress
 	}

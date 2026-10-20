@@ -17,7 +17,7 @@ public sealed class RelayForm : Form
         var advertised = Field(s.AdvertisedUrls);
         var account = Field(s.CloudflareAccount); var keyId = Field(s.CloudflareTurnKeyId);
         var key = Field("", true); var analytics = Field("", true);
-        var budget = new NumericUpDown { Minimum = 1, Maximum = 1000, Value = Math.Clamp((decimal)s.BudgetBytes / 1000000000m, 1, 1000) };
+        var budget = new NumericUpDown { Minimum = 1, Maximum = 900, Value = Math.Clamp((decimal)s.BudgetBytes / 1000000000m, 1, 900) };
         Row("TURN del equipo", enabled); Row("IP pública IPv4", ip); Row("Escucha UDP y TCP", listen); Row("TCP adicional (opcional)", alternate);
         Row("URLs del proxy TLS (opcional)", advertised);
         Row("Puertos UDP del relé", new Label { Text = $"{s.MinPort}–{s.MaxPort} · abrir en router", AutoSize = true });

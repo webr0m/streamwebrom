@@ -87,6 +87,7 @@ jobs:
       - run: python scripts/screen-share-smoke.py --url http://localhost:18443
       - run: python scripts/interface-smoke.py --url http://localhost:18443
       - run: python scripts/studio-smoke.py --url http://localhost:18443
+      - run: python scripts/relay-vdo-smoke.py --url http://localhost:18443
       - run: python scripts/effects-smoke.py --url http://localhost:18443
       - name: TURN/TCP relay-only integration
         run: |

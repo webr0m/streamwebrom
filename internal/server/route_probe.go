@@ -1,6 +1,9 @@
 package server
 
 import (
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -24,12 +27,27 @@ func (s *Server) createRouteCheck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 429, map[string]string{"error": "Espera un momento para comprobar la conexión."})
 		return
 	}
-	keys, err := s.hub.CreateRouteProbe()
-	if err != nil {
-		writeJSON(w, 503, map[string]string{"error": err.Error()})
+	var req struct {
+		Room     string `json:"room"`
+		Password string `json:"password"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2048)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, 400, map[string]string{"error": "Solicitud inválida"})
 		return
 	}
-	writeJSON(w, 201, keys)
+	keys, err := s.hub.CreateRoomRouteProbe(req.Room, req.Password)
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	ice, provider := s.hub.RoomICE(s.hub.Room(keys.Room), "")
+	writeJSON(w, 201, struct {
+		Room    string `json:"room"`
+		HostKey string `json:"hostKey"`
+		ICE     any    `json:"ice"`
+		Relay   any    `json:"relay"`
+	}{keys.Room, keys.HostKey, ice, map[string]string{"provider": provider}})
 }
 
 func (s *Server) releaseRouteCheck(w http.ResponseWriter, r *http.Request) {
