@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.9.0:** salas con contraseña [persistentes](docs/SALAS-PERSISTENTES.md) y caducidad opcional; latencia RTT por participante, ping de sala y batería/carga cuando el navegador los ofrece. Reordenación táctil de cámaras, 16:9 en horizontal, pantalla completa y vista «Solo escenario» del anfitrión. OBS recupera medios fallidos y ofrece resolución/FPS independientes; cada cámara tiene selector de calidad de envío. Efectos con segmentación en worker, perfil de baja latencia y sin cola de fotogramas. Reconexión tras interrupciones transitorias: 10 segundos. [Estudio y OBS](docs/ESTUDIO-Y-OBS.md), [efectos](docs/EFECTOS.md), [redes móviles](docs/REDES-MOVILES.md), [llamada](docs/LLAMADA-MOVIL.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.10.0:** Guardar sala visible en la barra del anfitrión; temas Día, Noche y Automático; paneles plegables independientes y una interfaz más clara para PC, tablet y móvil. Conserva salas con contraseña persistentes y enlaces OBS estables. [Interfaz y controles](docs/INTERFAZ.md), [salas persistentes](docs/SALAS-PERSISTENTES.md), [estudio y OBS](docs/ESTUDIO-Y-OBS.md), [efectos](docs/EFECTOS.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 

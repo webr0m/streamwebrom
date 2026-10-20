@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Estudio · StreamWebRom</title>
-<link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#141518"><link rel="apple-touch-icon" href="/img/icon-192.png"><link rel="stylesheet" href="/css/app.css">
+<link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#141518"><link rel="apple-touch-icon" href="/img/icon-192.png"><script src="/js/appearance.js"></script><link rel="stylesheet" href="/css/app.css">
 </head>
 <body class="sy">
 <div class="studio" id="studioRoot">
@@ -16,22 +16,36 @@
       <span class="sub"><span class="pill" id="status">conectando…</span><span class="pill hidden" id="liveTimer"></span></span>
     </div>
     <span class="grow"></span>
-    <span class="pill" id="roomPing" title="Ping de señalización entre tu equipo y la sala">Sala —</span>
-    <button class="small" id="networkToggle" aria-pressed="true">Latencias</button>
-    <button class="small" id="stageView" aria-pressed="false">Solo escenario</button>
-    <button class="small" id="stageFullscreen" aria-pressed="false">Pantalla completa</button>
-    <button id="record" class="topbtn" data-icon="record" title="Graba cada fuente por separado en el servidor">Grabar</button>
-    <button class="primary golive" id="golive" data-icon="live">Transmitir</button>
+    <label class="appearance-control"><span class="sr-only">Tema visual</span><select data-theme-picker aria-label="Tema visual"><option value="light">Día</option><option value="dark">Noche</option><option value="auto">Automático</option></select></label>
+    <div class="header-actions">
+      <button id="openRoomDialog" class="save-room" data-icon="save" aria-haspopup="dialog"><span id="roomActionLabel">Guardar sala</span></button>
+      <details class="view-menu" id="studioViewMenu">
+        <summary class="btn" data-icon="settings">Vista</summary>
+        <div class="view-options">
+          <span class="section-label">Área de trabajo</span>
+          <button id="toggleScenes" aria-expanded="true" aria-controls="scenesRail">Ocultar escenas</button>
+          <button id="togglePanel" aria-expanded="true" aria-controls="studioPanes">Ocultar panel</button>
+          <button id="stageView" aria-pressed="false">Solo escenario</button>
+          <button id="stageFullscreen" aria-pressed="false">Pantalla completa</button>
+          <span class="section-label">Conexión</span>
+          <span class="pill" id="roomPing" title="Ping de señalización entre tu equipo y la sala">Sala —</span>
+          <button id="networkToggle" aria-pressed="true">Mostrar latencias</button>
+        </div>
+      </details>
+      <button id="record" class="topbtn" data-icon="record" title="Graba cada fuente por separado en el servidor"><span id="recordLabel">Grabar</span></button>
+      <button class="primary golive" id="golive" data-icon="live">Transmitir</button>
+    </div>
   </header>
 
   <!-- Left rail: live scenes (Programa + escenas 2–8) and the preview of the scene being edited -->
-  <aside class="scenes-rail">
-    <div class="railhead">Escenas</div>
+  <aside class="scenes-rail" id="scenesRail">
+    <div class="railhead"><div>Escenas <span class="rail-caption">Organiza tu programa</span></div><button id="collapseScenes" class="small ghost" aria-label="Ocultar escenas" aria-controls="scenesRail" aria-expanded="true">‹</button></div>
     <div class="scenebar" id="sceneBar"></div>
     <div class="program-wrap hidden scene-preview" id="scenePreviewWrap"><canvas id="scenePreview"></canvas><span class="badge pill" id="scenePreviewLabel"></span></div>
   </aside>
 
   <section class="main">
+    <button id="restoreScenes" class="small scene-restore hidden" data-icon="layers" title="Mostrar escenas" aria-label="Mostrar escenas" aria-controls="scenesRail" aria-expanded="false">›</button>
     <div class="stagearea">
       <div class="program-wrap">
         <canvas id="program"></canvas>
@@ -47,8 +61,8 @@
     </div>
 
     <div class="trayhead">
-      <span class="traytitle">Backstage</span>
-      <span class="muted trayhint" title="Atajos: 1–8 layouts · B banner · C limpiar · S silenciar escenario">Pasa el cursor y pulsa “Al escenario” · 🎛️ controla a cada invitado · Atajos 1–8 · B · C · S</span>
+      <span class="traytitle">Backstage</span><span id="sourceCount" class="pill">0 fuentes</span>
+      <span class="muted trayhint" title="Atajos: 1–8 layouts · B banner · C limpiar · S silenciar escenario">Gestiona las fuentes antes de salir en vivo.</span>
       <span class="grow"></span>
       <details class="modmenu">
         <summary class="chip" data-icon="users">Producción</summary>
@@ -83,7 +97,8 @@
 
   <!-- Right: panel + vertical icon rail -->
   <aside class="side">
-    <div class="panes">
+    <div class="panes" id="studioPanes">
+      <div class="pane-toolbar"><span id="activePanelTitle">Comentarios</span><button id="closePanel" class="small ghost" title="Ocultar panel" aria-label="Ocultar panel">×</button></div>
       <div class="tabpane active" data-pane="chat">
         <div class="panehead">Comentarios</div>
         <div class="chatlog" id="chatlog"></div>
@@ -108,15 +123,7 @@
         <div class="row wrap"><button id="brandClearLogo" class="small">Quitar logo</button><button id="brandClearOverlay" class="small">Quitar overlay</button><span class="grow"></span><button class="primary" id="brandSave">Aplicar</button></div>
         <div><label for="showTitle">Título del programa</label><div class="row"><input id="showTitle" maxlength="120"><button id="titleSave" class="small">Guardar</button></div></div>
         <label class="row"><input type="checkbox" id="lobbyToggle"> Sala de espera (aprobar invitados)</label>
-        <details class="camdetails" id="persistentRoom"><summary>Guardar sala persistente</summary>
-          <p class="muted">Solo salas con contraseña. Conserva ajustes, participantes y enlaces de OBS después de cerrar o reiniciar el servidor.</p>
-          <label for="persistDays">Caducidad desde que guardas</label>
-          <select id="persistDays"><option value="30">30 días</option><option value="60">60 días</option><option value="90">90 días</option><option value="365">365 días</option><option value="0">Ilimitado</option></select>
-          <div class="row wrap"><button id="persistSave" class="primary">Guardar sala</button><button id="persistForget" class="small hidden">Quitar persistencia</button></div>
-          <p class="muted" id="persistStatus" role="status">Conectando…</p>
-          <p class="muted">Los invitados deben regresar con el mismo navegador o con su enlace personal. La contraseña sigue siendo obligatoria. No reactiva cámaras, grabaciones ni transmisiones automáticamente.</p>
-          <div id="persistentParticipants" class="col"></div>
-        </details>
+
       </div>
 
       <div class="tabpane" data-pane="dest">
@@ -180,6 +187,7 @@
     </div>
 
     <nav class="tabs" id="tabs" aria-label="Paneles">
+      <button id="roomDetails" data-icon="save" aria-haspopup="dialog">Sala</button>
       <button data-tab="chat" data-icon="chat" class="active">Chat</button>
       <button data-tab="banners" data-icon="banner">Banners</button>
       <button data-tab="brand" data-icon="brand">Marca</button>
@@ -190,6 +198,22 @@
     </nav>
   </aside>
 </div>
+<dialog id="roomDialog" class="card room-dialog" aria-labelledby="roomDialogTitle">
+  <header class="dialog-heading"><div><span class="section-label">Tu estudio</span><h2 id="roomDialogTitle">Guardar sala persistente</h2></div><button id="closeRoomDialog" class="ghost" aria-label="Cerrar ajustes de sala">×</button></header>
+  <div id="persistentRoom" class="col">
+    <div class="room-summary"><span id="roomSavedState" class="pill">Sala temporal</span><span class="muted">Mismos participantes · Mismos enlaces OBS</span></div>
+<p class="muted">Solo salas con contraseña. Conserva ajustes, participantes y enlaces de OBS después de cerrar o reiniciar el servidor.</p>
+          <label for="persistDays">Caducidad desde que guardas</label>
+          <select id="persistDays"><option value="30">30 días</option><option value="60">60 días</option><option value="90">90 días</option><option value="365">365 días</option><option value="0">Ilimitado</option></select>
+          <div class="row wrap persist-actions"><button id="persistSave" class="primary" disabled>Guardar sala</button><button id="persistForget" class="small hidden">Quitar persistencia</button></div>
+          <p class="muted" id="persistStatus" role="status">Conectando…</p>
+          <a id="passwordRoomHelp" class="hidden" href="/" target="_blank" rel="noopener">Crear un estudio con contraseña</a>
+          <p class="muted">Los invitados deben regresar con el mismo navegador o con su enlace personal. La contraseña sigue siendo obligatoria. No reactiva cámaras, grabaciones ni transmisiones automáticamente.</p>
+          <div id="persistentParticipants" class="col"></div>
+
+    <div class="room-access"><h3>Acceso del anfitrión</h3><p class="muted">Conserva tu enlace privado para volver a administrar la sala.</p><button id="copyHostLink" class="small" data-icon="obs">Copiar enlace del anfitrión</button></div>
+  </div>
+</dialog>
 <script type="module" src="/js/studio.js"></script>
 <script type="module" src="/js/pwa.js"></script>
 </body>

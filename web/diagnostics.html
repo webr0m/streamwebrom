@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Diagnóstico · StreamWebRom</title>
-  <link rel="stylesheet" href="/css/app.css"><link rel="manifest" href="/manifest.webmanifest">
+  <script src="/js/appearance.js"></script><link rel="stylesheet" href="/css/app.css"><link rel="manifest" href="/manifest.webmanifest">
   <script type="module" src="/js/diagnostics.js"></script>
 </head>
 <body>
   <main style="max-width:760px;margin:40px auto;padding:20px">
-    <a href="/">← StreamWebRom</a>
+    <div class="guest-heading"><a href="/">← StreamWebRom</a><select data-theme-picker aria-label="Tema visual"><option value="light">Día</option><option value="dark">Noche</option><option value="auto">Automático</option></select></div>
     <h1>Comprueba tu equipo antes de entrar</h1>
     <p>Revisa el navegador y la conexión con tu servidor. La prueba de cámara y micrófono es opcional y termina al detectar los dispositivos.</p>
     <div id="checks" role="status" aria-live="polite"></div>

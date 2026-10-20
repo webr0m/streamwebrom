@@ -1,5 +1,14 @@
 # Cambios
 
+## v1.10.0 — Guardar sala visible, temas y paneles plegables
+
+- Guardar sala en la barra superior y acceso Sala en el riel; diálogo con estado, caducidad y enlaces, sin desplegables ocultos en Marca.
+- Temas Día, Noche y Automático con preferencia local, sincronización entre pestañas y sin cambios en cámaras, programa u OBS.
+- Paneles izquierdo y derecho plegables por separado mediante controles directos; se recuperan desde su botón o herramienta y recuerdan la preferencia.
+- Cabecera compacta, jerarquía de paneles, escenario adaptado al espacio, mejor contraste y portada con salas guardadas separadas de los estudios temporales.
+- Se corrige la superposición del texto Grabar en teléfonos pequeños y la anchura mínima de los campos que producía desplazamiento horizontal.
+- Pruebas de interfaz en seis tamaños y ambos temas, guardado directo, restauración de paneles, sincronización de apariencia y píxeles de programa sin cambios.
+
 ## v1.9.0 — Conexión visible, escenario limpio, OBS y efectos
 
 - Salas con contraseña persistentes por decisión del anfitrión: 30, 60, 90, 365 días o ilimitadas, ajustes y participantes recuperables, enlaces personales y fuentes OBS estables.

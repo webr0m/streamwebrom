@@ -26,4 +26,4 @@ Las interrupciones transitorias de medios y señalización esperan diez segundos
 
 ## Guardar la producción
 
-Las salas con contraseña pueden guardarse con caducidad en Marca. Consulta [Salas persistentes](SALAS-PERSISTENTES.md). Ocultar una cámara también oculta su imagen en backstage y conserva el audio.
+Las salas con contraseña pueden guardarse con caducidad desde el botón Guardar sala de la barra superior. Consulta [Salas persistentes](SALAS-PERSISTENTES.md). Ocultar una cámara también oculta su imagen en backstage y conserva el audio.

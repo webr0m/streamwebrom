@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>StreamWebRom · Estudio de streaming</title>
-<link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#141518"><link rel="apple-touch-icon" href="/img/icon-192.png"><link rel="stylesheet" href="/css/app.css">
+<link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#141518"><link rel="apple-touch-icon" href="/img/icon-192.png"><script src="/js/appearance.js"></script><link rel="stylesheet" href="/css/app.css">
 </head>
-<body>
+<body class="home-page">
+<header class="page-toolbar"><a class="brand" href="/"><img src="/img/logo.svg" alt="">StreamWebRom</a><label class="appearance-control"><span>Tema visual</span><select data-theme-picker aria-label="Tema visual"><option value="light">Día</option><option value="dark">Noche</option><option value="auto">Automático</option></select></label></header>
 <main class="landing">
   <div class="hero">
     <section>
@@ -20,7 +21,7 @@
       </div>
     </section>
     <section class="card col">
-      <h2>Crear estudio</h2>
+      <span class="section-label">Tu próxima transmisión</span><h2>Crear estudio</h2>
       <div><label for="title">Nombre del programa</label><input id="title" placeholder="Mi show en vivo" maxlength="120"></div>
       <div><label for="room">ID de sala (opcional)</label><input id="room" placeholder="se genera automáticamente" maxlength="48" pattern="[a-z0-9_-]+"></div>
       <div><label for="pw">Contraseña para invitados (opcional)</label><input id="pw" type="password" maxlength="128" autocomplete="new-password"></div>
@@ -30,7 +31,7 @@
       <hr style="border:0;border-top:1px solid var(--line);width:100%">
       <h3>¿Te invitaron?</h3>
       <div class="row"><input id="joinRoom" placeholder="ID de sala"><button id="join">Entrar</button></div>
-      <div id="recent" class="list"></div>
+      <div id="savedStudios" class="saved-studios"></div><div id="recent" class="list"></div>
       <a href="/diagnostics">Comprobar conexión, cámara y servidor</a>
     </section>
   </div>

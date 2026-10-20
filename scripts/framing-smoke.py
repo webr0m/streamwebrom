@@ -71,7 +71,8 @@ with sync_playwright() as pw:
         # a landscape rectangle. Its central blue stripe keeps its width.
         im = Image.open(io.BytesIO(locator.screenshot())).convert('RGB')
         w,h = im.size
-        for x,y in [(.25,.15),(.25,.5),(.75,.85)]:
+        # Avoid the network badge and lower-third overlaid on small backstage tiles.
+        for x,y in [(.25,.3),(.25,.5),(.75,.7)]:
             r,g,b = im.getpixel((int(w*x),int(h*y)))
             assert g>140 and r<70 and b<140, (im.size,(x,y),(r,g,b))
         r,g,b = im.getpixel((w//2,h//2))

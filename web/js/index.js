@@ -37,12 +37,14 @@ const join = () => {
 $("#join").addEventListener("click", join);
 $("#joinRoom").addEventListener("keydown", (e) => e.key === "Enter" && join());
 
-const rooms = Object.values(saved()).filter((r) => r && typeof r.room === "string" && typeof r.hostKey === "string").sort((a, b) => Number(!!b.persistent)-Number(!!a.persistent) || b.created-a.created).filter((r,i,all)=>r.persistent || all.slice(0,i).filter(x=>!x.persistent).length<5);
-if (rooms.length) {
-  $("#recent").append(el("label", { text: "Tus estudios recientes" }));
-  for (const r of rooms) {
-    $("#recent").append(el("div", { class: "item" },
-      el("span", { class: "grow", text: (r.title || r.room) + (r.persistent ? (r.expires && r.expires < Date.now() ? " · caducada" : " · guardada") : "") }),
-      el("a", { class: "btn small", href: `/studio?room=${encodeURIComponent(r.room)}#key=${encodeURIComponent(r.hostKey)}`, text: "Abrir" })));
-  }
+const rooms = Object.values(saved()).filter(r=>r && typeof r.room === "string" && typeof r.hostKey === "string").sort((a,b)=>b.created-a.created);
+function studioCard(r) {
+  const expired = r.persistent && r.expires && r.expires < Date.now();
+  return el("div",{class:"studio-card"},
+    el("div",{class:"grow"},el("strong",{text:r.title || r.room}),el("span",{class:"muted",text:expired ? "Caducada" : r.persistent ? (r.expires ? "Guardada hasta " + new Date(r.expires).toLocaleDateString() : "Sin caducidad") : "Sala temporal"})),
+    el("a",{class:"btn small",href:`/studio?room=${encodeURIComponent(r.room)}#key=${encodeURIComponent(r.hostKey)}`,text:"Abrir estudio"}));
 }
+const persistent=rooms.filter(r=>r.persistent);
+if (persistent.length) $("#savedStudios").append(el("h3",{text:"Salas guardadas"}),...persistent.map(studioCard));
+const recent=rooms.filter(r=>!r.persistent).slice(0,5);
+if (recent.length) $("#recent").append(el("h3",{text:"Estudios recientes"}),...recent.map(studioCard));

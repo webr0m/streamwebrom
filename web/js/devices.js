@@ -345,7 +345,9 @@ export function settingsDialog(title = "Ajustes de audio y video") {
   if (!dlg) {
     dlg = el("dialog", { id: "devDialog", class: "card devdialog" },
       el("div", { class: "row" }, el("h3", { class: "grow", style: "margin:0", text: title }), el("button", { class: "small", onclick: () => dlg.close(), text: "✕" })),
+      el("label", {}, "Tema visual ", el("select", { "data-theme-picker": "", "aria-label":"Tema visual" }, ...[["light","Día"],["dark","Noche"],["auto","Automático"]].map(([value,text])=>el("option",{value,text})))),
       el("div", { id: "devPanel", class: "col" }), el("div", { id: "devCamCtl" }));
+    dlg.querySelector("[data-theme-picker]").value=document.documentElement.dataset.appearance || "auto";
     document.body.append(dlg);
   }
   return dlg;

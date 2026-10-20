@@ -1,3 +1,4 @@
+import { workspace } from "./workspace.js";
 import { $, $$, el, toast, copy, params, hashParams, api, Signal, publish, subscribe, levelMeter, fmtTime, readStored, writeStored } from "./rtc.js";
 import { roomTelemetry, metricText } from "./telemetry.js";
 import { immersive } from "./immersive.js";
@@ -6,6 +7,7 @@ import { chatMessage, appendChat, mountComposer } from "./chat.js";
 import { listDevices, openScreen, loadPrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain, QUALITIES, FPS } from "./devices.js";
 
 const prefs = loadPrefs();
+const studioWorkspace = workspace(document.querySelector("#studioRoot"));
 let hostCamId = "";         // stream id of the host's main camera (hot-swappable)
 let monitorOn = true;
 try { monitorOn = localStorage.getItem("swr.monitor") !== "0"; } catch {}
@@ -345,7 +347,8 @@ function renderState() {
   if (live && !liveSince) liveSince = (state.restream?.since || Date.now() / 1000) * 1000;
   if (!live) liveSince = 0;
   const rec = (state.recording || []).length > 0;
-  $("#record").textContent = rec ? "Detener grabación" : "Grabar";
+  $("#recordLabel").textContent = rec ? "Detener grabación" : "Grabar";
+  $("#record").setAttribute("aria-label",rec ? "Detener grabación" : "Grabar");
   $("#record").classList.toggle("recording", rec);
   const b = state.brand || {};
   $("#brandColor").value = b.color || "#7c5cff";
@@ -395,6 +398,7 @@ function sourceQuality(id, source) {
   return el("label", { class: "source-quality" }, "Calidad de envío ", select);
 }
 function renderBackstage() {
+  $("#sourceCount").textContent=`${sources.size} ${sources.size===1 ? "fuente" : "fuentes"}`;
   const box = $("#backstage");
   box.replaceChildren();
   if (!sources.size) box.append(el("div", { class: "empty" }, el("b", { text: "Aún no hay fuentes" }), el("span", { class: "muted", text: "Invita gente o agrega tu cámara o pantalla desde la barra de abajo." })));
@@ -736,12 +740,14 @@ setInterval(() => { const p = $('[data-pane="obs"]'); if (p.classList.contains("
 
 // ---------- tabs & misc ----------
 function activateTab(name) {
-  $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  studioWorkspace.openPanel();
+  $("#activePanelTitle").textContent = $(`#tabs [data-tab="${name}"]`)?.textContent || "Producción";
+  $$("#tabs button[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   if (name === "chat") { unread = 0; delete $('#tabs [data-tab="chat"]').dataset.unread; const l = $("#chatlog"); l.scrollTop = l.scrollHeight; }
   $$(".tabpane").forEach((p) => p.classList.toggle("active", p.dataset.pane === name));
   if (name === "obs") renderObs();
 }
-$$("#tabs button").forEach((b) => (b.onclick = () => activateTab(b.dataset.tab)));
+$$("#tabs button[data-tab]").forEach((b) => (b.onclick = () => activateTab(b.dataset.tab)));
 ["#obsCover", "#obsMute", "#obsLabel", "#obsTransparent", "#obsQuality", "#obsFPS"].forEach((sel) => $(sel).addEventListener("change", renderObs));
 
 function flyReaction(e) {
@@ -899,7 +905,7 @@ $$("#inviteOpts select, #inviteOpts input[type=checkbox], #inviteOpts input[type
 $("#invCopy").onclick = () => copy(inviteURL());
 renderInvite();
 
-window.addEventListener("pagehide", () => { telemetry.destroy(); cinema.destroy(); comp.stop(); scenePrev.stop(); });
+window.addEventListener("pagehide", () => { studioWorkspace.destroy(); telemetry.destroy(); cinema.destroy(); comp.stop(); scenePrev.stop(); });
 
 // Persistence is opt-in and host-only. Server state saves as it changes;
 // these controls also retain local production settings without extending TTL.
@@ -911,8 +917,15 @@ function roomOptions() {
 function renderPersistence(info, restore = false) {
   persistence = info;
   $("#persistSave").disabled = !info.available || !info.password;
+  $("#passwordRoomHelp").classList.toggle("hidden",info.password || !info.available);
+  $("#roomActionLabel").textContent=info.enabled ? "Sala guardada" : "Guardar sala";
+  $("#openRoomDialog").classList.toggle("is-saved",info.enabled);
+  $("#roomSavedState").textContent=info.enabled ? "Sala persistente" : "Sala temporal";
+  $("#roomSavedState").classList.toggle("green",info.enabled);
+  $("#persistSave").textContent=info.enabled ? "Guardar y renovar" : "Guardar sala";
+  $("#openRoomDialog").title=info.enabled ? (info.expires ? "Guardada hasta " + new Date(info.expires).toLocaleString() : "Guardada sin caducidad") : "Guardar ajustes, participantes y enlaces de OBS";
   $("#persistForget").classList.toggle("hidden", !info.enabled);
-  $("#persistStatus").textContent = !info.available ? "El servidor no tiene almacenamiento configurado." : !info.password ? "Crea una sala con contraseña para guardarla." : !info.enabled ? "Esta sala todavía no está guardada." : info.expires ? "Guardada hasta " + new Date(info.expires).toLocaleString() : "Guardada sin caducidad.";
+  $("#persistStatus").textContent = !info.available ? "El servidor no tiene almacenamiento configurado." : !info.password ? "Esta sala no tiene contraseña. Crea un estudio con contraseña desde la portada para habilitar el guardado." : !info.enabled ? "Esta sala todavía no está guardada." : info.expires ? "Guardada hasta " + new Date(info.expires).toLocaleString() : "Guardada sin caducidad.";
   if (restore && info.enabled) {
     $("#persistDays").value = String(info.days);
     const opt=info.options || {};
@@ -940,11 +953,15 @@ function renderPersistence(info, restore = false) {
 }
 sig.on("persistence",m=>renderPersistence(m.persistence));
 async function saveRoomOptions(action="") {
-  const response=await fetch(`/api/rooms/${encodeURIComponent(room)}/persistence${action === "options" ? "?auto=1" : ""}`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+hostKey},body:JSON.stringify({days:Number($("#persistDays").value),options:roomOptions()})});
+  const response=await fetch(`/api/rooms/${encodeURIComponent(room)}/persistence${action === "options" ? "?auto=1" : ""}`,{method:"POST",signal:AbortSignal.timeout(20000),headers:{"Content-Type":"application/json",Authorization:"Bearer "+hostKey},body:JSON.stringify({days:Number($("#persistDays").value),options:roomOptions()})});
   const result=await response.json(); if (!response.ok) throw new Error(result.error || "No se pudo guardar la sala");
   renderPersistence(result);
 }
-$("#persistSave").onclick=async()=>{ try { await saveRoomOptions(); toast("Sala y ajustes guardados"); } catch(e) { toast(e.message,"err"); } };
+$("#persistSave").onclick=async()=>{
+  const btn=$("#persistSave");btn.disabled=true;btn.textContent="Guardando…";
+  try { await saveRoomOptions(); toast("Sala y ajustes guardados"); } catch(e) { toast(e.message,"err"); }
+  finally { if (persistence) renderPersistence(persistence); }
+};
 $("#persistForget").onclick=async()=>{ try { await sig.request({type:"forget-room"}); toast("Persistencia desactivada; la sala actual sigue abierta"); } catch(e) { toast(e.message,"err"); } };
 function scheduleRoomOptions() {
   if (!persistence?.enabled) return;
@@ -952,3 +969,11 @@ function scheduleRoomOptions() {
   optionsSaveTimer=setTimeout(()=>saveRoomOptions("options").catch(e=>toast(e.message,"err")),500);
 }
 for (const id of optionIDs) $("#"+id).addEventListener("change",scheduleRoomOptions);
+
+const roomDialog=$("#roomDialog");
+for (const id of ["openRoomDialog","roomDetails"]) $("#"+id).onclick=()=>{
+  if (persistence) $("#persistDays").value=String(persistence.enabled ? persistence.days : 30);
+  if (!roomDialog.open) roomDialog.showModal();
+};
+$("#closeRoomDialog").onclick=()=>roomDialog.close();
+$("#copyHostLink").onclick=()=>copy(`${origin()}/studio?room=${encodeURIComponent(room)}#key=${encodeURIComponent(hostKey)}`);
