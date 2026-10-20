@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -25,6 +27,7 @@ import (
 
 // Options for the hub.
 type Options struct {
+	StoreDir         string
 	Engine           *sfu.Engine
 	Recorder         *record.Recorder
 	FFmpeg           string
@@ -49,9 +52,10 @@ type Hub struct {
 	log      *slog.Logger
 	upgrader websocket.Upgrader
 
-	mu     sync.RWMutex
-	rooms  map[string]*Room
-	probes map[string]*Room
+	persistMu sync.Mutex
+	mu        sync.RWMutex
+	rooms     map[string]*Room
+	probes    map[string]*Room
 }
 
 // NewHub creates a hub and starts the idle-room reaper.
@@ -65,6 +69,7 @@ func NewHub(ctx context.Context, o Options) *Hub {
 		CheckOrigin:       o.CheckOrigin,
 		EnableCompression: true,
 	}
+	h.loadRooms()
 	go h.reap(ctx)
 	return h
 }
@@ -123,6 +128,12 @@ func (h *Hub) CreateRoom(id, guestPassword, title string, lobby bool) (Keys, err
 	if len(h.rooms) >= h.o.MaxRooms {
 		return Keys{}, errors.New("server is at room capacity")
 	}
+	r.onSave = func() {
+		if err := h.persist(r); err != nil {
+			h.log.Error("room save failed", "room", r.ID)
+			r.toHosts(Msg{Type: "error", Error: "No se pudo actualizar la sala guardada en disco"})
+		}
+	}
 	h.rooms[id] = r
 	h.log.Info("room created", "room", id)
 	return keys, nil
@@ -132,7 +143,16 @@ func (h *Hub) CreateRoom(id, guestPassword, title string, lobby bool) (Keys, err
 func (h *Hub) Room(id string) *Room {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.rooms[strings.ToLower(id)]
+	r := h.rooms[strings.ToLower(id)]
+	if r != nil {
+		r.mu.RLock()
+		expired := r.expires > 0 && r.expires <= time.Now().UnixMilli()
+		r.mu.RUnlock()
+		if expired {
+			return nil
+		}
+	}
+	return r
 }
 
 // Stats summarises the hub.
@@ -174,9 +194,18 @@ func (h *Hub) ReapNow(now time.Time) int {
 	n := 0
 	for id, r := range h.rooms {
 		r.mu.RLock()
-		idle := len(r.peers) == 0 && len(r.waiting) == 0 && len(r.streams) == 0 && len(r.publishing) == 0 && now.Sub(r.emptyAt) > h.o.RoomTTL
+		expired := r.expires > 0 && r.expires <= now.UnixMilli()
+		idle := !r.persistent && len(r.peers) == 0 && len(r.waiting) == 0 && len(r.streams) == 0 && len(r.publishing) == 0 && now.Sub(r.emptyAt) > h.o.RoomTTL
 		r.mu.RUnlock()
-		if idle {
+		if idle || expired {
+			if expired && h.o.StoreDir != "" {
+				h.persistMu.Lock()
+				_ = os.Remove(filepath.Join(h.o.StoreDir, id+".json"))
+				r.mu.Lock()
+				r.persistent = false
+				r.mu.Unlock()
+				h.persistMu.Unlock()
+			}
 			r.close()
 			delete(h.rooms, id)
 			n++
@@ -242,7 +271,7 @@ var streamIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,48}$`)
 
 func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 	if m.Type == "ping" {
-		p.Send(Msg{Type: "pong", TS: m.TS})
+		p.Send(Msg{Type: "pong", TS: m.TS, ReqID: m.ReqID})
 		return nil
 	}
 	if p.room == nil {
@@ -331,6 +360,8 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 		r.addChat(c)
 		r.broadcast(Msg{Type: "chat", Comment: &c, PeerID: p.ID}, "")
 		return nil
+	case "latency":
+		return h.latency(p, m.Value)
 	case "media":
 		p.mu.Lock()
 		if m.Mic != nil {
@@ -406,6 +437,14 @@ func (h *Hub) join(p *Peer, m Msg) error {
 		p.Name = "OBS"
 	}
 	r.mu.Lock()
+	if r.closed || (r.expires > 0 && r.expires <= time.Now().UnixMilli()) {
+		r.mu.Unlock()
+		return errors.New("room expired")
+	}
+	if role == RoleGuest && r.persistent && len(r.passes) >= maxPasses && !r.passes[m.Rejoin] {
+		r.mu.Unlock()
+		return errors.New("La sala alcanzó el máximo de participantes guardados")
+	}
 	if len(r.peers)+len(r.waiting) >= h.o.MaxPeers {
 		r.mu.Unlock()
 		return errFull
@@ -476,8 +515,16 @@ func (h *Hub) welcome(p *Peer) {
 	}
 	if role == RoleGuest {
 		w.Rejoin = r.issuePass(p)
+		r.mu.RLock()
+		w.Persistent = r.persistent
+		r.mu.RUnlock()
+		if r.onSave != nil {
+			r.onSave()
+		}
+		h.notifyPersistence(r)
 	}
 	if role == RoleHost {
+		w.Persistence = r.persistenceInfo(h.o.StoreDir != "", true)
 		w.Keys = &Keys{Room: r.ID, ViewKey: r.viewKey, PushKey: r.pushKey, InviteKey: r.inviteKey}
 		r.mu.RLock()
 		for _, wp := range r.waiting {
@@ -576,7 +623,10 @@ func (h *Hub) dropStreams(r *Room, pubs map[string]*sfu.Stream, fromStage bool) 
 			// Update already owns r.mu; calling Stream here deadlocks.
 			return r.streams[id] == nil
 		}
-		if !fromStage {
+		r.mu.RLock()
+		persistent := r.persistent
+		r.mu.RUnlock()
+		if !fromStage || persistent {
 			gone = func(string) bool { return false }
 		}
 		_ = r.Update(func(st *State) error {
@@ -644,6 +694,14 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 			id = passStreamID(pass, kind)
 		}
 	}
+	if role == RoleGuest && strings.HasPrefix(id, "camera-slot-") && streamIDRe.MatchString(id) {
+		p.room.mu.RLock()
+		pass := p.pass
+		p.room.mu.RUnlock()
+		if pass != "" {
+			id = passStreamID(pass, id)
+		}
+	}
 	if !streamIDRe.MatchString(id) {
 		return errors.New("bad stream id")
 	}
@@ -656,6 +714,13 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 	p.mu.Unlock()
 	if full {
 		return errors.New("maximum 8 published streams per peer")
+	}
+	p.room.mu.RLock()
+	savedOwner := p.room.streamOwners[id]
+	pass := p.pass
+	p.room.mu.RUnlock()
+	if role == RoleGuest && (strings.HasPrefix(id, "host-") || (savedOwner != "" && savedOwner != pass)) {
+		return errors.New("Este identificador de cámara pertenece a otro participante")
 	}
 	// A guest may not hijack someone else's stream id.
 	if old := p.room.Stream(id); old != nil && old.Owner != p.ID && role != RoleHost {
@@ -697,8 +762,25 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 		p.mu.Unlock()
 		return errors.New("La sala se cerró o se revocó el permiso para compartir pantalla")
 	}
+	p.room.mu.Lock()
+	p.room.savedSources[id] = s.Info()
+	if role == RoleHost {
+		p.room.streamOwners[id] = "host"
+	} else {
+		p.room.streamOwners[id] = p.pass
+	}
+	p.room.mu.Unlock()
+	if p.room.onSave != nil {
+		p.room.onSave()
+	}
+	h.notifyPersistence(p.room)
 	if label := strings.TrimSpace(m.Name); label != "" {
-		_ = p.room.Update(func(st *State) error { st.Labels[id] = cleanName(label); return nil })
+		_ = p.room.Update(func(st *State) error {
+			if st.Labels[id] == "" {
+				st.Labels[id] = cleanName(label)
+			}
+			return nil
+		})
 	}
 	p.Send(Msg{Type: "answer", Stream: id, SDP: answer, ReqID: m.ReqID})
 	return nil
@@ -790,6 +872,10 @@ func (h *Hub) peerByID(r *Room, id string) *Peer {
 func (h *Hub) hostAction(host *Peer, m Msg) error {
 	r := host.room
 	switch m.Type {
+	case "save-room":
+		return h.saveRoom(host, m)
+	case "forget-room":
+		return h.forgetRoom(host, m)
 	case "admit", "deny":
 		if m.Type == "admit" {
 			if h.admit(r, m.Target) == 0 {
@@ -816,6 +902,10 @@ func (h *Hub) hostAction(host *Peer, m Msg) error {
 			return errors.New("peer not found")
 		}
 		r.revokePass(p)
+		if r.onSave != nil {
+			r.onSave()
+		}
+		h.notifyPersistence(r)
 		p.Send(Msg{Type: "kicked"})
 		time.AfterFunc(200*time.Millisecond, p.close)
 		return nil

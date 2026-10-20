@@ -1,0 +1,13 @@
+# Salas persistentes
+
+Crea una sala con contraseña. En el estudio abre **Marca → Guardar sala persistente**, elige **30, 60, 90, 365 días o Ilimitado** y pulsa **Guardar sala**. La persistencia no se activa por crear la sala ni por entrar a ella. La fecha parte de ese guardado; guardar nuevamente renueva el plazo. Los cambios posteriores de escenas, orden del escenario, marca, banners, nombres, audio y visibilidad se guardan automáticamente. También se conservan las opciones de enlaces OBS, invitación y destinos del anfitrión; cambiar esas opciones no renueva el plazo. Quitar persistencia borra el archivo guardado y mantiene abierta la sesión actual como sala temporal.
+
+El servidor guarda en `-data/rooms/` la configuración, los hashes de las claves de acceso, las claves de OBS/WHIP/invitación, el registro de participantes y las fuentes conocidas. La contraseña de sala se guarda como hash bcrypt. Los archivos contienen secretos de producción, incluidos los destinos de emisión guardados: protege el directorio y sus copias de seguridad; no los publiques ni los incluyas en el repositorio.
+
+La sala sobrevive a cerrar las pestañas y a reiniciar el servidor. El anfitrión vuelve desde sus estudios guardados en la portada o con su enlace de anfitrión. Conserva ese enlace: la contraseña de invitados no da control de anfitrión. Al caducar se impide volver a entrar y se elimina la sala guardada. Una sala ilimitada permanece hasta quitar su persistencia.
+
+Cada invitado conserva su identidad en el mismo navegador. En el panel de persistencia, el anfitrión puede copiar un **Enlace personal** para que esa persona vuelva desde otro dispositivo. La contraseña sigue siendo obligatoria. No compartas ese enlace entre personas: representa una identidad y una cámara principal. Dos personas con el mismo nombre no son la misma identidad. Expulsar a alguien revoca su pase anterior.
+
+La clave de vista, los identificadores de cámara principal y los enlaces OBS guardados permanecen iguales; las fuentes reaparecen cuando sus propietarios vuelven a publicar. La cámara principal y pantalla del anfitrión usan identificadores estables. Las cámaras adicionales mantienen sus ranuras según el orden en que se agregan. No se mantienen conexiones, permisos de pantalla, cámaras, archivos locales, grabaciones ni emisiones en ejecución: cada persona vuelve a autorizar sus dispositivos, y los archivos de medios locales deben seleccionarse otra vez. No se reinicia una emisión automáticamente.
+
+Ocultar una cámara desde el anfitrión oculta su imagen tanto en las escenas como en los cuadros de backstage de anfitrión e invitados, conservando su audio. Es control de presentación, no una revocación del acceso a las pistas de participantes ya autorizados.

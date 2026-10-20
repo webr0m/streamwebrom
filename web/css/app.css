@@ -288,8 +288,8 @@ label.row { color: var(--text); font-size: 13px; margin-bottom: 0; }
 
 /* ---------- Guest / call ---------- */
 .call { display: flex; flex-direction: column; height: 100%; height: 100dvh; min-width: 0; min-height: 0; overflow: hidden; }
-.call .grid { flex: 1; min-width: 0; min-height: 0; padding: 12px; display: grid; gap: 8px; align-content: center; justify-content: center; overflow: hidden; }
-.call .grid .tile { min-width: 0; min-height: 0; width: 100%; height: 100%; aspect-ratio: auto; }
+.call .grid { flex: 1; min-width: 0; min-height: 0; padding: 12px; position: relative; display: block; gap: 8px; align-content: center; justify-content: center; overflow: hidden; }
+.call .grid .tile { position: absolute; min-width: 0; min-height: 0; width: 100%; height: 100%; aspect-ratio: auto; }
 .tile[data-kind="screen"] video { object-fit: contain; }
 .call .grid .tile.expanded { grid-column: 1 / -1; grid-row: 1; justify-self: center; }
 .call .grid .tile.expanded { order: -1; border-color: var(--accent); }
@@ -332,8 +332,8 @@ label.row { color: var(--text); font-size: 13px; margin-bottom: 0; }
 .call .drawer .chatlog { min-height: 0; }
 .reaction-fly { position: fixed; bottom: 90px; font-size: 34px; animation: fly 2.4s ease-out forwards; pointer-events: none; z-index: 50; }
 @keyframes fly { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-60vh); opacity: 0; } }
-.call .tile > .tilevol { position: absolute; right: 8px; bottom: 8px; width: 110px; opacity: 0; transition: opacity .15s; }
-.call .tile:hover > .tilevol { opacity: 1; }
+.call .tile > .tilevol { opacity: 0; transition: opacity .15s; }
+.call .tile:hover > .tilevol, .call .tile:focus-within > .tilevol { opacity: 1; }
 
 /* ---------- Toasts, dialogs, messages ---------- */
 #toasts { position: fixed; top: 72px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
@@ -399,3 +399,57 @@ body.view .viewstats { position: absolute; right: 12px; top: 12px; font: 12px ui
 
 .allmenu { position: fixed; z-index: 60; display: flex; flex-direction: column; gap: 6px; padding: 10px; width: 250px; box-shadow: 0 12px 34px rgba(0,0,0,.5); }
 .allmenu button { text-align: left; justify-content: flex-start; }
+
+/* Measured camera frames, network badges and touch ordering. */
+.tile-latency { position: absolute; top: 5px; left: 5px; z-index: 2; border-radius: 5px; padding: 2px 5px; background: rgba(0,0,0,.72); color: #dce9ff; font-size: 11px; pointer-events: none; }
+.network-hidden .tile-latency { display: none; }
+.tile-order { position: absolute; z-index: 4; left: 4px; top: 26px; display: flex; gap: 4px; }
+.tile-order button { padding: 1px 6px; font-size: 14px; background: rgba(0,0,0,.8); }
+.call-grid-tools > .row { flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.call-grid-tools #roomPing { white-space: nowrap; }
+.immersive-exit { position: absolute; right: max(10px, env(safe-area-inset-right)); top: max(10px, env(safe-area-inset-top)); z-index: 40; background: rgba(15,16,20,.8); }
+.cinema { position: fixed !important; inset: 0; z-index: 100; width: 100vw !important; height: 100dvh !important; background: #08090b; }
+.call.cinema .grid { padding: 0; }
+.call.cinema .call-grid-tools { position: absolute; z-index: 12; left: 0; right: 0; top: 44px; background: rgba(15,16,20,.75); }
+.call.cinema .bar { position: absolute; z-index: 12; bottom: 0; left: 0; right: 0; background: rgba(15,16,20,.8); }
+.call.cinema .connection-status, .call.cinema .screen-share-status { position: absolute; z-index: 15; left: 0; right: 0; top: 85px; }
+.cinema .call-grid-tools, .cinema .bar, .cinema .controlbar { transition: opacity .2s; }
+.cinema.controls-idle .call-grid-tools, .cinema.controls-idle .bar, .cinema.controls-idle .controlbar { opacity: 0; pointer-events: none; }
+.studio.cinema { display: block; overflow: hidden; }
+.studio.cinema > .topbar, .studio.cinema > .scenes-rail, .studio.cinema > .side { display: none; }
+.studio.cinema .main { position: absolute; inset: 0; padding: 0; display: block; overflow: hidden; }
+.studio.cinema .main > :not(.stagearea):not(.controlbar) { display: none; }
+.studio.cinema .stagearea { position: absolute; inset: 0; }
+.studio.cinema .stagearea .program-wrap { width: min(100vw, 177.777778dvh); height: auto; max-height: none; border: 0; border-radius: 0; }
+.studio.cinema .controlbar { position: absolute; z-index: 12; bottom: 0; left: 0; right: 0; margin: 0; background: rgba(15,16,20,.8); }
+@media (orientation: landscape) and (max-height: 600px) {
+  .call .bar { flex-wrap: nowrap; justify-content: safe center; overflow-x: auto; gap: 5px; padding: 5px max(5px, env(safe-area-inset-right)) 5px max(5px, env(safe-area-inset-left)); }
+  .call .bar > * { flex-shrink: 0; }
+  .call .bar button.icon { width: 36px; height: 36px; }
+  .call .bar .danger { padding: 8px 12px; }
+  .call-grid-tools { min-height: 30px; padding: 2px 6px; }
+  .call-grid-tools button { font-size: 11px; }
+}
+@media (max-width: 650px) {
+  .topbar #networkToggle { display: none; }
+  .topbar #roomPing { font-size: 10px; }
+  .topbar #stageFullscreen { font-size: 10px; padding: 4px; }
+}
+
+body.view video.output-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+.source-quality { display: flex; align-items: center; gap: 4px; padding: 3px; background: rgba(0,0,0,.75); font-size: 10px; margin: 0; }
+.source-quality select { font-size: 11px; padding: 2px; width: 90px; }
+
+.stage-clean-controls { display: none; position: absolute; top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); z-index: 40; gap: 6px; }
+.studio.cinema .stage-clean-controls { display: flex; }
+.studio.cinema .controlbar { display: none; }
+.studio.cinema.controls-idle .stage-clean-controls { opacity: 0; }
+.studio.cinema .stage-clean-controls:focus-within, .studio.cinema .stage-clean-controls:hover { opacity: 1; }
+
+/* Keep media/audio alive while hiding the picture in every backstage tile. */
+.tile.video-hidden > video { opacity:0 !important; pointer-events:none; }
+.tile.video-hidden { background:#17171e; }
+.tile.video-hidden::before { content:"Cámara oculta"; position:absolute; inset:0; display:grid; place-items:center; color:#aaa; pointer-events:none; }
+
+body:has(.studio.cinema) #toasts { display:none; }

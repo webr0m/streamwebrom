@@ -131,6 +131,14 @@ type Room struct {
 	restream       *restream.Session
 	starting       bool // a go-live is being set up (guards against double start)
 	liveGeneration uint64
+	persistent     bool
+	persistDays    int
+	expires        int64
+	options        json.RawMessage
+	participants   map[string]string
+	savedSources   map[string]sfu.Info
+	streamOwners   map[string]string
+	onSave         func()
 	closed         bool
 }
 
@@ -166,7 +174,7 @@ func newRoom(id, guestPassword string, lobby bool, title string) (*Room, Keys, e
 		ID: id, Created: time.Now(), hostHash: hh[:],
 		viewKey: token(16), pushKey: token(20), inviteKey: token(16),
 		peers: map[string]*Peer{}, waiting: map[string]*Peer{}, passes: map[string]bool{}, streams: map[string]*sfu.Stream{},
-		emptyAt: time.Now(),
+		emptyAt: time.Now(), participants: map[string]string{}, savedSources: map[string]sfu.Info{}, streamOwners: map[string]string{},
 		state: State{Title: title, Layout: "grid", Lobby: lobby, Scenes: map[string]Scene{},
 			Labels: map[string]string{},
 			Brand:  Brand{Color: "#7c5cff", Background: "#0b0b12", Theme: "bubble", ShowNames: true}},
@@ -368,6 +376,9 @@ func (r *Room) Update(fn func(*State) error) error {
 	}
 	st := r.Snapshot()
 	r.broadcast(Msg{Type: "state", State: &st}, "")
+	if r.onSave != nil {
+		r.onSave()
+	}
 	return nil
 }
 
@@ -420,15 +431,16 @@ func (r *Room) toHosts(m Msg) {
 
 // PeerInfo is the public view of a participant.
 type PeerInfo struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Role            Role   `json:"role"`
-	Mic             bool   `json:"mic"`
-	Cam             bool   `json:"cam"`
-	Hand            bool   `json:"hand"`
-	Stage           bool   `json:"stage"`
-	ScreenAllowed   bool   `json:"screenAllowed"`
-	ScreenRequested bool   `json:"screenRequested"`
+	Network         *NetworkInfo `json:"network,omitempty"`
+	ID              string       `json:"id"`
+	Name            string       `json:"name"`
+	Role            Role         `json:"role"`
+	Mic             bool         `json:"mic"`
+	Cam             bool         `json:"cam"`
+	Hand            bool         `json:"hand"`
+	Stage           bool         `json:"stage"`
+	ScreenAllowed   bool         `json:"screenAllowed"`
+	ScreenRequested bool         `json:"screenRequested"`
 }
 
 // Peers returns public infos (viewers are hidden).
@@ -504,18 +516,21 @@ func (r *Room) issuePass(p *Peer) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if p.pass == "" || !r.passes[p.pass] {
-		if len(r.passes) >= maxPasses {
+		if len(r.passes) >= maxPasses && !r.persistent {
 			r.passes = map[string]bool{}
+			r.participants = map[string]string{}
 		}
 		p.pass = token(24)
 		r.passes[p.pass] = true
 	}
+	r.participants[p.pass] = p.Name
 	return p.pass
 }
 
 // revokePass makes a kicked guest go through the lobby again.
 func (r *Room) revokePass(p *Peer) {
 	r.mu.Lock()
+	delete(r.participants, p.pass)
 	delete(r.passes, p.pass)
 	p.pass = ""
 	r.mu.Unlock()

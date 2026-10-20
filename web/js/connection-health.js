@@ -1,6 +1,6 @@
 // ICE may briefly report "disconnected" during a mobile handover even though
 // it recovers on its own. Only persistent loss or "failed" needs user action.
-export function watchConnection(pc, lost, healthy = () => {}, grace = 6000) {
+export function watchConnection(pc, lost, healthy = () => {}, grace = 10000) {
   let timer, reported = false;
   const cancel = () => { clearTimeout(timer); timer = null; };
   const report = () => { cancel(); if (!reported) { reported = true; lost(); } };

@@ -1,5 +1,19 @@
 # Cambios
 
+## v1.9.0 — Conexión visible, escenario limpio, OBS y efectos
+
+- Salas con contraseña persistentes por decisión del anfitrión: 30, 60, 90, 365 días o ilimitadas, ajustes y participantes recuperables, enlaces personales y fuentes OBS estables.
+- Ocultar video también oculta la imagen en backstage, conservando el audio.
+
+- RTT por participante, ping de señalización y batería/carga disponibles, con datos acotados, actualización periódica y estados no disponibles/antiguos.
+- Reordenar cámaras mediante flechas táctiles sin recrear video; el orden se conserva al girar. Distribución 16:9 con banda lateral al ampliar en horizontal.
+- Pantalla completa para invitados y vista adicional Solo escenario del anfitrión, sin opciones de producción.
+- La espera de reconexión ante pérdidas transitorias pasa de seis a diez segundos.
+- OBS solicita un fotograma clave tras completar la conexión, elimina un decodificador duplicado por fuente y recupera medios fallidos/sin imagen. Vuelve a sincronizar audio tras reconectar.
+- Resoluciones de salida OBS de 360p a 2160p y FPS seleccionables; calidad de envío por cámara, incluidas adicionales. El lienzo de salida y el bitrate de fuente son opciones independientes.
+- Efectos con inferencia en worker, un solo fotograma pendiente, modelo landscape local, composición de cámara reciente, perfiles de rendimiento y captura manual de canvas donde existe. Se detienen workers y relojes al cerrar la cámara.
+- Se liberan medidores de audio al retirar suscripciones y se descartan tareas tardías de monitor de fuentes retiradas.
+
 ## v1.8.0 — Encuadre 16:9 y pantalla con autorización
 
 - Invitados en cualquier escenario pueden solicitar compartir pantalla. El anfitrión aprueba, rechaza o revoca; el invitado elige la pantalla tras aprobarse. El servidor exige autorización, invalida negociaciones revocadas y detiene el envío al retirar el permiso o sacar al invitado de todos los escenarios. Cada conexión y nueva sesión de pantalla requiere permiso nuevo.

@@ -45,7 +45,7 @@ func newEnv(t *testing.T) *env {
 	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	hub := studio.NewHub(ctx, studio.Options{Engine: eng, Recorder: record.New(dir, "ffmpeg"), FFmpeg: "ffmpeg",
+	hub := studio.NewHub(ctx, studio.Options{StoreDir: filepath.Join(dir, "rooms"), Engine: eng, Recorder: record.New(dir, "ffmpeg"), FFmpeg: "ffmpeg",
 		MaxRooms: 10, MaxPeers: 8, MaxMsgBytes: 1 << 20, MsgRate: 100, MsgBurst: 100, RoomTTL: time.Minute,
 		CheckOrigin: server.CheckOrigin(cfg), Logger: log})
 	ts := httptest.NewServer(server.New(cfg, hub, web.Files, log).Handler())

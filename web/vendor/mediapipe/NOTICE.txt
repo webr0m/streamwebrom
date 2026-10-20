@@ -2,3 +2,8 @@ MediaPipe Tasks Vision 0.10.14 (@mediapipe/tasks-vision) and selfie_segmenter.tf
 Copyright Google LLC. Licensed under the Apache License, Version 2.0:
 https://www.apache.org/licenses/LICENSE-2.0
 Vendored unmodified so background effects work offline and under CSP script-src self.
+
+SelfieSegmenter landscape (144x256, float16), Google MediaPipe model; Apache-2.0.
+Source: https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite
+Storage generation: 1683436452396689
+SHA256: 490e9ea734313e0de10fa0cd9e3c6133e36ea4db2b7a49bde9ef019f72796b8e

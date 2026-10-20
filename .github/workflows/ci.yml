@@ -85,6 +85,8 @@ jobs:
       - run: python scripts/call-smoke.py --url http://localhost:18443
       - run: python scripts/framing-smoke.py --url http://localhost:18443
       - run: python scripts/screen-share-smoke.py --url http://localhost:18443
+      - run: python scripts/studio-smoke.py --url http://localhost:18443
+      - run: python scripts/effects-smoke.py --url http://localhost:18443
       - name: TURN/TCP relay-only integration
         run: |
           go build -o /tmp/turn-smoke scripts/turn-smoke-server.go

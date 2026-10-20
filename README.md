@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.8.0:** los panelistas en escenario pueden solicitar compartir pantalla con autorización del anfitrión. Encuadre horizontal 16:9 en teléfonos, computadores, cuadrícula y video ampliado. Las cámaras verticales usan el mismo recorte centrado que ve el anfitrión, sin deformación; las salidas individuales y de programa para OBS conservan ese encuadre. [Guía móvil](docs/REDES-MOVILES.md), [uso de la llamada](docs/LLAMADA-MOVIL.md), [auditoría](docs/AUDITORIA-1.5.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.9.0:** salas con contraseña [persistentes](docs/SALAS-PERSISTENTES.md) y caducidad opcional; latencia RTT por participante, ping de sala y batería/carga cuando el navegador los ofrece. Reordenación táctil de cámaras, 16:9 en horizontal, pantalla completa y vista «Solo escenario» del anfitrión. OBS recupera medios fallidos y ofrece resolución/FPS independientes; cada cámara tiene selector de calidad de envío. Efectos con segmentación en worker, perfil de baja latencia y sin cola de fotogramas. Reconexión tras interrupciones transitorias: 10 segundos. [Estudio y OBS](docs/ESTUDIO-Y-OBS.md), [efectos](docs/EFECTOS.md), [redes móviles](docs/REDES-MOVILES.md), [llamada](docs/LLAMADA-MOVIL.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 
@@ -26,7 +26,7 @@ Ver [docs/AUDITORIA.md](docs/AUDITORIA.md).
 | 💬 **Comunidad** | Chat, reacciones, levantar la mano, indicador de quién habla, push-to-talk (Espacio), atajos M/V. |
 | ⚡ **Veloz** | SFU: cada invitado sube una sola vez. Reenvío RTP sin decodificar, PLI inmediato, jitter buffer mínimo. |
 | 🎧 **Dispositivos como VDO.Ninja** | Elige cámara, micrófono y audífonos dentro de la app (también en plena llamada, sin cortar). Resolución hasta 4K, FPS, ganancia, eco/ruido/AGC, estéreo HQ, códec, zoom/enfoque/exposición/linterna/desenfoque de fondo según lo que soporte la cámara. |
-| 🛡️ **Control del anfitrión** | Silenciar escenario, silenciar a todos, silenciar u ocultar a alguien solo en el programa, volumen por fuente, apagar cámaras, pedir audio/cámara, bajar manos, expulsar. |
+| 🛡️ **Control del anfitrión** | Silenciar escenario, silenciar a todos, silenciar a alguien en el programa u ocultar su imagen también en backstage, volumen por fuente, apagar cámaras, pedir audio/cámara, bajar manos, expulsar. |
 | 🎛️ **Director como VDO.Ninja** | Por invitado: resolución, FPS y bitrate de lo que envía, cambiar su cámara o micrófono, zoom/enfoque/exposición, ganancia y eco/ruido, estadísticas en vivo, mensaje privado, que no escuche, recargar y mover a otra sala. |
 | 🎞️ **Escenas 1–8** | Programa + 7 escenas extra, cada una con su gente y layout, con link de OBS propio (`scene=N`) y vista previa. |
 | ✨ **Efectos de video** | Desenfoque de fondo, fondo virtual (imagen, video, degradados, verde/azul croma) o reemplazar la cámara por imagen/video. Se procesa en el equipo, sin CDN. |

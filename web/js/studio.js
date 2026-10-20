@@ -1,4 +1,6 @@
 import { $, $$, el, toast, copy, params, hashParams, api, Signal, publish, subscribe, levelMeter, fmtTime, readStored, writeStored } from "./rtc.js";
+import { roomTelemetry, metricText } from "./telemetry.js";
+import { immersive } from "./immersive.js";
 import { Compositor, AudioMixer } from "./compositor.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
 import { listDevices, openScreen, loadPrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain, QUALITIES, FPS } from "./devices.js";
@@ -35,6 +37,19 @@ const local = new Map();     // streamId -> publication (host's own)
 const sig = new Signal();
 let program = null;          // publication of the composed program
 let liveSince = 0;
+const cinema = immersive($("#studioRoot"), $("#stageView"), $("#exitFullscreen"), { native: false });
+$("#stageFullscreen").onclick = () => cinema.enter(true);
+$("#cleanFullscreen").onclick = () => cinema.enter(true);
+const telemetry = roomTelemetry(sig, () => sources.get(hostCamId)?.pub?.pc || program?.pc, $("#roomPing"), peers => {
+  for (const tile of document.querySelectorAll("#backstage .tile")) {
+    const label = tile.querySelector(".tile-latency");
+    if (label) label.textContent = metricText(peers.get(tile.dataset.peer));
+  }
+});
+$("#networkToggle").onclick = () => {
+  const hidden = $("#studioRoot").classList.toggle("network-hidden");
+  $("#networkToggle").setAttribute("aria-pressed", String(!hidden));
+};
 
 // ---------- program preview ----------
 const comp = new Compositor($("#program"), sources, () => state);
@@ -59,7 +74,7 @@ function renderSceneBar() {
     ...SCENES.map((n) => {
       const count = sceneOf(n).stage.filter((id) => sources.has(id)).length;
       return el("button", { class: "scenecard" + (n === "1" ? " program" : "") + (editScene === n ? " active" : ""), title: n === "1" ? "Programa (lo que sale en vivo)" : `Escena ${n} (salida extra para OBS)`,
-        onclick: () => { editScene = n; renderSceneBar(); renderState(); } },
+        onclick: () => { editScene = n; renderSceneBar(); renderState(); scheduleRoomOptions(); } },
         el("span", { class: "scenename", text: n === "1" ? "Programa" : `Escena ${n}` }),
         el("span", { class: "scenecount", text: count ? `${count} en escena` : "vacía" }));
     }),
@@ -70,7 +85,7 @@ function renderSceneBar() {
   if (extra) scenePrev.start(); else scenePrev.stop();
 }
 function sceneURL(n, extra = "") {
-  return `${origin()}/view?room=${encodeURIComponent(room)}&scene=${n}${extra}#key=${encodeURIComponent(keys.viewKey)}`;
+  return `${origin()}/view?room=${encodeURIComponent(room)}&scene=${n}${extra}&${obsSizing()}#key=${encodeURIComponent(keys.viewKey)}`;
 }
 const mixer = new AudioMixer();
 
@@ -102,6 +117,7 @@ sig.on("reconnected", async (m) => {
 function onWelcome(m) {
   state = m.state; keys = m.keys || keys; myId = m.peerId || myId;
   renderInvite();
+  if (m.persistence) renderPersistence(m.persistence, true);
   $("#chatlog").replaceChildren();
   peers = new Map((m.peers || []).map((p) => [p.id, p]));
   for (const s of m.streams || []) addRemote(s.id, s.kind, s.owner);
@@ -139,9 +155,9 @@ async function addRemote(id, kind, owner, name) {
     if (sources.get(id) !== placeholder) { sub.close(); return; } // removed while connecting
     const v = placeholder.video;
     v.muted = true; v.playsInline = true; v.autoplay = true; v.srcObject = sub.stream;
-    await v.play().catch(() => {});
+    v.play().catch(() => {});
     Object.assign(placeholder, { stream: sub.stream, sub, name: sub.name || placeholder.name });
-    setTimeout(() => { if (sub.stream.getAudioTracks().length) { placeholder.level = levelMeter(sub.stream); monitor(id, sub.stream); } syncAudio(); }, 300);
+    setTimeout(() => { if (sources.get(id) !== placeholder) return; if (sub.stream.getAudioTracks().length) { placeholder.level = levelMeter(sub.stream); monitor(id, sub.stream); } syncAudio(); }, 300);
     renderBackstage();
   } catch (e) {
     if (sources.get(id) === placeholder) sources.delete(id);
@@ -152,7 +168,7 @@ async function addRemote(id, kind, owner, name) {
 function removeSource(id) {
   const s = sources.get(id);
   if (!s) return;
-  s.sub?.close();
+  s.sub?.close(); s.level?.close?.();
   monitors.get(id)?.remove(); monitors.delete(id);
   sources.delete(id);
   renderBackstage();
@@ -176,7 +192,7 @@ function syncMonitor() {
 }
 const localVolumes = readStored("swr.mon", {}, true);
 const localVol = (id) => localVolumes[id] ?? 1;
-$("#monitor").onclick = () => { monitorOn = !monitorOn; try { localStorage.setItem("swr.monitor", monitorOn ? "1" : "0"); } catch {} syncMonitor(); toast(monitorOn ? "Escuchando a los invitados" : "Monitor silenciado"); };
+$("#monitor").onclick = () => { monitorOn = !monitorOn; try { localStorage.setItem("swr.monitor", monitorOn ? "1" : "0"); } catch {} syncMonitor(); scheduleRoomOptions(); toast(monitorOn ? "Escuchando a los invitados" : "Monitor silenciado"); };
 
 // ---------- host's own sources ----------
 async function addLocal(media, kind, name, extra = {}, cleanup = null) {
@@ -213,10 +229,12 @@ $("#addCam").onclick = async () => {
   warnings.forEach((w) => toast(w, "err"));
   if (!stream.getTracks().length) return toast(warnings.length ? "No se pudo abrir ninguna cámara ni micrófono." : "No hay cámara ni micrófono conectados.", "err");
   const id = await addLocalCam(stream, "Anfitrión");
-  if (id) { hostCamId = id; setState({ stage: [...(state.stage || []), id] }); $("#addCam").textContent = "Otra cámara"; }
+  if (id) { hostCamId = id; setState({ stage: [...new Set([...(state.stage || []), id])] }); $("#addCam").textContent = "Otra cámara"; }
 };
 async function addLocalCam(stream, name) {
-  const id = await addLocal(stream, "camera", name, { videoKbps: kbpsFor(Number(prefs.quality)), fps: Number(prefs.fps) || 30, codec: prefs.codec, stereo: prefs.stereo, audioKbps: prefs.stereo ? 256 : 128 });
+  let slot=2; while (local.has("host-camera-"+slot)) slot++;
+  const cameraSlot = !hostCamId ? "host-camera" : "host-camera-" + slot;
+  const id = await addLocal(stream, "camera", name, { stream: cameraSlot, videoKbps: kbpsFor(Number(prefs.quality)), fps: Number(prefs.fps) || 30, codec: prefs.codec, stereo: prefs.stereo, audioKbps: prefs.stereo ? 256 : 128 });
   if (id) sources.get(id).mirror = false;
   return id;
 }
@@ -238,6 +256,7 @@ async function pickExtraCamera() {
 
 // ---------- device settings (host) ----------
 async function onPrefChange(p, what) {
+  scheduleRoomOptions();
   if (what === "speaker") { for (const a of monitors.values()) applySink(a, p.speaker); return; }
   const s = hostCamId && sources.get(hostCamId);
   if (!s || what === "other") return;
@@ -267,7 +286,7 @@ onDeviceChange(() => { if ($("#devDialog")?.open) renderPanel($("#devPanel"), pr
 $("#addScreen").onclick = async () => {
   try {
     const m = await openScreen();
-    const id = await addLocal(m, "screen", "Pantalla", { stereo: true, audioKbps: 192, codec: prefs.codec });
+    const id = await addLocal(m, "screen", "Pantalla", { stream:"host-screen", stereo: true, audioKbps: 192, codec: prefs.codec });
     if (id) setState({ stage: [...(state.stage || []), id], layout: "screen" });
   } catch (e) { if (e.name !== "NotAllowedError") toast("Pantalla: " + e.message, "err"); }
 };
@@ -338,9 +357,10 @@ function renderState() {
   renderBackstage(); renderBanners(); renderScenes(); syncAudio();
 }
 
+const obsSizing = () => new URLSearchParams({ quality: $("#obsQuality").value, fps: $("#obsFPS").value });
 function obsURL(id) {
   if (!keys.viewKey) return "";
-  const q = new URLSearchParams({ room, stream: id });
+  const q = new URLSearchParams({ room, stream: id, quality: $("#obsQuality").value, fps: $("#obsFPS").value });
   if (!$("#obsCover")?.checked) q.set("cover", "0");
   if ($("#obsMute")?.checked) q.set("mute", "1");
   if ($("#obsLabel")?.checked) q.set("label", "1");
@@ -349,6 +369,31 @@ function obsURL(id) {
 }
 const toggleMap = (key, id) => setState({ [key]: { ...(state[key] || {}), [id]: !(state[key] || {})[id] } });
 
+function sourceQuality(id, source) {
+  const select = el("select", { "aria-label": `Calidad de envío de ${source.name}`, title: "Calidad codificada de esta cámara para todos sus receptores" },
+    ...QUALITIES.map(([value, text]) => el("option", { value, text })));
+  const measured = source.stream?.getVideoTracks()[0]?.getSettings?.().height;
+  select.value = String(source.sendHeight || (QUALITIES.some(([v]) => Number(v) === measured) ? measured : 720));
+  select.onchange = async () => {
+    const height = Number(select.value), fps = 30, kbps = kbpsFor(height);
+    select.disabled = true;
+    try {
+      if (source.local) {
+        const track = source.stream.getVideoTracks()[0], raw = track?.raw || track;
+        if (!raw?.applyConstraints) throw new Error("Esta fuente no permite cambiar su resolución");
+        await raw.applyConstraints({ width: { ideal: Math.round(height * 16 / 9) }, height: { ideal: height }, frameRate: { ideal: fps } });
+        await source.pub.setBitrate(kbps, fps); source.sendHeight = height;
+        toast(`Envío ajustado a ${height}p · ${kbps} kbps; la resolución real depende de la cámara`, "ok");
+      } else {
+        source.sendHeight = height;
+        req(source.owner, "quality", { stream: id, height, fps, kbps });
+        toast(`Solicitando envío ${height}p a ${source.name}`);
+      }
+    } catch (e) { toast(e.message, "err"); }
+    finally { select.disabled = false; }
+  };
+  return el("label", { class: "source-quality" }, "Calidad de envío ", select);
+}
 function renderBackstage() {
   const box = $("#backstage");
   box.replaceChildren();
@@ -371,8 +416,9 @@ function renderBackstage() {
       el("button", { title: "Cámaras y micrófonos de todos", onclick: (e) => allMenu(e.currentTarget), text: "👥" }),
       el("button", { title: "Expulsar", onclick: () => owner && confirm(`¿Expulsar a ${owner.name}?`) && sig.send({ type: "kick", target: owner.id }), text: "🚫" }),
     ];
-    const tile = el("div", { class: "tile" + (onStage(id) ? " stage" : "") + (progMuted ? " progmuted" : ""), "data-id": id, "data-kind": s.kind },
+    const tile = el("div", { class: "tile" + (onStage(id) ? " stage" : "") + (progMuted ? " progmuted" : "") + (hidden ? " video-hidden" : ""), "data-id": id, "data-kind": s.kind, "data-peer": s.local ? myId : s.owner },
       s.preview,
+      el("span", { class: "tile-latency", title: "RTT del participante al servidor (ida y vuelta)", text: "RTT —" }),
       owner?.hand ? el("span", { class: "hand", text: "✋" }) : null,
       scenesWith(id).length ? el("span", { class: "scenes", title: "Escenas donde aparece", text: scenesWith(id).map((n) => n === "1" ? "P" : n).join(" ") }) : null,
       el("span", { class: "name", text: ((state.labels && state.labels[id]) || s.name + (s.kind === "screen" ? " · pantalla" : "")) + (owner && owner.mic === false ? " 🔇" : "") }),
@@ -380,14 +426,16 @@ function renderBackstage() {
         el("button", { class: "stagebtn " + (onStage(id) ? "on" : ""), onclick: () => toggleStage(id), text: onStage(id) ? "Quitar" : (editScene === "1" ? "Al escenario" : `A escena ${editScene}`) }),
         el("button", { title: "Destacar en esta escena", onclick: () => setScene(editScene, { featured: sceneOf(editScene).featured === id ? "" : id }), text: sceneOf(editScene).featured === id ? "★" : "☆" }),
         el("button", { class: progMuted ? "off" : "", title: progMuted ? "Activar en el programa" : "Silenciar en el programa (el invitado no se entera)", onclick: () => toggleMap("muted", id), text: progMuted ? "🔈✕" : "🔈" }),
-        el("button", { class: hidden ? "off" : "", title: hidden ? "Mostrar video" : "Ocultar video (mantiene el audio)", onclick: () => toggleMap("hidden", id), text: hidden ? "🙈" : "👁" }),
+        el("button", { class: hidden ? "off" : "", title: hidden ? "Mostrar video" : "Ocultar video en escenario y backstage (mantiene el audio)", onclick: () => toggleMap("hidden", id), text: hidden ? "🙈" : "👁" }),
         el("button", { title: "Copiar link de OBS de esta cámara", onclick: () => keys.viewKey ? copy(obsURL(id)) : toast("Aún no hay clave de vista", "err"), text: "🔗 OBS" }),
         el("button", { title: "Renombrar", onclick: () => rename(id, s), text: "✎" }),
+        s.kind === "camera" ? sourceQuality(id, s) : null,
         ...remoteTools,
         s.local ? el("button", { title: "Detener", onclick: () => stopLocal(id), text: "✕" }) : null),
       el("div", { class: "row tilevolrow" }, el("span", { text: "🔊" }), vol));
     box.append(tile);
   }
+  telemetry.refresh();
 }
 
 function rename(id, s) {
@@ -593,7 +641,7 @@ function renderScenes() {
 // ---------- destinations (kept in localStorage only) ----------
 const destKey = `swr.dest.${room}`;
 let dests = readStored(destKey, readStored("swr.dest", []));
-const saveDests = () => { if (!writeStored(destKey, dests)) toast("No se pudieron guardar los destinos en este navegador", "err"); writeStored("swr.dest", dests); renderDests(); };
+const saveDests = () => { if (!writeStored(destKey, dests)) toast("No se pudieron guardar los destinos en este navegador", "err"); writeStored("swr.dest", dests); renderDests(); scheduleRoomOptions(); };
 $("#destPreset").onchange = (e) => { $("#destURL").value = e.target.value; };
 $("#destURL").value = $("#destPreset").value;
 $("#destAdd").onclick = () => {
@@ -669,13 +717,13 @@ function renderObs() {
   const vk = encodeURIComponent(keys.viewKey), r = encodeURIComponent(room);
   const box = $("#obsLinks");
   box.replaceChildren(
-    linkRow("Programa completo (escena, con banners y marca)", `${origin()}/view?room=${r}&scene=1#key=${vk}`),
-    linkRow("Programa con fondo transparente (para tus propias escenas)", `${origin()}/view?room=${r}&scene=1&transparent=1#key=${vk}`),
+    linkRow("Programa completo (escena, con banners y marca)", `${origin()}/view?room=${r}&scene=1&${obsSizing()}#key=${vk}`),
+    linkRow("Programa con fondo transparente (para tus propias escenas)", `${origin()}/view?room=${r}&scene=1&transparent=1&${obsSizing()}#key=${vk}`),
     linkRow("Invitación para invitados (entran directo al backstage)", inviteURL()),
     linkRow("WHEP del programa (reproductores WHEP / OBS 31+)", `${origin()}/whep/${r}/program`),
     linkRow("Clave WHEP (Bearer)", keys.viewKey),
   );
-  box.append(linkRow("Pantalla virtual (programa limpio, sin textos de estado)", `${origin()}/view?room=${r}&scene=1&status=0#key=${vk}`));
+  box.append(linkRow("Pantalla virtual (programa limpio, sin textos de estado)", `${origin()}/view?room=${r}&scene=1&status=0&${obsSizing()}#key=${vk}`));
   for (const n of SCENES.slice(1)) if (sceneOf(n).stage.length) box.append(linkRow(`Escena ${n} (${sceneOf(n).stage.length} en escena)`, sceneURL(n)));
   box.append(linkRow("Co-director (control total del estudio: compártelo solo con quien produce contigo)", `${origin()}/studio?room=${r}#key=${encodeURIComponent(hostKey)}`));
   for (const [id, s] of sources) box.append(linkRow(`Cámara: ${(state.labels && state.labels[id]) || s.name}${s.kind === "screen" ? " · pantalla" : ""}`, obsURL(id)));
@@ -694,7 +742,7 @@ function activateTab(name) {
   if (name === "obs") renderObs();
 }
 $$("#tabs button").forEach((b) => (b.onclick = () => activateTab(b.dataset.tab)));
-["#obsCover", "#obsMute", "#obsLabel", "#obsTransparent"].forEach((sel) => $(sel).addEventListener("change", renderObs));
+["#obsCover", "#obsMute", "#obsLabel", "#obsTransparent", "#obsQuality", "#obsFPS"].forEach((sel) => $(sel).addEventListener("change", renderObs));
 
 function flyReaction(e) {
   const n = el("div", { class: "reaction-fly", text: e });
@@ -737,6 +785,10 @@ function closeRemote() {
 }
 
 sig.on("report", (m) => {
+  if (m.action === "quality" && m.value?.stream) {
+    const source = sources.get(m.value.stream);
+    if (source) { source.sendHeight = m.value.quality; toast(`Calidad aplicada: ${m.value.width}×${m.value.height}`, "ok"); }
+  }
   if (!remote || m.peerId !== remote.peerId) return;
   if (m.action === "devices" || m.action === "quality") { remote.snap = m.value; renderRemote(); if (m.action === "quality") toast("Calidad aplicada", "ok"); }
   if (m.action === "stats") {
@@ -846,3 +898,57 @@ function renderInvite() { const i = $("#invURL"); if (i) i.value = inviteURL(); 
 $$("#inviteOpts select, #inviteOpts input[type=checkbox], #inviteOpts input[type=number]").forEach((x) => x.addEventListener("change", renderInvite));
 $("#invCopy").onclick = () => copy(inviteURL());
 renderInvite();
+
+window.addEventListener("pagehide", () => { telemetry.destroy(); cinema.destroy(); comp.stop(); scenePrev.stop(); });
+
+// Persistence is opt-in and host-only. Server state saves as it changes;
+// these controls also retain local production settings without extending TTL.
+let persistence = null, optionsSaveTimer = null;
+const optionIDs = ["obsQuality","obsFPS","obsCover","obsMute","obsLabel","obsTransparent","vKbps","fps","invQuality","invBitrate","invCodec","invEffect","invMuted","invVideoMute","invStereo","invAudioOnly"];
+function roomOptions() {
+  return { controls: Object.fromEntries(optionIDs.map(id => { const e=$("#"+id); return [id,e.type === "checkbox" ? e.checked : e.value]; })), prefs, dests, monitorOn, editScene };
+}
+function renderPersistence(info, restore = false) {
+  persistence = info;
+  $("#persistSave").disabled = !info.available || !info.password;
+  $("#persistForget").classList.toggle("hidden", !info.enabled);
+  $("#persistStatus").textContent = !info.available ? "El servidor no tiene almacenamiento configurado." : !info.password ? "Crea una sala con contraseña para guardarla." : !info.enabled ? "Esta sala todavía no está guardada." : info.expires ? "Guardada hasta " + new Date(info.expires).toLocaleString() : "Guardada sin caducidad.";
+  if (restore && info.enabled) {
+    $("#persistDays").value = String(info.days);
+    const opt=info.options || {};
+    for (const id of optionIDs) if (Object.hasOwn(opt.controls || {}, id)) {
+      const e=$("#"+id); if (e.type === "checkbox") e.checked=!!opt.controls[id]; else e.value=String(opt.controls[id]);
+    }
+    if (opt.prefs && typeof opt.prefs === "object") Object.assign(prefs,opt.prefs);
+    if (Array.isArray(opt.dests)) { dests=opt.dests; saveDests(); }
+    if (typeof opt.monitorOn === "boolean") { monitorOn=opt.monitorOn; syncMonitor(); }
+    if (SCENES.includes(opt.editScene)) editScene=opt.editScene;
+    renderObs(); renderInvite();
+  }
+  savedRooms[room]={...savedRooms[room], persistent:info.enabled, expires:info.expires, title:state.title};
+  writeStored("swr.rooms",savedRooms);
+  const box=$("#persistentParticipants"); box.replaceChildren();
+  if (!info.enabled) return;
+  for (const [pass,name] of Object.entries(info.participants || {})) {
+    const fragment=new URLSearchParams({invite:keys.inviteKey,participant:pass});
+    const url=`${origin()}/guest?room=${encodeURIComponent(room)}&label=${encodeURIComponent(name)}#${fragment}`;
+    box.append(el("div",{class:"row"},el("span",{class:"grow",text:name}),el("button",{class:"small",text:"Enlace personal",onclick:()=>copy(url)})));
+  }
+  for (const [id,source] of Object.entries(info.sources || {})) {
+    box.append(el("div",{class:"row"},el("span",{class:"grow",text:state.labels?.[id] || source.kind || id}),el("button",{class:"small",text:"Link OBS guardado",onclick:()=>copy(obsURL(id))})));
+  }
+}
+sig.on("persistence",m=>renderPersistence(m.persistence));
+async function saveRoomOptions(action="") {
+  const response=await fetch(`/api/rooms/${encodeURIComponent(room)}/persistence${action === "options" ? "?auto=1" : ""}`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+hostKey},body:JSON.stringify({days:Number($("#persistDays").value),options:roomOptions()})});
+  const result=await response.json(); if (!response.ok) throw new Error(result.error || "No se pudo guardar la sala");
+  renderPersistence(result);
+}
+$("#persistSave").onclick=async()=>{ try { await saveRoomOptions(); toast("Sala y ajustes guardados"); } catch(e) { toast(e.message,"err"); } };
+$("#persistForget").onclick=async()=>{ try { await sig.request({type:"forget-room"}); toast("Persistencia desactivada; la sala actual sigue abierta"); } catch(e) { toast(e.message,"err"); } };
+function scheduleRoomOptions() {
+  if (!persistence?.enabled) return;
+  clearTimeout(optionsSaveTimer);
+  optionsSaveTimer=setTimeout(()=>saveRoomOptions("options").catch(e=>toast(e.message,"err")),500);
+}
+for (const id of optionIDs) $("#"+id).addEventListener("change",scheduleRoomOptions);

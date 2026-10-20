@@ -16,7 +16,9 @@ import (
 
 // Msg is the single signalling envelope (JSON over WebSocket).
 type Msg struct {
-	Type string `json:"type"`
+	Type        string           `json:"type"`
+	Persistent  bool             `json:"persistent,omitempty"`
+	Persistence *PersistenceInfo `json:"persistence,omitempty"`
 
 	// identity / auth
 	Room     string `json:"room,omitempty"`
@@ -79,6 +81,7 @@ type Peer struct {
 	mu              sync.Mutex
 	mic             bool
 	cam             bool
+	network         *NetworkInfo
 	screenAllowed   bool
 	screenRequested bool
 	screenEpoch     uint64
@@ -148,7 +151,7 @@ func (p *Peer) Info(stage []string) PeerInfo {
 			onStage = true
 		}
 	}
-	return PeerInfo{ID: p.ID, Name: p.Name, Role: p.Role, Mic: p.mic, Cam: p.cam, Hand: p.hand, Stage: onStage, ScreenAllowed: p.screenAllowed, ScreenRequested: p.screenRequested}
+	return PeerInfo{ID: p.ID, Name: p.Name, Role: p.Role, Mic: p.mic, Cam: p.cam, Hand: p.hand, Stage: onStage, ScreenAllowed: p.screenAllowed, ScreenRequested: p.screenRequested, Network: p.network}
 }
 
 // Send queues a message; slow consumers are dropped instead of blocking the room.

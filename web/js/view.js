@@ -9,6 +9,8 @@
 //   &audioonly=1 sound only · &status=0 hide status text · &transparent=1
 //   &stats=1 show resolution / fps / bitrate overlay
 import { $, params, hashParams, Signal, subscribe } from "./rtc.js";
+import { singleOutput } from "./output-quality.js";
+import { watchConnection } from "./connection-health.js";
 import { Compositor, programGain } from "./compositor.js";
 
 const room = (params.get("room") || "").toLowerCase();
@@ -41,6 +43,29 @@ const available = new Map();
 const retries = new Map();
 let statsTimer;
 const sig = new Signal();
+let compositor, output, switching = false, triedLocal = false;
+const explicitRoute = params.has("network");
+const configureRoute = () => {
+  if (!explicitRoute && !triedLocal && sig.ice.some(s => [s.urls].flat().some(u => /^turns:.*:443(?:\?|$)/i.test(u)))) sig.mediaMode = "tls";
+};
+if (only && params.has("quality")) {
+  const canvas = $("#singleOut"); canvas.classList.remove("hidden");
+  single.classList.add("output-input"); canvas.style.transform = single.style.transform;
+  output = singleOutput(canvas, single, params.get("quality"), params.get("fps"), () => document.body.classList.contains("contain"));
+}
+async function recover(info, entry) {
+  if (sources.get(info.id) !== entry) return;
+  sources.delete(info.id); entry.stopWatch?.(); clearTimeout(entry.frameTimer); entry.sub?.close(); entry.video.srcObject = null;
+  const audio = audios.get(info.id); if (audio) { audio.pause(); audio.srcObject = null; audios.delete(info.id); }
+  if (!explicitRoute && !triedLocal && sig.localIce.length && !switching) {
+    switching = true; triedLocal = true; sig.mediaMode = "local"; say("probando conexión alternativa…");
+    try { await sig.reconnect(); } catch { say("esperando conexión…"); } finally { switching = false; }
+    return;
+  }
+  say("esperando señal…");
+  clearTimeout(retries.get(info.id));
+  retries.set(info.id, setTimeout(() => { retries.delete(info.id); if (available.has(info.id)) watch(available.get(info.id)); }, 1000));
+}
 
 function playAudio(id, stream) {
   if (muted || audios.has(id)) return;
@@ -64,39 +89,38 @@ async function watch(info) {
   if (info.kind === "program" && scene) return;
   if (only && info.id !== only) return;
   if (sources.has(info.id)) return;
-  const v = document.createElement("video");
+  const v = only ? single : document.createElement("video");
   v.muted = true; v.playsInline = true; v.autoplay = true;
   const entry = { video: v, kind: info.kind, name: info.id, stream: null };
   sources.set(info.id, entry);
   try {
-    const sub = await subscribe(sig, info.id);
-    if (sources.get(info.id) !== entry) { sub.pc.close(); return; }
+    const sub = await subscribe(sig, info.id, { timeout: 10000 });
+    if (sources.get(info.id) !== entry) { sub.close(); return; }
     entry.stream = sub.stream; entry.sub = sub; entry.name = sub.name || info.id;
     v.srcObject = sub.stream;
-    await v.play().catch(() => {});
+    v.play().catch(() => {});
     if (only) {
       framing(info.kind);
       const s = $("#single");
       s.srcObject = sub.stream; s.muted = muted; s.volume = baseVol; s.classList.remove("hidden");
       if (params.get("label") === "1" || params.has("showlabel")) $("#label").textContent = sub.name || "";
       if (params.get("stats") === "1") startStats(sub.pc);
-      s.play().catch(() => { s.muted = true; s.play(); });
+      s.play().catch(() => { s.muted = true; s.play().catch(() => {}); });
     } else playAudio(info.id, sub.stream);
+    entry.stopWatch = watchConnection(sub.pc, () => recover(info, entry));
+    entry.frameTimer = setTimeout(() => {
+      if (v.readyState < 2 && sub.stream.getVideoTracks().length) recover(info, entry);
+    }, 8000);
     syncAudio();
     say("");
-  } catch (e) {
-    if (sources.get(info.id) !== entry) return;
-    sources.delete(info.id); say("esperando señal…");
-    clearTimeout(retries.get(info.id));
-    retries.set(info.id, setTimeout(() => { retries.delete(info.id); if (available.has(info.id)) watch(available.get(info.id)); }, 2000));
-  }
+  } catch { await recover(info, entry); }
 }
 
 function resetMedia() {
   clearInterval(statsTimer);
   for (const timer of retries.values()) clearTimeout(timer);
   retries.clear(); available.clear();
-  for (const source of sources.values()) { source.sub?.pc.close(); source.video.srcObject = null; }
+  for (const source of sources.values()) { source.stopWatch?.(); clearTimeout(source.frameTimer); source.sub?.close(); source.video.srcObject = null; }
   sources.clear();
   for (const audio of audios.values()) { audio.pause(); audio.srcObject = null; audio.remove(); }
   audios.clear(); single.srcObject = null;
@@ -107,20 +131,20 @@ sig.on("state", (m) => { state = m.state; syncAudio(); });
 sig.on("stream-added", (m) => discover([m.info]));
 sig.on("stream-removed", (m) => {
   available.delete(m.stream); clearTimeout(retries.get(m.stream)); retries.delete(m.stream);
-  const s = sources.get(m.stream); s?.sub?.pc.close(); if (s) s.video.srcObject = null; sources.delete(m.stream);
+  const s = sources.get(m.stream); s?.stopWatch?.(); clearTimeout(s?.frameTimer); s?.sub?.close(); if (s) s.video.srcObject = null; sources.delete(m.stream);
   const audio = audios.get(m.stream); if (audio) { audio.pause(); audio.srcObject = null; audio.remove(); } audios.delete(m.stream);
   if (only === m.stream) { clearInterval(statsTimer); single.srcObject = null; say("señal perdida, reintentando…"); }
 });
 sig.on("disconnected", () => { resetMedia(); say("reconectando…"); });
-sig.on("reconnected", (m) => { state = m.state; discover(m.streams); });
+sig.on("reconnected", (m) => { state = m.state; configureRoute(); discover(m.streams); syncAudio(); });
 
 sig.connect({ type: "join", room, role: "viewer", key, name: "OBS" })
   .then((m) => {
-    state = m.state;
+    state = m.state; configureRoute();
     if (scene && !only) {
       const c = $("#out");
       c.classList.remove("hidden");
-      new Compositor(c, sources, view, { transparent: params.get("transparent") === "1" }).start();
+      compositor = new Compositor(c, sources, view, { transparent: params.get("transparent") === "1", height: params.get("quality"), fps: params.get("fps") }); compositor.start();
     }
     discover(m.streams);
     say(only ? "esperando señal…" : "");
@@ -144,7 +168,7 @@ function startStats(pc) {
   }, 1000);
 }
 
-window.addEventListener("pagehide", () => { sig.close(); resetMedia(); });
+window.addEventListener("pagehide", () => { sig.close(); resetMedia(); compositor?.stop(); output?.stop(); });
 
 // Double-click = full screen (handy for the "pantalla virtual" window on a projector or second monitor).
 document.addEventListener("dblclick", () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {}); else document.exitFullscreen(); });

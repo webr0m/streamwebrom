@@ -94,7 +94,7 @@ export class Signal extends EventTarget {
     // same tab) skip the waiting room instead of getting stuck in it.
     const passKey = joinMsg.room ? `swr.rejoin.${joinMsg.room}` : "";
     if (joinMsg.role === "guest" && !joinMsg.rejoin && passKey) {
-      try { const p = sessionStorage.getItem(passKey); if (p) joinMsg = { ...joinMsg, rejoin: p }; } catch {}
+      try { const p = sessionStorage.getItem(passKey) || localStorage.getItem(passKey); if (p) joinMsg = { ...joinMsg, rejoin: p }; } catch {}
     }
     this.joinMsg = joinMsg;
     return new Promise((resolve, reject) => {
@@ -116,10 +116,13 @@ export class Signal extends EventTarget {
           this.cancelJoin = null;
           clearTimeout(deadline);
           this.retry = 0; welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.localIce = m.localIce || []; this.trickle = m.trickle === true; this.flush(); resolve(m);
-          if (m.rejoin) { this.joinMsg = { ...this.joinMsg, rejoin: m.rejoin }; try { passKey && sessionStorage.setItem(passKey, m.rejoin); } catch {} }
+          if (m.rejoin) { this.joinMsg = { ...this.joinMsg, rejoin: m.rejoin }; try { if (passKey) { sessionStorage.setItem(passKey, m.rejoin); if (m.persistent) localStorage.setItem(passKey, m.rejoin); } } catch {} }
         }
         // Waiting in the lobby counts as connected: if the socket drops while
         // waiting, reconnect and knock again instead of leaving a dead page.
+        if (m.type === "room-persistent" && joinMsg.role === "guest" && passKey) {
+          try { if (m.persistent && this.joinMsg.rejoin) localStorage.setItem(passKey,this.joinMsg.rejoin); else localStorage.removeItem(passKey); } catch {}
+        }
         if (m.type === "waiting") { this.cancelJoin = null; clearTimeout(deadline); welcomed = true; this.everWelcomed = true; resolve(m); }
         if (m.type === "error" && !welcomed && !m.reqId) {
           // Authentication failure is terminal, including after a reconnect.
@@ -127,7 +130,7 @@ export class Signal extends EventTarget {
         }
         if (m.type === "kicked" || m.type === "denied") {
           this.closed = true;
-          try { passKey && sessionStorage.removeItem(passKey); } catch {}
+          try { if (passKey) { sessionStorage.removeItem(passKey); localStorage.removeItem(passKey); } } catch {}
           clearInterval(this.keepalive);
         }
         if (m.reqId && this.pending.has(m.reqId)) {
@@ -376,7 +379,7 @@ async function tune(senders, opts) {
 }
 
 /** Subscribe to a stream id. Resolves with { stream, pc, close() }. */
-export async function subscribe(sig, id) {
+export async function subscribe(sig, id, opts = {}) {
   const socket = sig.ws;
   const pc = new RTCPeerConnection(iceConfiguration(sig.ice, sig.mediaMode));
   const ice = incrementalICE(sig, pc);
@@ -395,7 +398,7 @@ export async function subscribe(sig, id) {
     if (sig.ws !== socket || ice.signal.aborted) throw new Error("Se perdió la conexión con el servidor.");
     sig.send({ type: "answer", stream: id, sdp: pc.localDescription });
     ice.ready();
-    await waitConnected(pc, sig.ice, 30000, ice.signal);
+    await waitConnected(pc, sig.ice, opts.timeout || 30000, ice.signal);
   } catch (e) {
     ice.close();
     pc.close();

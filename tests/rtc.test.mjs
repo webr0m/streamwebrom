@@ -168,3 +168,23 @@ test('signalling loss cancels a pending media connection immediately',async()=>{
   const pending=assert.rejects(waitConnected(pc,[],30000,controller.signal),/perdió la conexión con el servidor/);
   controller.abort();await pending;
 });
+
+test('a saved room retains participant identity across tabs and clears it on revocation',async()=>{
+  const persistent=new Map();globalThis.localStorage={getItem:k=>persistent.get(k),setItem:(k,v)=>persistent.set(k,v),removeItem:k=>persistent.delete(k)};
+  try {
+    const s=signal(),ws=await connected(s);
+    ws.receive({type:'room-persistent',persistent:true});
+    assert.equal(persistent.get('swr.rejoin.test-room'),'pass');
+    storage.clear();
+    const second=signal(),joining=second.connect({type:'join',role:'guest',room:'test-room'});
+    const socket=Socket.sockets.at(-1);socket.open();
+    assert.equal(socket.sent[0].rejoin,'pass');
+    socket.receive({type:'welcome',rejoin:'pass',persistent:true});await joining;
+    socket.receive({type:'kicked'});
+    assert.equal(persistent.has('swr.rejoin.test-room'),false);
+  } finally {delete globalThis.localStorage}
+});
+test('disabling room persistence removes durable identity while retaining session reconnection',async()=>{
+  const persistent=new Map();globalThis.localStorage={getItem:k=>persistent.get(k),setItem:(k,v)=>persistent.set(k,v),removeItem:k=>persistent.delete(k)};
+  try {const s=signal(),ws=await connected(s);ws.receive({type:'room-persistent',persistent:true});ws.receive({type:'room-persistent',persistent:false});assert.equal(persistent.size,0);assert.equal(storage.get('swr.rejoin.test-room'),'pass')} finally {delete globalThis.localStorage}
+});

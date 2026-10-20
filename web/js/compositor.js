@@ -3,6 +3,7 @@
 // code renders the studio preview, the OBS "scene" output and the program
 // sent to YouTube/Twitch, so what you see is exactly what goes out.
 
+import { outputSize, outputFPS } from "./output-quality.js";
 import { stickerById } from "./stickers.js";
 
 export const W = 1920, H = 1080;
@@ -120,8 +121,10 @@ export class Compositor {
    */
   constructor(canvas, sources, getState, opts = {}) {
     this.c = canvas;
-    canvas.width = W; canvas.height = H;
+    [canvas.width, canvas.height] = outputSize(opts.height);
+    this.scale = canvas.width / W; this.fps = outputFPS(opts.fps);
     this.ctx = canvas.getContext("2d", { alpha: !!opts.transparent });
+    this.ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
     this.sources = sources;
     this.getState = getState;
     this.transparent = !!opts.transparent;
@@ -134,9 +137,11 @@ export class Compositor {
     this.running = true;
     // rAF stops when the tab is hidden (OBS browser sources are often
     // "hidden"), so drive frames with a worker-free timer as well.
-    const loop = () => { if (!this.running) return; this.draw(); this.raf = requestAnimationFrame(loop); };
+    let last = -Infinity;
+    const draw = () => { if (performance.now() - last >= 1000 / this.fps - 2) { last = performance.now(); this.draw(); } };
+    const loop = () => { if (!this.running) return; draw(); this.raf = requestAnimationFrame(loop); };
     this.raf = requestAnimationFrame(loop);
-    this.timer = setInterval(() => { if (document.hidden) this.draw(); }, 1000 / 30);
+    this.timer = setInterval(() => { if (document.hidden) draw(); }, 1000 / this.fps);
   }
 
   stop() { this.running = false; cancelAnimationFrame(this.raf); clearInterval(this.timer); }

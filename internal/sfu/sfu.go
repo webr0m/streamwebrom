@@ -524,6 +524,13 @@ func (e *Engine) attach(s *Stream, pc *webrtc.PeerConnection) (*Subscriber, erro
 		sub.removes = append(sub.removes, f.AddSink(sink))
 	}
 	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
+		if st == webrtc.PeerConnectionStateConnected {
+			// AddSink's initial PLI precedes ICE/DTLS. Ask again only once the
+			// receiver can accept RTP instead of waiting for the 3s safety PLI.
+			for _, f := range s.Forwarders() {
+				f.RequestKeyframe()
+			}
+		}
 		if st == webrtc.PeerConnectionStateFailed || st == webrtc.PeerConnectionStateClosed {
 			sub.Close()
 		}

@@ -164,6 +164,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.clientConfig)
 	mux.HandleFunc("POST /api/rooms", s.createRoom)
 	mux.HandleFunc("GET /api/rooms/{room}", s.roomInfo)
+	mux.HandleFunc("POST /api/rooms/{room}/persistence", s.saveRoom)
 	mux.HandleFunc("POST /api/route-check", s.createRouteCheck)
 	mux.HandleFunc("DELETE /api/route-check/{room}", s.releaseRouteCheck)
 	mux.HandleFunc("GET /api/admin/stats", s.admin(s.stats))
@@ -327,6 +328,28 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 201, keys)
+}
+
+// Private saved-room settings can contain local background images larger than
+// signalling frames. Authenticate first, then enforce a separate bounded body.
+func (s *Server) saveRoom(w http.ResponseWriter, r *http.Request) {
+	room := s.hub.Room(r.PathValue("room"))
+	key := bearer(r)
+	if room == nil || !room.CheckHost(key) {
+		writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+		return
+	}
+	value, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 6<<20))
+	if err != nil {
+		writeJSON(w, 413, map[string]string{"error": "Ajustes demasiado grandes (máximo 6 MB)"})
+		return
+	}
+	info, err := s.hub.SaveRoom(room.ID, key, value, r.URL.Query().Get("auto") == "1")
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 200, info)
 }
 
 func (s *Server) roomInfo(w http.ResponseWriter, r *http.Request) {

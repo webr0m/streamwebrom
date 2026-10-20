@@ -37,12 +37,12 @@ const join = () => {
 $("#join").addEventListener("click", join);
 $("#joinRoom").addEventListener("keydown", (e) => e.key === "Enter" && join());
 
-const rooms = Object.values(saved()).filter((r) => r && typeof r.room === "string" && typeof r.hostKey === "string").sort((a, b) => b.created - a.created).slice(0, 5);
+const rooms = Object.values(saved()).filter((r) => r && typeof r.room === "string" && typeof r.hostKey === "string").sort((a, b) => Number(!!b.persistent)-Number(!!a.persistent) || b.created-a.created).filter((r,i,all)=>r.persistent || all.slice(0,i).filter(x=>!x.persistent).length<5);
 if (rooms.length) {
   $("#recent").append(el("label", { text: "Tus estudios recientes" }));
   for (const r of rooms) {
     $("#recent").append(el("div", { class: "item" },
-      el("span", { class: "grow", text: r.title || r.room }),
+      el("span", { class: "grow", text: (r.title || r.room) + (r.persistent ? (r.expires && r.expires < Date.now() ? " · caducada" : " · guardada") : "") }),
       el("a", { class: "btn small", href: `/studio?room=${encodeURIComponent(r.room)}#key=${encodeURIComponent(r.hostKey)}`, text: "Abrir" })));
   }
 }

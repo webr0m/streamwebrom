@@ -15,6 +15,8 @@ import { remoteSnapshot, remoteStats, CAMCTL } from "./remote.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
 import { automaticRoute } from "./network.js";
 import { callGrid } from "./call-grid.js";
+import { roomTelemetry, metricText } from "./telemetry.js";
+import { immersive } from "./immersive.js";
 import { watchConnection } from "./connection-health.js";
 
 const room = (params.get("room") || "").toLowerCase();
@@ -26,7 +28,18 @@ const extraCams = new Map(); // pubId -> { pub, media }
 let state = {};
 const remotes = new Map(); // streamId -> { tile, sub, video }
 const sig = new Signal();
-const gridLayout = callGrid($("#grid"), $("#restoreGrid"));
+const cinema = immersive($("#call"), $("#callFullscreen"), $("#exitFullscreen"));
+const telemetry = roomTelemetry(sig, () => pub?.pc, $("#roomPing"), peers => {
+  for (const tile of document.querySelectorAll("#grid .tile")) {
+    const label = tile.querySelector(".tile-latency");
+    if (label) label.textContent = metricText(peers.get(tile.dataset.peer));
+  }
+});
+$("#networkToggle").onclick = () => {
+  const hidden = $("#call").classList.toggle("network-hidden");
+  $("#networkToggle").setAttribute("aria-pressed", String(!hidden));
+};
+const gridLayout = callGrid($("#grid"), $("#restoreGrid"), $("#reorderGrid"));
 // Even previously shared links start automatically. Manual routing is an
 // optional advanced action for this visit, never required for admission.
 sig.mediaMode = "auto";
@@ -146,7 +159,7 @@ async function join() {
     }
     $("#joinBtn").textContent = "Entrando…";
     const invite = new URLSearchParams(location.hash.slice(1)).get("invite") || "";
-    const m = await sig.connect({ type: "join", room, role: "guest", name, password: $("#pw").value, invite });
+    const m = await sig.connect({ type: "join", room, role: "guest", name, password: $("#pw").value, invite, rejoin: new URLSearchParams(location.hash.slice(1)).get("participant") || undefined });
     if (m.type === "waiting") { $("#pre").classList.add("hidden"); $("#waiting").classList.remove("hidden"); return; }
     await enter(m);
   } catch (e) {
@@ -222,7 +235,7 @@ sig.on("disconnected", () => {
     connectionStatus("Recuperando la conexión…");
     lossTimer = setTimeout(() => {
       if (!sig.closed && sig.ws?.readyState !== 1 && !reconnectingGuest) connectionStatus("Se perdió la conexión con el servidor.", true);
-    }, 6000);
+    }, 10000);
   }
 });
 sig.on("welcome", (m) => {
@@ -313,23 +326,29 @@ async function remoteControl(action, v) {
     case "stats":
       return report("stats", await remoteStats(pub));
     case "quality": {
+      const extra = v?.stream ? extraCams.get(v.stream) : null;
+      if (v?.stream && v.stream !== pub?.id && !extra) throw new Error("La cámara solicitada ya no está disponible");
+      const targetMedia = extra?.media || media, targetPrefs = extra ? { ...prefs } : prefs;
       const h = Number(v?.height), fps = Number(v?.fps), kbps = Number(v?.kbps);
-      if (h && h >= 144 && h <= 2160) prefs.quality = String(h);
-      if (fps && fps >= 1 && fps <= 60) prefs.fps = String(fps);
-      remoteKbps = kbps >= 50 && kbps <= 50000 ? Math.round(kbps) : (v?.kbps === 0 ? 0 : remoteKbps);
-      const t = camTrack();
+      if (h && h >= 144 && h <= 2160) targetPrefs.quality = String(h);
+      if (fps && fps >= 1 && fps <= 60) targetPrefs.fps = String(fps);
+      const rate = kbps >= 50 && kbps <= 50000 ? Math.round(kbps) : kbpsFor(Number(targetPrefs.quality));
+      if (!extra) remoteKbps = rate;
+      const track = targetMedia.getVideoTracks()[0], raw = track?.raw || track;
       let ok = false;
-      if (t && t.applyConstraints) { // with effects this is the raw camera; the effect canvas follows its size
-        try {
-          await t.applyConstraints({ width: { ideal: Math.round(Number(prefs.quality) * 16 / 9) }, height: { ideal: Number(prefs.quality) }, frameRate: { ideal: Number(prefs.fps) } });
-          ok = true;
-        } catch (e) { console.warn("applyConstraints", e); }
+      if (raw?.applyConstraints) {
+        try { await raw.applyConstraints({ width: { ideal: Math.round(Number(targetPrefs.quality) * 16 / 9) }, height: { ideal: Number(targetPrefs.quality) }, frameRate: { ideal: Number(targetPrefs.fps) } }); ok = true; }
+        catch (e) { console.warn("applyConstraints", e); }
       }
-      if (!ok && t) await swapDevices("video", true);
-      if (pub) await pub.setBitrate(videoKbps(), Number(prefs.fps) || 30);
-      savePrefs(prefs);
-      toast(`El anfitrión ajustó tu video: ${prefs.quality}p · ${prefs.fps} fps · ${videoKbps()} kbps`);
-      return report("quality", await remoteSnapshot(media, prefs, { videoKbps: videoKbps() }));
+      if (!ok && raw) {
+        if (extra) throw new Error("Esta cámara adicional no permite aplicar esa resolución");
+        await swapDevices("video", true);
+      }
+      const targetPub = extra?.pub || pub;
+      if (targetPub) await targetPub.setBitrate(rate, Number(targetPrefs.fps) || 30);
+      if (!extra) savePrefs(prefs);
+      toast(`El anfitrión ajustó tu video: ${targetPrefs.quality}p · ${targetPrefs.fps} fps · ${rate} kbps`);
+      return report("quality", { ...await remoteSnapshot(extra?.media || media, targetPrefs, { videoKbps: rate }), stream: targetPub?.id });
     }
     case "device": {
       const kind = v?.kind === "audio" ? "audio" : "video";
@@ -404,31 +423,39 @@ async function watch(id, kind, owner, name) {
     const sub = await subscribe(sig, id);
     if (remotes.get(id) !== pending) { sub.close(); return; }
     const lvl = sub.stream.getAudioTracks().length ? levelMeter(sub.stream) : () => 0;
-    const tile = addTile(id, sub.stream, sub.name || name || "Invitado", false, lvl, kind);
-    remotes.set(id, { sub, tile, video: tile.querySelector("video") });
+    const tile = addTile(id, sub.stream, sub.name || name || "Invitado", false, lvl, kind, owner);
+    remotes.set(id, { sub, tile, level: lvl, video: tile.querySelector("video") });
   } catch { if (remotes.get(id) === pending) remotes.delete(id); }
 }
 function unwatch(id) {
   const r = remotes.get(id);
-  r?.sub?.close(); r?.tile?.remove();
+  r?.sub?.close(); r?.level?.close?.(); r?.tile?.remove();
   remotes.delete(id);
 }
 
-function addTile(id, stream, name, mine, level, kind = "camera") {
+function addTile(id, stream, name, mine, level, kind = "camera", owner = "") {
   const v = el("video", { playsinline: true, autoplay: true });
   v.muted = mine || deafened; v.srcObject = stream;
   if (mine) mirrorPreview(v); else applySink(v, prefs.speaker);
-  v.play().catch(() => { v.muted = true; v.play().catch(() => {}); document.addEventListener("click", () => { v.muted = mine || deafened; v.play(); }, { once: true }); });
+  v.play().catch(() => { v.muted = true; v.play().catch(() => {}); document.addEventListener("click", () => { v.muted = mine || deafened; v.play().catch(() => {}); }, { once: true }); });
   const vol = mine ? null : el("input", { type: "range", min: 0, max: 1, step: 0.05, value: 1, title: "Volumen (solo para ti)", class: "tilevol", oninput: (e) => { v.volume = Number(e.target.value); } });
-  const tile = el("div", { class: "tile", "data-id": id, "data-name": name, "data-kind": kind }, v,
+  const tile = el("div", { class: "tile", "data-id": id, "data-name": name, "data-kind": kind, "data-peer": mine ? myId : owner }, v,
+    el("span", { class: "tile-latency", title: "Latencia de ida y vuelta (RTT) de este participante al servidor; no es el retraso total del video", text: "RTT —" }),
     el("button", { class: "tile-focus", type: "button", "aria-label": `Ampliar video de ${name}`, "aria-pressed": "false" }),
     el("span", { class: "name", text: name }), vol);
-  $("#grid").append(tile);
+  $("#grid").append(tile); updateHiddenCameras(); telemetry.refresh();
   const t = setInterval(() => { if (!tile.isConnected) return clearInterval(t); tile.classList.toggle("speaking", level() > 0.15); }, 150);
   return tile;
 }
 
+function updateHiddenCameras() {
+  for (const tile of document.querySelectorAll("#grid .tile")) {
+    const id = tile.dataset.id === "me" ? pub?.id : tile.dataset.id;
+    tile.classList.toggle("video-hidden", !!state.hidden?.[id]);
+  }
+}
 function updateStageBadge() {
+  updateHiddenCameras();
   const mine = [pub?.id, screenPub?.id, ...extraCams.keys()].filter(Boolean);
   const live = mine.some((id) => (state.stage || []).includes(id));
   const progMuted = state.stageMuted || mine.some((id) => state.muted?.[id]);
@@ -555,10 +582,11 @@ async function addExtraCam(dev) {
   warnings.forEach((w) => toast(w, "err"));
   if (!stream.getVideoTracks().length) return;
   const name = `${$("#name").value} · ${(dev.label || "cámara 2").slice(0, 24)}`;
+  let slot=1; while ([...extraCams.values()].some(e=>e.slot===slot)) slot++;
   let p;
-  try { p = await publish(sig, stream, { ...pubOpts(name), name, stream: crypto.randomUUID() }); }
+  try { p = await publish(sig, stream, { ...pubOpts(name), name, stream: "camera-slot-" + slot }); }
   catch (e) { stream.getTracks().forEach(t => t.stop()); if (!sig.closed) toast(e.message, "err"); return; }
-  extraCams.set(p.id, { pub: p, media: stream });
+  extraCams.set(p.id, { pub: p, media: stream, slot });
   const tile = addTile(p.id, stream, name + " (tú)", true, () => 0);
   tile.querySelector(".name").after(el("button", { class: "small tileclose", onclick: () => { p.stop(); stream.getTracks().forEach((t) => t.stop()); extraCams.delete(p.id); tile.remove(); }, text: "✕" }));
   stream.getVideoTracks()[0].onended = () => { p.stop(); extraCams.delete(p.id); tile.remove(); };
@@ -570,7 +598,7 @@ function leave(text) {
   // Closing signalling first avoids queued unpublish operations delaying the
   // server's leave cleanup when a TURN connection takes time to shut down.
   sig.close(); pub?.stop(); screenPub?.stop(); for (const x of extraCams.values()) x.pub.stop();
-  clearTimeout(lossTimer); clearInterval(meterTimer); stopMediaWatch(); gridLayout.destroy();
+  clearTimeout(lossTimer); clearInterval(meterTimer); stopMediaWatch(); gridLayout.destroy(); telemetry.destroy(); cinema.destroy();
   screenMedia?.getTracks().forEach(t => t.stop());
   for (const x of extraCams.values()) x.media.getTracks().forEach(t => t.stop());
   media?.getTracks().forEach((t) => t.stop());

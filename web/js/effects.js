@@ -10,8 +10,10 @@
 //   is scaled up with smoothing, which gives soft edges and keeps CPU low.
 // - Blur is done by down-scaling and up-scaling (works everywhere, including
 //   Safari, where canvas `filter` is missing).
-// - A Worker drives the frame loop so it keeps running when the tab is in the
-//   background (timers in hidden tabs are throttled to 1 Hz).
+// - Segmentation runs in a dedicated Worker with one transferable bitmap in
+//   flight. Camera rendering stays fresh while the mask is being calculated.
+import { segmentationClient } from "./segmentation-client.js";
+import { effectBudget } from "./effect-budget.js";
 import { el, toast } from "./rtc.js";
 
 export const EFFECTS = [
@@ -59,25 +61,6 @@ function assetFor(slot, prefs) {
 export const effectActive = (p) => !!p.effect && p.effect !== "none";
 export const needsCamera = (p) => p.effect !== "replace";
 
-// ---------- MediaPipe (lazy) ----------
-let segmenterP = null;
-let segTs = 0; // one strictly increasing integer-ms clock shared by every pipeline (MediaPipe requires it)
-const nextTs = () => (segTs = Math.max(Math.floor(performance.now()), segTs + 1));
-function loadSegmenter() {
-  if (segmenterP) return segmenterP;
-  segmenterP = (async () => {
-    const { ImageSegmenter } = await import("/vendor/mediapipe/vision_bundle.mjs");
-    const fileset = { wasmLoaderPath: "/vendor/mediapipe/vision_wasm_internal.js", wasmBinaryPath: "/vendor/mediapipe/vision_wasm_internal.wasm" };
-    const make = (delegate) => ImageSegmenter.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: "/vendor/mediapipe/selfie_segmenter.tflite", delegate },
-      runningMode: "VIDEO", outputCategoryMask: false, outputConfidenceMasks: true,
-    });
-    try { return await make("GPU"); } catch (e) { console.warn("segmenter GPU", e); return make("CPU"); }
-  })();
-  segmenterP.catch(() => { segmenterP = null; });
-  return segmenterP;
-}
-
 // ---------- frame clock that survives background tabs ----------
 let ticker = null;
 const tickers = new Set();
@@ -85,11 +68,14 @@ function onTick(fn) {
   if (!ticker) {
     try {
       ticker = new Worker(new URL("./ticker.js", import.meta.url));
-      ticker.onmessage = () => tickers.forEach((f) => f());
+      ticker.onmessage = () => { try { tickers.forEach((f) => f()); } finally { ticker?.postMessage(0); } };
     } catch { ticker = { postMessage() {}, fallback: setInterval(() => tickers.forEach((f) => f()), 33) }; }
   }
   tickers.add(fn);
-  return () => tickers.delete(fn);
+  return () => {
+    tickers.delete(fn);
+    if (!tickers.size && ticker) { ticker.terminate?.(); clearInterval(ticker.fallback); ticker = null; }
+  };
 }
 
 function mediaElement(asset) {
@@ -129,6 +115,7 @@ export async function applyEffect(track, p) {
   const mode = p.effect && p.effect !== "none" ? p.effect : "none";
   const flipH = !!p.flipH, flipV = !!p.flipV;
   const fps = Math.min(60, Number(p.fps) || 30);
+  const profile = p.effectPerformance || "fast";
   const set = track?.getSettings?.() || {};
   // Start from the reported settings, then follow the real frame size: phones
   // report landscape settings for portrait frames, and the quality can change
@@ -145,12 +132,8 @@ export async function applyEffect(track, p) {
   const replaceAsset = mode === "replace" ? mediaElement(assetFor("replace", p)) : null;
   if (mode === "replace" && !replaceAsset) toast("Elige una imagen o video para reemplazar tu cámara.", "err");
 
-  // Segmentation for blur/bg.
-  let seg = null;
-  if (mode === "blur" || mode === "blur-strong" || mode === "bg") {
-    try { seg = await loadSegmenter(); }
-    catch (e) { console.warn("segmenter", e); toast("Este navegador no pudo cargar el recorte de fondo; envío la cámara normal.", "err"); return track; }
-  }
+  const segmented = ["blur", "blur-strong", "bg"].includes(mode);
+  let client = null;
   const SW = 256;
   let SH = 2;
   const small = el("canvas");
@@ -160,24 +143,40 @@ export async function applyEffect(track, p) {
   // another width slid the person down the frame.
   const maskC = el("canvas"); maskC.width = 2; maskC.height = 2;
   const mctx = maskC.getContext("2d");
-  let maskData = null, haveMask = false;
+  let maskData = null, haveMask = false, maskAt = 0, maskInterval = 1000 / 12;
   const blurC = el("canvas"); const blurPx = mode === "blur-strong" ? 16 : 40;
   const bctx = blurC.getContext("2d");
   const fg = el("canvas");
   const fctx = fg.getContext("2d");
   function resize(w, h) {
-    W = w; H = h;
+    const bounded = mode === "none" ? { width: w, height: h, maskInterval: 1000 } : effectBudget(profile, w, h);
+    W = bounded.width; H = bounded.height; maskInterval = bounded.maskInterval;
     canvas.width = fg.width = W; canvas.height = fg.height = H;
     SH = Math.max(2, Math.round(SW * H / W));
     small.width = SW; small.height = SH;
     blurC.width = Math.max(2, Math.round(W / blurPx)); blurC.height = Math.max(2, Math.round(H / blurPx));
   }
   resize(W, H);
-  let busy = false, stopped = false, errors = 0;
-  // Adaptive budget: never use more than ~half of the main thread, so chat,
-  // signalling and the UI stay responsive on slow machines. Ticks that arrive
-  // while we're behind are dropped instead of queuing up.
-  let lastRun = 0, cost = 0, lastSeg = 0, segCost = 0;
+  let stopped = false, lastRun = 0, cost = 0, lastSeg = -Infinity, videoClock = -1;
+  const metrics = { frames: 0, renderMs: 0, worker: null, mode: profile, maxInFlight: 1 };
+  if (segmented) {
+    try {
+      client = segmentationClient(W >= H && profile !== "detail", data => {
+        if (stopped || performance.now() - data.captured > 500) return;
+        if (!maskData || maskData.width !== data.width || maskData.height !== data.height) {
+          maskC.width = data.width; maskC.height = data.height; maskData = mctx.createImageData(data.width, data.height);
+        }
+        maskData.data.set(new Uint8Array(data.rgba)); mctx.putImageData(maskData, 0, 0);
+        haveMask = true; maskAt = data.captured;
+      });
+      await client.loaded; metrics.worker = client.metrics;
+    } catch (e) {
+      client?.stop(); cam?.pause(); if (cam) cam.srcObject = null;
+      bgAsset?.pause?.(); replaceAsset?.pause?.();
+      console.warn("segmenter worker", e); toast("No se pudo iniciar el efecto sin bloquear la cámara; envío la cámara normal.", "err");
+      return track;
+    }
+  }
 
   function background() {
     if (mode === "bg") {
@@ -194,12 +193,17 @@ export async function applyEffect(track, p) {
   // Flip what everyone sees (whole output: camera and background).
   const flip = () => ctx.setTransform(flipH ? -1 : 1, 0, 0, flipV ? -1 : 1, flipH ? W : 0, flipV ? H : 0);
   function frame() {
-    if (stopped || busy) return;
+    if (stopped) return;
     const t0 = performance.now();
-    if (t0 - lastRun < Math.max(1000 / fps - 4, cost * 2)) return;
+    if (t0 - lastRun < Math.max(1000 / fps - 3, cost * 1.5)) return;
+    if (cam && cam.currentTime === videoClock) return;
+    if (cam) videoClock = cam.currentTime;
     lastRun = t0;
-    try { flip(); draw(t0); } finally { ctx.setTransform(1, 0, 0, 1, 0, 0); }
+    try { flip(); draw(t0); out.requestFrame?.(); metrics.frames++; }
+    catch (e) { console.warn("effect render", e); }
+    finally { ctx.setTransform(1, 0, 0, 1, 0, 0); cost = cost * .8 + (performance.now() - t0) * .2; metrics.renderMs = cost; }
   }
+  let sourceW = set.width || W, sourceH = set.height || H;
   function draw(t0) {
     if (mode === "replace") {
       ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
@@ -207,53 +211,36 @@ export async function applyEffect(track, p) {
       return;
     }
     if (!cam || cam.readyState < 2) return;
-    if (cam.videoWidth && cam.videoHeight && (cam.videoWidth !== W || cam.videoHeight !== H)) { resize(cam.videoWidth, cam.videoHeight); flip(); }
-    if (mode === "none") { ctx.drawImage(cam, 0, 0, W, H); return; } // flip only
-    busy = true;
-    try {
-      if (t0 - lastSeg >= Math.max(1000 / 30, segCost * 3)) {
-      lastSeg = t0;
-      sctx.drawImage(cam, 0, 0, SW, SH);
-      seg.segmentForVideo(small, nextTs(), (res) => {
-        const m = res.confidenceMasks?.[0];
-        if (!m) return;
-        const mw = m.width || SW, mh = m.height || SH;
-        const f = m.getAsFloat32Array();
-        if (f.length !== mw * mh) return;
-        if (!maskData || maskData.width !== mw || maskData.height !== mh) { maskC.width = mw; maskC.height = mh; maskData = mctx.createImageData(mw, mh); }
-        const d = maskData.data;
-        for (let i = 0, j = 3; i < f.length; i++, j += 4) d[j] = f[i] < 0.25 ? 0 : f[i] > 0.75 ? 255 : (f[i] - 0.25) * 510;
-        mctx.putImageData(maskData, 0, 0);
-        haveMask = true;
-      });
-      segCost = segCost * 0.8 + (performance.now() - t0) * 0.2;
-      }
-      if (!haveMask) { ctx.drawImage(cam, 0, 0, W, H); busy = false; return; } // first frames: plain camera, not an empty background
-      // person = camera masked by the (smoothed, up-scaled) mask
-      fctx.globalCompositeOperation = "copy";
-      fctx.imageSmoothingEnabled = true; fctx.imageSmoothingQuality = "high";
-      fctx.drawImage(maskC, 0, 0, W, H);
-      fctx.globalCompositeOperation = "source-in";
-      fctx.drawImage(cam, 0, 0, W, H);
-      background();
-      ctx.drawImage(fg, 0, 0);
-      errors = 0;
-    } catch (e) {
-      console.warn("effect frame", e);
-      // A broken graph stays broken: rebuild the segmenter after a few failures.
-      if (++errors === 5) { segmenterP = null; loadSegmenter().then((s2) => { seg = s2; errors = 0; }).catch(() => {}); }
+    if (cam.videoWidth && cam.videoHeight && (cam.videoWidth !== sourceW || cam.videoHeight !== sourceH)) {
+      sourceW = cam.videoWidth; sourceH = cam.videoHeight; resize(sourceW, sourceH); haveMask = false; flip();
     }
-    busy = false;
-    cost = cost * 0.8 + (performance.now() - t0) * 0.2;
+    if (mode === "none") { ctx.drawImage(cam, 0, 0, W, H); return; }
+    if (client && t0 - lastSeg >= Math.max(maskInterval, (client.metrics.inferenceMs || 0) * 1.5)) {
+      lastSeg = t0; sctx.drawImage(cam, 0, 0, SW, SH);
+      client.submit(small, t0);
+    }
+    // Always composite the freshest camera frame. A late mask never queues or
+    // freezes video. If its mask is late, keep a fully blurred/replaced
+    // background until it catches up instead of exposing an unprocessed room.
+    if (!haveMask || t0 - maskAt > 500 || client?.metrics.failed) { background(); return; }
+    fctx.globalCompositeOperation = "copy"; fctx.imageSmoothingEnabled = true;
+    fctx.drawImage(maskC, 0, 0, W, H);
+    fctx.globalCompositeOperation = "source-in"; fctx.drawImage(cam, 0, 0, W, H);
+    background(); ctx.drawImage(fg, 0, 0);
   }
 
+  let capture = canvas.captureStream(0), out = capture.getVideoTracks()[0];
+  if (!out.requestFrame) { out.stop(); capture = canvas.captureStream(fps); out = capture.getVideoTracks()[0]; }
   const untick = onTick(frame);
-  const out = canvas.captureStream(fps).getVideoTracks()[0];
+  let callback = 0;
+  const videoFrame = () => { if (stopped) return; frame(); callback = cam.requestVideoFrameCallback(videoFrame); };
+  if (cam?.requestVideoFrameCallback) callback = cam.requestVideoFrameCallback(videoFrame);
+  out.effectMetrics = metrics;
   out.contentHint = "motion";
   out.raw = track || null;
   out.effect = mode;
   const stopOut = out.stop.bind(out);
-  const cleanup = () => { stopped = true; untick(); track?.stop(); if (replaceAsset instanceof HTMLVideoElement) replaceAsset.pause(); if (bgAsset instanceof HTMLVideoElement) bgAsset.pause(); };
+  const cleanup = () => { if (stopped) return; stopped = true; untick(); client?.stop(); if (callback) cam?.cancelVideoFrameCallback?.(callback); cam?.pause(); if (cam) cam.srcObject = null; track?.stop(); if (replaceAsset instanceof HTMLVideoElement) replaceAsset.pause(); if (bgAsset instanceof HTMLVideoElement) bgAsset.pause(); };
   out.stop = () => { cleanup(); stopOut(); };
   track?.addEventListener("ended", () => { cleanup(); stopOut(); });
   // enabling/disabling the output also pauses the camera light
@@ -273,6 +260,13 @@ export function effectsPanel(prefs, onChange) {
     const a = assetFor(slot, prefs);
     info.textContent = a ? `Usando: ${a.name}` : (slot === "replace" || !preset.value ? "Aún no elegiste archivo." : "");
   };
+  const performanceMode = el("select", { id: "dev-effect-performance" },
+    el("option", { value: "fast", text: "Baja latencia (recomendado, hasta 720p)" }),
+    el("option", { value: "balanced", text: "Equilibrado (hasta 1080p)" }),
+    el("option", { value: "detail", text: "Más detalle (mayor consumo)" }));
+  performanceMode.value = prefs.effectPerformance || "fast";
+  performanceMode.onchange = () => { prefs.effectPerformance = performanceMode.value; onChange("video"); };
+  const performanceRow = el("div", {}, el("label", { text: "Rendimiento del efecto" }), performanceMode);
   const presetRow = el("div", {}, el("label", { text: "Fondo" }), preset);
   const fileRow = el("div", {}, el("label", { text: "Imagen o video (se queda en tu equipo)" }), file, info);
   const sync = () => {
@@ -291,6 +285,6 @@ export function effectsPanel(prefs, onChange) {
   };
   sync();
   return el("details", { class: "camdetails", open: effectActive(prefs) }, el("summary", { text: "✨ Efectos de video (fondo virtual, desenfoque, imagen)" }),
-    el("div", { class: "col", style: "margin-top:8px" }, el("div", {}, el("label", { text: "Efecto" }), sel), presetRow, fileRow,
-      el("p", { class: "muted", style: "margin:0;font-size:12px", text: "El recorte del fondo se hace en tu equipo; nada se sube a internet. Verde croma sirve para quitar el fondo en OBS." })));
+    el("div", { class: "col", style: "margin-top:8px" }, el("div", {}, el("label", { text: "Efecto" }), sel), performanceRow, presetRow, fileRow,
+      el("p", { class: "muted", style: "margin:0;font-size:12px", text: "El recorte se procesa en un worker de tu equipo sin acumular fotogramas. Si el equipo se sobrecarga se prioriza video reciente. Para usar filtros de OBS, selecciona OBS Virtual Camera como cámara y deja este efecto desactivado." })));
 }
