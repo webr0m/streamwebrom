@@ -112,6 +112,7 @@ with sync_playwright() as pw:
     # Restore routing and recover in the same page, without repeating admission.
     blocked.evaluate('window.__blockICE=false')
     blocked.locator('#retryMedia').click()
+    blocked.wait_for_function("()=>__pcs.some(pc=>pc.connectionState==='connected'&&pc.getSenders().some(s=>s.track))",timeout=30000)
     expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
     assert blocked.evaluate('window.__sockets.length===2'), 'Retry must replace the signalling socket'
     assert blocked.evaluate("window.__pcs.some(pc=>pc.connectionState==='connected')")
@@ -127,6 +128,7 @@ with sync_playwright() as pw:
     }""")
     expect(blocked.locator('#retryMedia')).to_be_visible(timeout=15000)
     blocked.locator('#retryMedia').click()
+    blocked.wait_for_function("()=>__pcs.some(pc=>pc.connectionState==='connected'&&pc.getSenders().some(s=>s.track))",timeout=30000)
     expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
     assert blocked.evaluate('window.__sockets.length===3')
     expect(blocked.locator('#waiting')).to_be_hidden()
@@ -136,6 +138,7 @@ with sync_playwright() as pw:
     }""")
     blocked.evaluate('window.__sockets.at(-1).close()')
     blocked.wait_for_function('() => window.__sockets.length>=4 && window.__sockets.at(-1).readyState===1',timeout=15000)
+    blocked.wait_for_function("()=>__pcs.some(pc=>pc.connectionState==='connected'&&pc.getSenders().some(s=>s.track))",timeout=30000)
     expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
     assert blocked.evaluate("window.__pcs.some(pc=>pc.connectionState==='connected')")
     # Exit and return from a real invitation URL. A same-URL #invite link used
