@@ -18,7 +18,7 @@ test('participant layouts fit phone portrait, landscape and desktop without over
 });
 
 test('a brief media interruption clears without asking to reconnect',t=>{
-  t.mock.timers.enable({apis:['setTimeout']});
+  t.mock.timers.enable({apis:['setTimeout','Date']});
   const pc=new EventTarget();let loss=0,healthy=0;
   const stop=watchConnection(pc,()=>loss++,()=>healthy++);
   pc.connectionState='disconnected';pc.dispatchEvent(new Event('connectionstatechange'));
@@ -28,16 +28,64 @@ test('a brief media interruption clears without asking to reconnect',t=>{
 });
 
 test('persistent or failed media reports one real loss, and cleanup cancels old timers',t=>{
-  t.mock.timers.enable({apis:['setTimeout']});
+  t.mock.timers.enable({apis:['setTimeout','Date']});
   const pc=new EventTarget();let loss=0;const stop=watchConnection(pc,()=>loss++);
   pc.connectionState='disconnected';pc.dispatchEvent(new Event('connectionstatechange'));
   t.mock.timers.tick(10001);assert.equal(loss,1);
   pc.connectionState='failed';pc.dispatchEvent(new Event('connectionstatechange'));assert.equal(loss,1);
   pc.connectionState='connected';pc.dispatchEvent(new Event('connectionstatechange'));
-  pc.connectionState='failed';pc.dispatchEvent(new Event('connectionstatechange'));assert.equal(loss,2);
+  pc.connectionState='failed';pc.dispatchEvent(new Event('connectionstatechange'));assert.equal(loss,1);
+  t.mock.timers.tick(10001);assert.equal(loss,2);
   pc.connectionState='connected';pc.dispatchEvent(new Event('connectionstatechange'));
   pc.connectionState='disconnected';pc.dispatchEvent(new Event('connectionstatechange'));stop();
   t.mock.timers.tick(10000);assert.equal(loss,2);
+});
+
+test('a reconnecting state or healthy ICE cancels a suspect-state deadline',t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date']});
+  const pc=new EventTarget();let loss=0;const stop=watchConnection(pc,()=>loss++);
+  pc.connectionState='disconnected';pc.dispatchEvent(new Event('connectionstatechange'));
+  t.mock.timers.tick(9000);pc.connectionState='connecting';pc.dispatchEvent(new Event('connectionstatechange'));
+  t.mock.timers.tick(20000);assert.equal(loss,0);
+  pc.connectionState='disconnected';pc.iceConnectionState='connected';pc.dispatchEvent(new Event('iceconnectionstatechange'));
+  t.mock.timers.tick(20000);assert.equal(loss,0);stop();
+});
+
+test('incoming consent/RTP activity prevents false loss; outgoing bytes alone do not',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date']});
+  const pc=new EventTarget();pc.connectionState='disconnected';
+  let received=1,sent=0,loss=0;
+  pc.getStats=async()=>new Map([
+    ['transport',{type:'transport',selectedCandidatePairId:'active'}],
+    ['active',{id:'active',type:'candidate-pair',responsesReceived:received}],
+    ['send',{id:'send',type:'outbound-rtp',bytesSent:sent}]
+  ]);
+  const stop=watchConnection(pc,()=>loss++);
+  await Promise.resolve();
+  for(let i=0;i<15;i++){received++;sent+=1000;t.mock.timers.tick(1000);await Promise.resolve();}
+  assert.equal(loss,0);
+  for(let i=0;i<11;i++){sent+=1000;t.mock.timers.tick(1000);await Promise.resolve();}
+  assert.equal(loss,1);stop();
+});
+
+test('late statistics after recovery or cleanup cannot trigger a loss',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date']});
+  const pc=new EventTarget();pc.connectionState='disconnected';let resolve,loss=0;
+  pc.getStats=()=>new Promise(r=>resolve=r);
+  const stop=watchConnection(pc,()=>loss++);
+  pc.connectionState='connected';pc.dispatchEvent(new Event('connectionstatechange'));
+  resolve(new Map());await Promise.resolve();t.mock.timers.tick(30000);
+  assert.equal(loss,0);stop();
+});
+
+test('resumed packets clear an existing warning even before the browser updates its state',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date']});
+  const pc=new EventTarget();pc.connectionState='failed';let bytes=1,loss=0,healthy=0;
+  pc.getStats=async()=>new Map([['audio',{id:'audio',type:'inbound-rtp',bytesReceived:bytes}]]);
+  const stop=watchConnection(pc,()=>loss++,()=>healthy++);await Promise.resolve();
+  for(let i=0;i<11;i++){t.mock.timers.tick(1000);await Promise.resolve();}
+  assert.equal(loss,1);bytes+=1000;t.mock.timers.tick(1000);await Promise.resolve();
+  assert.equal(healthy,1);stop();
 });
 
 test('16:9 camera rectangles stay inside every screen, including focused side strips',()=>{

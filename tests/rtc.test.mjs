@@ -38,6 +38,19 @@ test('switching a single socket to local preserves admission and password in mem
   retry.receive({type:'welcome',ice:[],localIce:[{urls:'turns:local.test:443?transport=tcp'}]});
   await Promise.resolve();assert.equal(s.localIce.length,1);
 });
+
+test('automatic local fallback follows a new room provider without closing a healthy socket',async()=>{
+  const s=signal(),ws=await connected(s);s.mediaMode='local';
+  ws.receive({type:'state',state:{connection:'cloudflare'}});
+  assert.equal(s.mediaMode,'auto');assert.equal(ws.readyState,1);assert.equal(s.ready,true);
+  ws.close();assert.equal(s.ready,false);
+});
+
+test('an explicit network override survives room provider changes',async()=>{
+  const s=signal(),ws=await connected(s);s.mediaMode='local';s.followRoomRoute=false;
+  ws.receive({type:'state',state:{connection:'cloudflare'}});
+  assert.equal(s.mediaMode,'local');assert.equal(s.roomRoute,'cloudflare');assert.equal(ws.readyState,1);
+});
 afterEach(()=>{ signals.splice(0).forEach(s=>s.close()); Socket.sockets=[]; storage.clear(); });
 function signal() { const s=new Signal();signals.push(s);return s; }
 async function connected(s) {

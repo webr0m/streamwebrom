@@ -133,26 +133,45 @@ const mixer = new AudioMixer();
 // ---------- connection ----------
 function setStatus(t, cls = "") { const s = $("#status"); s.textContent = t; s.className = "pill " + cls; }
 
-sig.on("disconnected", () => setStatus("reconectando…", "red"));
+let hostGeneration = 0, hostLossTimer;
+sig.on("disconnected", () => {
+  hostGeneration++;
+  clearTimeout(hostLossTimer);
+  setStatus("actualizando conexión…");
+  hostLossTimer = setTimeout(() => { if (!sig.ready) setStatus("sin conexión", "red"); },10000);
+});
 sig.on("reconnected", async (m) => {
+  const generation = hostGeneration, socket = sig.ws;
+  clearTimeout(hostLossTimer);
   // The server dropped everything tied to the old connection: our
   // subscriptions (guests' video would freeze) and our own publications
   // (the host's camera would vanish from the show). Rebuild both.
   for (const [id, s] of [...sources]) {
     if (s.local) continue;
-    s.sub?.close(); monitors.get(id)?.remove(); monitors.delete(id); sources.delete(id);
+    s.sub?.close(); s.level?.close?.();
+    const audio = monitors.get(id); if (audio) { audio.pause(); audio.srcObject = null; audio.remove(); }
+    monitors.delete(id); sources.delete(id);
   }
   try { program?.pc.close(); } catch {}
   program = null;
+  // Install the snapshot before negotiation: newer state/stream-added messages
+  // arriving while cameras restart must not be overwritten by an old welcome.
+  onWelcome(m);
   for (const [id, pub] of [...local]) {
     const s = sources.get(id);
+    if (!s) continue;
     try { pub.pc.close(); } catch {}
     try {
       const fresh = await publish(sig, s.stream, { ...pub.opts, stream: id }); // same id keeps its stage slot
+      if (generation !== hostGeneration || socket !== sig.ws || sources.get(id) !== s || local.get(id) !== pub) { fresh.stop(); continue; }
       local.set(id, fresh); s.pub = fresh;
-    } catch (e) { console.warn("republish", id, e); local.delete(id); sources.delete(id); }
+    } catch (e) {
+      // Keep the actual capture and its stable identity if negotiation fails.
+      if (generation === hostGeneration && socket === sig.ws) toast(`No se pudo restablecer ${s.name}: ${e.message}`, "err");
+    }
   }
-  onWelcome(m); setStatus("conectado", "green");
+  if (generation !== hostGeneration || socket !== sig.ws) return;
+  renderBackstage(); syncAudio(); setStatus("conectado", "green");
 });
 
 function onWelcome(m) {
@@ -209,6 +228,9 @@ async function addRemote(id, kind, owner, name) {
 }
 
 function removeSource(id) {
+  // The SFU removed an old transport, not the host's physical camera/mic.
+  // Its capture must remain available for the new authenticated socket.
+  if (local.has(id)) return;
   const s = sources.get(id);
   if (!s) return;
   s.sub?.close(); s.level?.close?.();

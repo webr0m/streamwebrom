@@ -1,4 +1,4 @@
-# Conexión, cuota y alternativa VDO.Ninja (v1.11.1)
+# Conexión, cuota y alternativa VDO.Ninja (v1.11.2)
 
 Al crear un estudio elige **StreamWebRom · relé local** o **VDO.Ninja · sala independiente**. Son salas distintas: crear una sala VDO.Ninja no crea una sala en el SFU local ni usa las credenciales Cloudflare del servidor StreamWebRom.
 
@@ -66,3 +66,7 @@ Pruebas automatizadas: permisos y contraseña maestra del backend, cuota compart
 ### Identificadores de sala
 
 Desde v1.11.1 los IDs VDO tienen como máximo 30 caracteres alfanuméricos. Se conservan 128 bits de aleatoriedad, codificados en base 36; se usan hasta cinco letras o números del prefijo opcional. El título del programa conserva su nombre completo. Los enlaces largos de v1.11.0 se convierten al mismo ID para director, invitado y escena; vuelve a copiar el enlace OBS desde la sala actualizada si habías copiado el enlace directo del servicio anterior.
+
+### Recuperación y cambios de relé
+
+Desde v1.11.2 un estado temporal de WebRTC no solicita reconectar ni cierra la conexión. El aviso requiere diez segundos sin recepción o respuestas del enlace. Si reaparecen paquetes, se retira automáticamente. Cambiar de proveedor conserva la cámara y el micrófono capturados del anfitrión, los IDs y las cámaras adicionales; los invitados mantienen las fuentes que llegan durante su recuperación. Una elección automática anterior del relé local vuelve a evaluar la preferencia de la sala, mientras que una elección manual se conserva.

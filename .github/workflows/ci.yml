@@ -104,3 +104,9 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://localhost:18445/api/health && break; sleep 1; done
           python scripts/relay-smoke.py --url http://localhost:18445 --tcp-only --expect-provider local
           python -c "import json, urllib.request; from pathlib import Path; c=json.load(urllib.request.urlopen('http://localhost:18445/api/config')); assert c['relay']=={'provider':'local','reason':'room-auth-required'}; assert 'state-unavailable' in Path('/tmp/swr-native.log').read_text(); assert Path('/tmp/swr-native/turn-quota.json').read_bytes()==bytes(568)"
+      - name: bidirectional audio survives provider handover
+        run: |
+          go build -o /tmp/handover-server scripts/relay-handover-server.go
+          /tmp/handover-server > /tmp/handover.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://localhost:18446/api/health && break; sleep 1; done
+          python scripts/relay-handover-smoke.py --url http://localhost:18446 --fixture

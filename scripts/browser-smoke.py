@@ -125,7 +125,7 @@ with sync_playwright() as pw:
       pc.close();Object.defineProperty(pc,'connectionState',{value:'failed'});
       pc.dispatchEvent(new Event('connectionstatechange'));
     }""")
-    expect(blocked.locator('#retryMedia')).to_be_visible()
+    expect(blocked.locator('#retryMedia')).to_be_visible(timeout=15000)
     blocked.locator('#retryMedia').click()
     expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
     assert blocked.evaluate('window.__sockets.length===3')

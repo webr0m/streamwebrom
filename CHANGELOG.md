@@ -1,5 +1,13 @@
 # Cambios
 
+## v1.11.2 — Reconexión verificada y audio al cambiar de relé
+
+- Los estados transitorios de WebRTC no cierran conexiones. El aviso requiere diez segundos sin recepción RTP, informes del receptor ni respuestas del enlace; se cancela si se recupera la conexión o llegan paquetes. Los cambios breves de señalización se recuperan en segundo plano.
+- Se conserva la captura local del anfitrión ante avisos tardíos de retirada del transporte. La recuperación publica la misma cámara y micrófono con IDs estables y evita que una sesión anterior borre fuentes nuevas.
+- Los invitados conservan las fuentes que llegan mientras recuperan su propia cámara. Las cámaras adicionales se vuelven a publicar sin detener su captura y sus botones de cierre usan la nueva publicación.
+- Una ruta local elegida automáticamente sigue la nueva preferencia de la sala al habilitar Cloudflare; se respetan las rutas seleccionadas manualmente.
+- Regresión con audio RTP y energía recibida en ambos sentidos durante tres cambios entre dos relés TURN/TCP independientes, además de estados transitorios, recuperación de cámaras y eliminación de publicaciones viejas. La prueba con relés locales no certifica la infraestructura externa de Cloudflare.
+
 ## v1.11.1 — Creación de salas VDO.Ninja
 
 - Se generan identificadores alfanuméricos de hasta 30 caracteres, conservando 128 bits aleatorios, para evitar el aviso y recorte de nombres en la aplicación oficial.

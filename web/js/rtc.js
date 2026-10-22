@@ -83,15 +83,18 @@ export class Signal extends EventTarget {
     this.ice = [];
     this.localIce = [];
     this.mediaMode = networkMode(params.get("network"));
+    this.followRoomRoute = !params.has("network");
     this.bandwidthMode = "balanced";
     this.relayProvider = "";
     this.retry = 0;
     this.closed = false;
     this.everWelcomed = false; // once in, keep retrying until close()
+    this.ready = false;
   }
 
   connect(joinMsg) {
 	if (this.closed) return Promise.reject(new Error("connection closed"));
+    this.ready = false;
     joinMsg = { ...joinMsg, route: this.mediaMode === "local" ? "local" : "" };
     // An admitted guest gets a rejoin pass so reconnects (and reloads in the
     // same tab) skip the waiting room instead of getting stuck in it.
@@ -116,20 +119,27 @@ export class Signal extends EventTarget {
         if (this.ws !== ws) return;
         let m; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === "welcome") {
+          this.roomRoute = m.state?.connection || "local";
           this.bandwidthMode = m.state?.bandwidth || "balanced";
           this.relayProvider = m.relayProvider || "";
           this.cancelJoin = null;
           clearTimeout(deadline);
-          this.retry = 0; welcomed = true; this.everWelcomed = true; this.ice = m.ice || []; this.localIce = m.localIce || []; this.trickle = m.trickle === true; this.flush(); resolve(m);
+          this.retry = 0; welcomed = true; this.ready = true; this.everWelcomed = true; this.ice = m.ice || []; this.localIce = m.localIce || []; this.trickle = m.trickle === true; this.flush(); resolve(m);
           if (m.rejoin) { this.joinMsg = { ...this.joinMsg, rejoin: m.rejoin }; try { if (passKey) { sessionStorage.setItem(passKey, m.rejoin); if (m.persistent) localStorage.setItem(passKey, m.rejoin); } } catch {} }
         }
-        if (m.type === "state" && m.state) this.bandwidthMode = m.state.bandwidth || "balanced";
+        if (m.type === "state" && m.state) {
+          this.bandwidthMode = m.state.bandwidth || "balanced";
+          if (m.state.connection) {
+            if (this.roomRoute && this.roomRoute !== m.state.connection && this.followRoomRoute) this.mediaMode = "auto";
+            this.roomRoute = m.state.connection;
+          }
+        }
         // Waiting in the lobby counts as connected: if the socket drops while
         // waiting, reconnect and knock again instead of leaving a dead page.
         if (m.type === "room-persistent" && joinMsg.role === "guest" && passKey) {
           try { if (m.persistent && this.joinMsg.rejoin) localStorage.setItem(passKey,this.joinMsg.rejoin); else localStorage.removeItem(passKey); } catch {}
         }
-        if (m.type === "waiting") { this.cancelJoin = null; clearTimeout(deadline); welcomed = true; this.everWelcomed = true; resolve(m); }
+        if (m.type === "waiting") { this.cancelJoin = null; clearTimeout(deadline); welcomed = true; this.ready = true; this.everWelcomed = true; resolve(m); }
         if (m.type === "error" && !welcomed && !m.reqId) {
           // Authentication failure is terminal, including after a reconnect.
           terminal = true; reject(new Error(m.error)); ws.close();
@@ -152,6 +162,7 @@ export class Signal extends EventTarget {
       ws.onclose = () => {
         clearTimeout(deadline);
         if (this.ws !== ws) return;
+        this.ready = false;
         this.cancelJoin = null;
         clearInterval(this.keepalive);
         this.queue = [];
@@ -180,6 +191,7 @@ export class Signal extends EventTarget {
     if (this.restarting) return this.restarting;
     if (this.closed || !this.joinMsg) return Promise.reject(new Error("connection closed"));
     const join = this.joinMsg, old = this.ws;
+    this.ready = false;
     clearTimeout(this.reconnectTimer); clearInterval(this.keepalive);
     this.cancelJoin?.(); this.cancelJoin = null;
     this.ws = null; this.queue = [];
@@ -222,7 +234,7 @@ export class Signal extends EventTarget {
 
   close() {
     this.cancelJoin?.("connection closed"); this.cancelJoin = null;
-    this.closed = true; clearInterval(this.keepalive); clearTimeout(this.reconnectTimer); this.queue = [];
+    this.closed = true; this.ready = false; clearInterval(this.keepalive); clearTimeout(this.reconnectTimer); this.queue = [];
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error("connection closed")); }
     this.pending.clear(); this.ws && this.ws.close();
   }

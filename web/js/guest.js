@@ -17,7 +17,7 @@ import { automaticRoute } from "./network.js";
 import { callGrid } from "./call-grid.js";
 import { roomTelemetry, metricText } from "./telemetry.js";
 import { immersive } from "./immersive.js";
-import { watchConnection } from "./connection-health.js";
+import { watchConnection, connectionHealthy } from "./connection-health.js";
 
 const room = (params.get("room") || "").toLowerCase();
 if (!room) location.href = "/";
@@ -43,8 +43,10 @@ const gridLayout = callGrid($("#grid"), $("#restoreGrid"), $("#reorderGrid"));
 // Even previously shared links start automatically. Manual routing is an
 // optional advanced action for this visit, never required for admission.
 sig.mediaMode = "auto";
+sig.followRoomRoute = true;
 $("#networkMode").value = sig.mediaMode;
 function selectNetwork(mode) {
+  sig.followRoomRoute = mode === "auto";
   $("#networkMode").value = mode;
   const url = new URL(location.href);
   if (mode === "auto") url.searchParams.delete("network"); else url.searchParams.set("network", mode);
@@ -188,7 +190,7 @@ async function connectMedia() {
   const generation = ++mediaGeneration;
   connectingMedia = true;
   $("#retryMedia").disabled = true;
-  connectionStatus("Conectando audio y video…");
+  if (!hadMediaConnection || reconnectingGuest) connectionStatus("Conectando audio y video…");
   try {
     pub?.stop(); pub = null;
     const fresh = await publish(sig, media, pubOpts($("#name").value));
@@ -205,6 +207,7 @@ async function connectMedia() {
 }
 async function reconnectGuest() {
   if (reconnectingGuest || sig.closed) return;
+  if (sig.ready && connectionHealthy(pub?.pc)) { connectionStatus(""); return; }
   reconnectingGuest = true; $("#retryMedia").disabled = true;
   connectionStatus("Comprobando la conexión para volver a entrar…");
   try {
@@ -232,9 +235,9 @@ sig.on("disconnected", () => {
   try { pub?.pc.close(); } catch {} pub = null;
   for (const id of [...remotes.keys()]) unwatch(id);
   if (entered) {
-    connectionStatus("Recuperando la conexión…");
+    connectionStatus("");
     lossTimer = setTimeout(() => {
-      if (!sig.closed && sig.ws?.readyState !== 1 && !reconnectingGuest) connectionStatus("Se perdió la conexión con el servidor.", true);
+      if (!sig.closed && !sig.ready && !reconnectingGuest) connectionStatus("Se perdió la conexión con el servidor.", true);
     }, 10000);
   }
 });
@@ -258,16 +261,28 @@ async function resume(m) {
   const socket = sig.ws;
   // The server forgot our old publications: publish fresh ones.
   myId = m.peerId;
+  const mine = $('[data-id="me"]'); if (mine) mine.dataset.peer = myId;
   state = m.state || state;
+  // Clear only the old session before awaiting publication. A stream-added
+  // received during negotiation belongs to the new session and must survive.
+  for (const id of [...remotes.keys()]) unwatch(id);
+  for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
   try { pub?.pc.close(); } catch {}
   pub = null;
   await connectMedia();
   if (sig.closed || sig.ws !== socket) return;
   stopScreen(false); // A new connection needs a new host authorization.
   if (sig.closed || sig.ws !== socket) return;
-  for (const [id, x] of extraCams) { try { x.pub.pc.close(); } catch {} extraCams.delete(id); x.media.getTracks().forEach((t) => t.stop()); $(`[data-id="${id}"]`)?.remove(); }
-  for (const id of [...remotes.keys()]) unwatch(id);
-  for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
+  for (const [id, x] of [...extraCams]) {
+    try { x.pub.pc.close(); } catch {}
+    try {
+      const fresh = await publish(sig, x.media, x.pub.opts);
+      if (sig.closed || sig.ws !== socket || extraCams.get(id) !== x) { fresh.stop(); continue; }
+      x.pub = fresh;
+      if (fresh.id !== id) { extraCams.delete(id); extraCams.set(fresh.id,x); }
+      if (x.tile) { x.tile.dataset.id = fresh.id; x.tile.dataset.peer = myId; }
+    } catch (e) { if (!sig.closed && sig.ws === socket) toast(`No se pudo restablecer la cámara adicional: ${e.message}`,"err"); }
+  }
   $("#chatlog").replaceChildren(); for (const c of m.chat || []) addChat(c); // catch up on what we missed
   sendMedia();
 }
@@ -586,10 +601,12 @@ async function addExtraCam(dev) {
   let p;
   try { p = await publish(sig, stream, { ...pubOpts(name), name, stream: "camera-slot-" + slot }); }
   catch (e) { stream.getTracks().forEach(t => t.stop()); if (!sig.closed) toast(e.message, "err"); return; }
-  extraCams.set(p.id, { pub: p, media: stream, slot });
   const tile = addTile(p.id, stream, name + " (tú)", true, () => 0);
-  tile.querySelector(".name").after(el("button", { class: "small tileclose", onclick: () => { p.stop(); stream.getTracks().forEach((t) => t.stop()); extraCams.delete(p.id); tile.remove(); }, text: "✕" }));
-  stream.getVideoTracks()[0].onended = () => { p.stop(); extraCams.delete(p.id); tile.remove(); };
+  const entry = { pub:p, media:stream, slot, tile };
+  extraCams.set(p.id, entry);
+  const close = () => { entry.pub.stop(); stream.getTracks().forEach(t => t.stop()); extraCams.delete(entry.pub.id); tile.remove(); };
+  tile.querySelector(".name").after(el("button", { class: "small tileclose", onclick: close, text: "✕" }));
+  stream.getVideoTracks()[0].onended = close;
 }
 
 $("#leaveBtn").onclick = () => leave("Saliste de la sala.");
