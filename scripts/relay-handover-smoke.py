@@ -41,9 +41,14 @@ AUDIO='''async selector=>{
 }'''
 
 def audio_advances(page,selector):
-    page.wait_for_function('async x=>{const a=await ('+AUDIO+')(x.selector);return a?.bytes>0&&a.energy>0&&a.live}',arg={'selector':selector},timeout=35000)
-    before=page.evaluate(AUDIO,selector)
-    page.wait_for_function('async x=>{const a=await ('+AUDIO+')(x.selector);return a&&a.bytes>x.bytes&&a.energy>x.energy&&a.live}',arg={'selector':selector,**before},timeout=15000)
+    deadline=time.monotonic()+40;before=None;current=None
+    while time.monotonic()<deadline:
+        current=page.evaluate(AUDIO,selector)
+        if current and current['live'] and current['bytes']>0 and current['energy']>0:
+            if before and current['bytes']>before['bytes'] and current['energy']>before['energy']:return
+            if before is None:before=current
+        page.wait_for_timeout(150)
+    raise AssertionError(('Audio did not advance',selector,current,page.evaluate('()=>__pcs.map(p=>({state:p.connectionState,receive:p.getReceivers().map(r=>r.track.kind)}))')))
 
 with tempfile.TemporaryDirectory(prefix='swr-audio-') as folder, sync_playwright() as pw:
     wav=Path(folder)/'tone.wav'
