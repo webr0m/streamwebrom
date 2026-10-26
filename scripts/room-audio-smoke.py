@@ -75,6 +75,7 @@ with tempfile.TemporaryDirectory(prefix='swr-multiparty-') as folder,sync_playwr
     def all_audio():
         for receiver,item in enumerate(participants):
             assert item.evaluate('__providers.at(-1)')=='cloudflare'
+            if receiver:assert item.locator('audio[data-room-audio="'+ids[receiver]+'"]').count()==0
             for sender,source in enumerate(ids):
                 if receiver==sender:continue
                 selector=('[data-id="'+source+'"] video')

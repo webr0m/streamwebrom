@@ -202,6 +202,9 @@ async function connectMedia() {
     const fresh = await publish(sig, media, pubOpts($("#name").value));
     if (generation !== mediaGeneration) { fresh.stop(); return; }
     pub = fresh;
+    // A reconnect welcome can still list our old transport. Never keep an
+    // audible subscription to our own stable camera ID after republishing.
+    unwatch(pub.id);
     hadMediaConnection = true; clearTimeout(lossTimer); stopMediaWatch();
     connectionStatus(""); sendMedia(); updateStageBadge();
     const current = pub;
@@ -438,7 +441,8 @@ function ask(text, btn, fn) {
 }
 
 async function watch(id, kind, owner, name, revision) {
-  if (kind === "program" || owner === myId || id === pub?.id || id === screenPub?.id || extraCams.has(id)) return;
+  if (kind === "program") return;
+  if (owner === myId || id === pub?.id || id === screenPub?.id || extraCams.has(id)) { unwatch(id); return; }
   const previous = remoteInfo.get(id);
   if (staleRevision(revision, previous?.revision)) return;
   if (remotes.has(id) && (!revision || previous?.revision === revision)) return;
