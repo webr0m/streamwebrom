@@ -13,7 +13,8 @@ if a.public_relay_host:
     with urllib.request.urlopen(req,timeout=15) as r:ip=next(x['data'] for x in json.load(r)['Answer'] if x['type']==1)
     flags.append('--host-resolver-rules=MAP '+a.public_relay_host+' '+ip)
 INIT='''
-window.__pcs=[];window.__sockets=[];window.__sources={};window.__updates=[];window.__providers=[];window.__holdUnsubscribe=false;window.__held=[];window.__answers={};window.__delayScreenAudio=false;
+window.__pcs=[];window.__sockets=[];window.__sources={};window.__updates=[];window.__providers=[];window.__holdUnsubscribe=false;window.__held=[];window.__answers={};window.__delayScreenAudio=false;window.__audios=[];
+const NativeAudio=window.Audio;window.Audio=function(...args){const audio=new NativeAudio(...args);__audios.push(audio);return audio};window.Audio.prototype=NativeAudio.prototype;
 const PC=window.RTCPeerConnection;
 window.RTCPeerConnection=class extends PC {
  constructor(c){super({...c,iceTransportPolicy:'relay'});__pcs.push(this)}
@@ -99,10 +100,12 @@ with tempfile.TemporaryDirectory(prefix='swr-multiparty-') as folder,sync_playwr
     all_audio()
     # A real delayed audio RTP track reaches the SFU after the initial offer.
     host.evaluate('__delayScreenAudio=true');host.locator('#addScreen').click();expect(host.locator('#backstage [data-id="host-screen"]')).to_be_visible(timeout=30000)
-    host.locator('#backstage [data-id="host-screen"] .stagebtn').click()
+    expect(host.locator('#backstage [data-id="host-screen"] .stagebtn.on')).to_be_visible(timeout=15000)
     for g in guests:advancing(g,'[data-id="host-screen"] video')
     guests[1].wait_for_function('()=>__updates.includes("host-screen")',timeout=20000)
     obs=page();obs.goto(a.url+'/view?room='+keys['room']+'&stream=host-screen#key='+keys['viewKey']);advancing(obs,'#single')
+    scene=page();scene.goto(a.url+'/view?room='+keys['room']+'&scene=1#key='+keys['viewKey'])
+    scene.wait_for_function('''async()=>{for(const pc of __pcs){if(pc.connectionState!=='connected'||!pc.remoteDescription?.sdp.includes('host-screen'))continue;const track=pc.getReceivers().find(r=>r.track.kind==='audio')?.track;if(!track)continue;const stats=await pc.getStats();const received=[...stats.values()].some(s=>s.type==='inbound-rtp'&&s.kind==='audio'&&s.totalAudioEnergy>0);if(received&&__audios.some(a=>!a.paused&&!a.muted&&a.volume>0&&a.srcObject?.getAudioTracks().some(t=>t.id===track.id)))return true}return false}''',timeout=40000)
     # An authorized panelist also shares audio to the host and other panelists.
     host.locator('#backstage [data-id="'+ids[1]+'"] .stagebtn').click()
     guests[0].locator('#screenBtn').click();host.get_by_role('button',name='Autorizar pantalla',exact=True).click();guests[0].locator('#startScreen').click()
