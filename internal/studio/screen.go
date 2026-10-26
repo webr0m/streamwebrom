@@ -90,7 +90,7 @@ func (r *Room) clearScreenLocked(p *Peer) []*sfu.Stream {
 
 func (r *Room) finishScreenRemoval(p *Peer, removed []*sfu.Stream, action string) {
 	for _, s := range removed {
-		r.broadcast(Msg{Type: "stream-removed", Stream: s.ID}, "")
+		r.broadcast(Msg{Type: "stream-removed", Stream: s.ID, Revision: s.Revision}, "")
 		go s.Close()
 	}
 	p.Send(Msg{Type: "screen-permission", Action: action})

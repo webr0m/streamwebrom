@@ -1,5 +1,13 @@
 # Cambios
 
+## v1.11.3 — Audio entre participantes, pantalla y segundo plano
+
+- Los mensajes de cierre y respuesta SDP quedan ligados a su negociación. Las revisiones de fuentes descartan eventos de transportes anteriores al reconectar.
+- Se anuncian las pistas que llegan tarde y se reconstruye solo su recepción. Una recepción fallida se reintenta sin reiniciar toda la sala.
+- Los invitados escuchan audio separado del vídeo: pausar una vista no silencia a los demás. Se recupera la reproducción al regresar a Chrome/Android y se ofrece ventana flotante donde la API está disponible. Android y Chrome pueden suspender procesos/capturas; no se garantiza ejecución permanente en segundo plano.
+- La captura de pantalla conserva la solicitud de audio al simplificar opciones incompatibles e informa si el navegador no entregó audio. Se prueba sonido de pantallas del anfitrión y de panelistas autorizados, además de OBS.
+- Se conserva el dominio configurado `stream.webrom.cc` en los ejemplos y las pruebas operativas.
+
 ## v1.11.2 — Reconexión verificada y audio al cambiar de relé
 
 - Los estados transitorios de WebRTC no cierran conexiones. El aviso requiere diez segundos sin recepción RTP, informes del receptor ni respuestas del enlace; se cancela si se recupera la conexión o llegan paquetes. Los cambios breves de señalización se recuperan en segundo plano.

@@ -286,23 +286,27 @@ func (f *Forwarder) run(log *slog.Logger) {
 
 // Stream is one published source (camera, screen, program, OBS WHIP push).
 type Stream struct {
-	ID    string
-	Owner string // peer id, "whip" for WHIP pushes
-	Kind  string // camera | screen | program | whip
+	ID       string
+	Owner    string // peer id, "whip" for WHIP pushes
+	Kind     string // camera | screen | program | whip
+	Revision string // one transport instance of a stable source ID
 
 	engine *Engine
 	pc     *webrtc.PeerConnection
 
-	mu         sync.RWMutex
-	forwarders []*Forwarder
-	expected   int
-	ready      chan struct{}
-	readyOnce  sync.Once
-	closed     chan struct{}
-	closeOnce  sync.Once
-	onClose    []func()
-	created    time.Time
+	mu            sync.RWMutex
+	forwarders    []*Forwarder
+	expected      int
+	ready         chan struct{}
+	readyOnce     sync.Once
+	closed        chan struct{}
+	closeOnce     sync.Once
+	onClose       []func()
+	tracksChanged chan struct{}
+	created       time.Time
 }
+
+var streamSequence atomic.Uint64
 
 // Publish accepts a publisher offer and returns the answer. expectedTracks is
 // derived from the offer's m-lines so we know when the stream is complete.
@@ -315,6 +319,7 @@ func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webr
 		return nil, nil, err
 	}
 	s := &Stream{ID: id, Owner: owner, Kind: kind, engine: e, pc: pc,
+		Revision: fmt.Sprintf("%016x-%016x", streamSequence.Add(1), time.Now().UnixNano()), tracksChanged: make(chan struct{}, 1),
 		ready: make(chan struct{}), closed: make(chan struct{}), created: time.Now(),
 		expected: countMedia(offer.SDP)}
 	trickle(pc, onICE)
@@ -332,6 +337,10 @@ func (e *Engine) Publish(ctx context.Context, id, owner, kind string, offer webr
 		e.log.Info("track up", "stream", id, "kind", tr.Kind().String(), "codec", tr.Codec().MimeType)
 		if n >= s.expected {
 			s.markReady()
+		}
+		select {
+		case s.tracksChanged <- struct{}{}:
+		default:
 		}
 		go f.run(e.log)
 	})
@@ -406,6 +415,9 @@ func (s *Stream) markReady() { s.readyOnce.Do(func() { close(s.ready) }) }
 // Ready is closed once the stream's tracks are flowing.
 func (s *Stream) Ready() <-chan struct{} { return s.ready }
 
+// TracksChanged signals that a late RTP track became available after Ready.
+func (s *Stream) TracksChanged() <-chan struct{} { return s.tracksChanged }
+
 // Done is closed when the stream ends.
 func (s *Stream) Done() <-chan struct{} { return s.closed }
 
@@ -448,17 +460,18 @@ func (s *Stream) Close() {
 
 // Info is a JSON friendly description of a stream.
 type Info struct {
-	ID      string   `json:"id"`
-	Owner   string   `json:"owner"`
-	Kind    string   `json:"kind"`
-	Tracks  []string `json:"tracks"`
-	Viewers int      `json:"viewers"`
-	Since   int64    `json:"since"`
+	ID       string   `json:"id"`
+	Owner    string   `json:"owner"`
+	Kind     string   `json:"kind"`
+	Revision string   `json:"revision,omitempty"`
+	Tracks   []string `json:"tracks"`
+	Viewers  int      `json:"viewers"`
+	Since    int64    `json:"since"`
 }
 
 // Info describes the stream.
 func (s *Stream) Info() Info {
-	inf := Info{ID: s.ID, Owner: s.Owner, Kind: s.Kind, Since: s.created.Unix()}
+	inf := Info{ID: s.ID, Owner: s.Owner, Kind: s.Kind, Revision: s.Revision, Since: s.created.Unix()}
 	for _, f := range s.Forwarders() {
 		inf.Tracks = append(inf.Tracks, f.Kind.String()+":"+f.Codec.MimeType)
 		if c := f.SinkCount(); c > inf.Viewers {

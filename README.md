@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.11.2:** Reconexión solo tras pérdida persistente sin recepción y recuperación del audio/cámaras al cambiar de relé. Salas con relé local por defecto; Cloudflare opcional para el anfitrión en salas con contraseña y validación de contraseña maestra. Incluye control de cuota compartida, avisos y respaldo local, perfiles de ahorro, OBS que recibe solo su escena, cámaras ampliadas al abrir sus opciones y una alternativa independiente mediante la aplicación oficial de VDO.Ninja. [Conexión y VDO.Ninja](docs/CONEXION-Y-VDO.md), [interfaz](docs/INTERFAZ.md), [salas persistentes](docs/SALAS-PERSISTENTES.md), [estudio y OBS](docs/ESTUDIO-Y-OBS.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.11.3:** Recuperación de audio entre participantes al reconectar, negociaciones aisladas y pistas tardías de pantalla compartida. Audio independiente del vídeo y ventana flotante cuando el navegador lo permite, con recuperación al regresar a Chrome/Android. Salas con relé local por defecto; Cloudflare opcional para el anfitrión en salas con contraseña y validación de contraseña maestra. [Audio y segundo plano](docs/AUDIO-Y-SEGUNDO-PLANO.md), [conexión y VDO.Ninja](docs/CONEXION-Y-VDO.md), [interfaz](docs/INTERFAZ.md), [salas persistentes](docs/SALAS-PERSISTENTES.md), [estudio y OBS](docs/ESTUDIO-Y-OBS.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 
@@ -66,7 +66,7 @@ o deja `ffmpeg.exe` junto al ejecutable.
 
 Ideal cuando tu hosting es compartido (cPanel) y no puede correr servidores de video.
 
-1. En Cloudflare Zero Trust crea un túnel con hostname público (p. ej. `stream.webrom.lat`) → `http://localhost:8443`.
+1. En Cloudflare Zero Trust crea un túnel con hostname público (p. ej. `stream.webrom.cc`) → `http://localhost:8443`.
 2. En la app de Windows marca *Publicar en internet*, escribe el dominio y pega el token del túnel (se guarda cifrado con DPAPI). La app descarga `cloudflared` y lo ejecuta.
 3. Reenvía en tu router el puerto **UDP 50000** a tu PC para conexiones directas. Para redes móviles restrictivas, CGNAT o UDP bloqueado, configura además un **relé TURN con TCP/TLS**, preferiblemente en el puerto 443. La web y la señalización pasan por Cloudflare Tunnel; el túnel HTTP no transporta el audio/video WebRTC. Instrucciones: [redes móviles](docs/REDES-MOVILES.md).
 

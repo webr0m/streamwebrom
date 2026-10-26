@@ -1,5 +1,5 @@
 import { workspace } from "./workspace.js";
-import { $, $$, el, toast, copy, params, hashParams, api, Signal, publish, subscribe, levelMeter, fmtTime, readStored, writeStored } from "./rtc.js";
+import { $, $$, el, toast, copy, params, hashParams, api, Signal, publish, subscribe, levelMeter, fmtTime, readStored, writeStored, staleRevision } from "./rtc.js";
 import { roomTelemetry, metricText } from "./telemetry.js";
 import { relayMonitor } from "./relay-status.js";
 import { mountVdo } from "./vdo.js";
@@ -7,6 +7,9 @@ import { immersive } from "./immersive.js";
 import { Compositor, AudioMixer } from "./compositor.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
 import { listDevices, openScreen, loadPrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain, QUALITIES, FPS } from "./devices.js";
+import { screenAudioNotice } from "./devices.js";
+import { RoomAudio } from "./room-audio.js";
+import { watchConnection } from "./connection-health.js";
 
 const prefs = loadPrefs();
 const studioWorkspace = workspace(document.querySelector("#studioRoot"));
@@ -14,6 +17,8 @@ let hostCamId = "";         // stream id of the host's main camera (hot-swappabl
 let monitorOn = true;
 try { monitorOn = localStorage.getItem("swr.monitor") !== "0"; } catch {}
 const monitors = new Map(); // streamId -> <audio> for the host's headphones
+const roomAudio = new RoomAudio();
+const remoteInfo = new Map(), remoteRetries = new Map();
 
 const room = (params.get("room") || "").toLowerCase();
 const savedRooms = readStored("swr.rooms", {});
@@ -65,7 +70,7 @@ async function changeRelay(provider) {
 $("#useCloudflare").onclick = () => changeRelay("cloudflare");
 $("#useLocalRelay").onclick = () => changeRelay("local");
 $("#relayDialog").addEventListener("close", () => { $("#cloudflareMaster").value = ""; });
-window.addEventListener("pagehide", () => relayUI.destroy());
+window.addEventListener("pagehide", e => { if (!e.persisted) relayUI.destroy(); });
 const vdoUI = mountVdo({ root: $("#vdoDialog"), copy, notify: message => toast(message,"err"), onCapture: async () => {
   const media = await openScreen();
   const id = await addLocal(media, "camera", "VDO.Ninja", { stream:"host-vdo-" + crypto.randomUUID().slice(0,20), videoKbps: 1500, fps: 24 });
@@ -75,7 +80,7 @@ const vdoUI = mountVdo({ root: $("#vdoDialog"), copy, notify: message => toast(m
   }
 } });
 $("#addVdo").onclick = () => $("#vdoDialog").showModal();
-window.addEventListener("pagehide", () => vdoUI.destroy());
+window.addEventListener("pagehide", e => { if (!e.persisted) vdoUI.destroy(); });
 let program = null;          // publication of the composed program
 let liveSince = 0;
 const cinema = immersive($("#studioRoot"), $("#stageView"), $("#exitFullscreen"), { native: false });
@@ -148,10 +153,10 @@ sig.on("reconnected", async (m) => {
   // (the host's camera would vanish from the show). Rebuild both.
   for (const [id, s] of [...sources]) {
     if (s.local) continue;
-    s.sub?.close(); s.level?.close?.();
-    const audio = monitors.get(id); if (audio) { audio.pause(); audio.srcObject = null; audio.remove(); }
+    s.stopWatch?.(); s.audioCleanup?.(); s.sub?.close(); s.level?.close?.(); roomAudio.remove(id);
     monitors.delete(id); sources.delete(id);
   }
+  for (const timer of remoteRetries.values()) clearTimeout(timer); remoteRetries.clear(); remoteInfo.clear();
   try { program?.pc.close(); } catch {}
   program = null;
   // Install the snapshot before negotiation: newer state/stream-added messages
@@ -182,7 +187,7 @@ function onWelcome(m) {
   if (m.persistence) renderPersistence(m.persistence, true);
   $("#chatlog").replaceChildren();
   peers = new Map((m.peers || []).map((p) => [p.id, p]));
-  for (const s of m.streams || []) addRemote(s.id, s.kind, s.owner);
+  for (const s of m.streams || []) addRemote(s.id, s.kind, s.owner, "", s.revision);
   for (const c of m.chat || []) addChat(c);
   renderAll();
 }
@@ -199,8 +204,9 @@ sig.on("peer-updated", (m) => {
   if (m.peer.screenRequested && !wasPending) toast(`${m.peer.name} solicita compartir pantalla`);
 });
 sig.on("peer-left", (m) => { const p = peers.get(m.peerId); peers.delete(m.peerId); renderPeople(); if (p) toast(`${p.name} salió`); });
-sig.on("stream-added", (m) => addRemote(m.info.id, m.info.kind, m.info.owner, m.name));
-sig.on("stream-removed", (m) => removeSource(m.stream));
+sig.on("stream-added", (m) => addRemote(m.info.id, m.info.kind, m.info.owner, m.name, m.info.revision));
+sig.on("stream-updated", (m) => { if (staleRevision(m.info.revision, remoteInfo.get(m.info.id)?.revision)) return; removeSource(m.info.id); addRemote(m.info.id, m.info.kind, m.info.owner, m.name, m.info.revision); });
+sig.on("stream-removed", (m) => removeSource(m.stream, m.revision));
 sig.on("chat", (m) => addChat(m.comment));
 sig.on("knock", (m) => addKnock(m));
 sig.on("knock-cancel", (m) => { if (knocks.delete(m.peerId)) { renderKnocks(); if (m.action !== "admitted") toast("Un invitado dejó la sala de espera"); } });
@@ -208,9 +214,14 @@ sig.on("reaction", (m) => flyReaction(m.text));
 sig.on("restream", (m) => { const r = m.state.restream; $("#restreamStats").textContent = r ? (r.stats || "") + (r.lastError ? " · " + r.lastError : "") : ""; });
 sig.on("error", (m) => toast(m.error, "err"));
 
-async function addRemote(id, kind, owner, name) {
-  if (sources.has(id) || local.has(id) || kind === "program") return;
-  const placeholder = { kind, owner, name: name || id, video: document.createElement("video"), stream: null, level: () => 0 };
+async function addRemote(id, kind, owner, name, revision) {
+  if (local.has(id) || kind === "program") return;
+  if (staleRevision(revision, remoteInfo.get(id)?.revision)) return;
+  if (sources.has(id) && (!revision || sources.get(id).revision === revision)) return;
+  if (sources.has(id)) removeSource(id);
+  remoteInfo.set(id, { kind, owner, name, revision });
+  clearTimeout(remoteRetries.get(id)); remoteRetries.delete(id);
+  const placeholder = { kind, owner, revision, name: name || id, video: document.createElement("video"), stream: null, level: () => 0 };
   sources.set(id, placeholder);
   try {
     const sub = await subscribe(sig, id);
@@ -219,22 +230,34 @@ async function addRemote(id, kind, owner, name) {
     v.muted = true; v.playsInline = true; v.autoplay = true; v.srcObject = sub.stream;
     v.play().catch(() => {});
     Object.assign(placeholder, { stream: sub.stream, sub, name: sub.name || placeholder.name });
-    setTimeout(() => { if (sources.get(id) !== placeholder) return; if (sub.stream.getAudioTracks().length) { placeholder.level = levelMeter(sub.stream); monitor(id, sub.stream); } syncAudio(); }, 300);
+    const refreshAudio = () => { placeholder.level?.close?.(); placeholder.level = levelMeter(sub.stream); syncAudio(); };
+    sub.stream.addEventListener("addtrack", refreshAudio);
+    placeholder.audioCleanup = () => sub.stream.removeEventListener("addtrack", refreshAudio);
+    monitor(id, sub.stream); refreshAudio();
+    placeholder.stopWatch = watchConnection(sub.pc, () => retryRemote(id, placeholder));
     renderBackstage();
   } catch (e) {
-    if (sources.get(id) === placeholder) sources.delete(id);
+    if (sources.get(id) === placeholder) retryRemote(id, placeholder);
     console.warn("subscribe", id, e);
   }
 }
 
-function removeSource(id) {
+function retryRemote(id, entry) {
+  if (sources.get(id) !== entry || sig.closed || !remoteInfo.has(id)) return;
+  const info = remoteInfo.get(id); removeSource(id);
+  remoteInfo.set(id, info);
+  remoteRetries.set(id, setTimeout(() => { remoteRetries.delete(id); if (remoteInfo.has(id) && sig.ready) addRemote(id, info.kind, info.owner, info.name, info.revision); }, 1000));
+}
+function removeSource(id, revision) {
   // The SFU removed an old transport, not the host's physical camera/mic.
   // Its capture must remain available for the new authenticated socket.
   if (local.has(id)) return;
   const s = sources.get(id);
+  if (revision && s?.revision && revision !== s.revision) return;
+  clearTimeout(remoteRetries.get(id)); remoteRetries.delete(id); remoteInfo.delete(id);
   if (!s) return;
-  s.sub?.close(); s.level?.close?.();
-  monitors.get(id)?.remove(); monitors.delete(id);
+  s.stopWatch?.(); s.audioCleanup?.(); s.sub?.close(); s.level?.close?.();
+  roomAudio.remove(id); monitors.delete(id);
   sources.delete(id);
   renderBackstage();
   syncAudio();
@@ -243,11 +266,8 @@ function removeSource(id) {
 // ---------- host monitoring (hear guests in your headphones) ----------
 function monitor(id, stream) {
   if (monitors.has(id)) return;
-  const a = new Audio();
-  a.srcObject = new MediaStream(stream.getAudioTracks());
-  a.autoplay = true;
+  const a = roomAudio.add(id, stream);
   applySink(a, prefs.speaker);
-  a.play().catch(() => document.addEventListener("click", () => a.play().catch(() => {}), { once: true }));
   monitors.set(id, a);
   syncMonitor();
 }
@@ -352,6 +372,7 @@ $("#addScreen").onclick = async () => {
   try {
     const m = await openScreen();
     const id = await addLocal(m, "screen", "Pantalla", { stream:"host-screen", stereo: true, audioKbps: 192, codec: prefs.codec });
+    if (id) toast(screenAudioNotice(m), m.getAudioTracks().length ? "ok" : "");
     if (id) setState({ stage: [...(state.stage || []), id], layout: "screen" });
   } catch (e) { if (e.name !== "NotAllowedError") toast("Pantalla: " + e.message, "err"); }
 };
@@ -996,7 +1017,15 @@ $$("#inviteOpts select, #inviteOpts input[type=checkbox], #inviteOpts input[type
 $("#invCopy").onclick = () => copy(inviteURL());
 renderInvite();
 
-window.addEventListener("pagehide", () => { studioWorkspace.destroy(); telemetry.destroy(); cinema.destroy(); comp.stop(); scenePrev.stop(); });
+window.addEventListener("pagehide", e => { if (!e.persisted) { studioWorkspace.destroy(); telemetry.destroy(); cinema.destroy(); comp.stop(); scenePrev.stop(); roomAudio.close(); } });
+const resumeStudioAudio = () => {
+  if (document.visibilityState !== "visible") return;
+  roomAudio.resume(); mixer.ctx.resume().catch(() => {}); levelMeter.ctx?.resume().catch(() => {});
+  for (const source of sources.values()) source.video?.play().catch(() => {});
+};
+document.addEventListener("visibilitychange", resumeStudioAudio);
+document.addEventListener("pointerdown", resumeStudioAudio, true);
+window.addEventListener("pageshow", resumeStudioAudio);
 
 // Persistence is opt-in and host-only. Server state saves as it changes;
 // these controls also retain local production settings without extending TTL.

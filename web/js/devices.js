@@ -360,12 +360,21 @@ export async function openScreen() {
   try {
     return await navigator.mediaDevices.getDisplayMedia({
       video, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      systemAudio: "include", selfBrowserSurface: "exclude", surfaceSwitching: "include",
+      systemAudio: "include", windowAudio: "system", selfBrowserSurface: "exclude", surfaceSwitching: "include", preferCurrentTab: false,
     });
   } catch (e) {
-    if (e.name === "NotAllowedError" || e.name === "AbortError") throw e;
-    return navigator.mediaDevices.getDisplayMedia({ video: true }); // Safari / older browsers
+    if (!["TypeError", "OverconstrainedError"].includes(e.name)) throw e;
+    // Unsupported optional hints must never silently discard the requested audio.
+    return navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
   }
+}
+
+export function screenAudioNotice(stream) {
+  return stream.getAudioTracks().length ? "Pantalla compartida con audio." : "La pantalla no incluye audio. Para enviarlo, comparte una pestaña y marca «Compartir audio de la pestaña»; el audio del sistema depende del navegador y del equipo.";
+}
+
+export function resumeCaptureAudio() {
+  if (gainCtx.ctx && gainCtx.ctx.state !== "running") gainCtx.ctx.resume().catch(() => {});
 }
 
 // Audio graphs created before a user gesture start suspended: wake them on the first click.

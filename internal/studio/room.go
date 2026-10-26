@@ -265,18 +265,34 @@ func (r *Room) addStream(s *sfu.Stream, permit func() bool) bool {
 		}
 		r.mu.Unlock()
 		if removed {
-			r.broadcast(Msg{Type: "stream-removed", Stream: s.ID}, "")
+			r.broadcast(Msg{Type: "stream-removed", Stream: s.ID, Revision: s.Revision}, "")
 		}
 	})
 	go func() {
 		select {
 		case <-s.Ready():
+		case <-s.Done():
+			return
+		}
+		announced := -1
+		for {
 			if r.Stream(s.ID) != s {
 				return
 			}
 			inf := s.Info()
-			r.broadcast(Msg{Type: "stream-added", Info: &inf, Name: r.label(s)}, "")
-		case <-s.Done():
+			if len(inf.Tracks) > announced {
+				kind := "stream-updated"
+				if announced < 0 {
+					kind = "stream-added"
+				}
+				announced = len(inf.Tracks)
+				r.broadcast(Msg{Type: kind, Info: &inf, Name: r.label(s)}, "")
+			}
+			select {
+			case <-s.TracksChanged():
+			case <-s.Done():
+				return
+			}
 		}
 	}()
 	return true

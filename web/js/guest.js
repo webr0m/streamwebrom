@@ -9,7 +9,7 @@
 //   &quality=0|1|2 or &height=, &fps=, &stereo, &denoise=0, &echo=0, &autogain=0
 //   &videodevice= &audiodevice= &outputdevice=  index (1..n), part of the name, or 0 = off
 //   &novideo / &noaudio     audio-only / video-only
-import { $, el, toast, params, api, Signal, publish, subscribe, levelMeter } from "./rtc.js";
+import { $, el, toast, params, api, Signal, publish, subscribe, levelMeter, staleRevision } from "./rtc.js";
 import { listDevices, openScreen, loadPrefs, savePrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain } from "./devices.js";
 import { remoteSnapshot, remoteStats, CAMCTL } from "./remote.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
@@ -18,6 +18,8 @@ import { callGrid } from "./call-grid.js";
 import { roomTelemetry, metricText } from "./telemetry.js";
 import { immersive } from "./immersive.js";
 import { watchConnection, connectionHealthy } from "./connection-health.js";
+import { RoomAudio, pictureInPicture } from "./room-audio.js";
+import { screenAudioNotice, resumeCaptureAudio } from "./devices.js";
 
 const room = (params.get("room") || "").toLowerCase();
 if (!room) location.href = "/";
@@ -27,6 +29,10 @@ let screenAllowed = false, screenPending = false, screenOpening = false, screenA
 const extraCams = new Map(); // pubId -> { pub, media }
 let state = {};
 const remotes = new Map(); // streamId -> { tile, sub, video }
+const remoteInfo = new Map(), remoteRetries = new Map();
+const roomAudio = new RoomAudio(blocked => $("#enableAudio")?.classList.toggle("hidden", !blocked));
+$("#enableAudio").onclick = () => roomAudio.resume();
+const closePiP = pictureInPicture($("#floatingVideo"), () => $("#grid .tile.expanded video") || $('#grid .tile:not([data-id="me"]) video') || $('#grid [data-id="me"] video'), text => toast(text));
 const sig = new Signal();
 const cinema = immersive($("#call"), $("#callFullscreen"), $("#exitFullscreen"));
 const telemetry = roomTelemetry(sig, () => pub?.pc, $("#roomPing"), peers => {
@@ -102,7 +108,7 @@ async function startPreview() {
 }
 
 async function onPrefChange(p, what) {
-  if (what === "speaker") { for (const r of remotes.values()) applySink(r.video, p.speaker); return; }
+  if (what === "speaker") { for (const id of remotes.keys()) { const audio = roomAudio.get(id); if (audio) applySink(audio, p.speaker); } return; }
   if (what === "other") {
     mirrorPreview($("#preview"));
     const me = $('[data-id="me"] video'); if (me) mirrorPreview(me);
@@ -233,7 +239,7 @@ sig.on("disconnected", () => {
   if (sig.closed) return; // Leave/kick already replaced the call's DOM.
   $("#retryMedia").disabled = reconnectingGuest;
   try { pub?.pc.close(); } catch {} pub = null;
-  for (const id of [...remotes.keys()]) unwatch(id);
+  for (const id of [...remoteInfo.keys()]) unwatch(id);
   if (entered) {
     connectionStatus("");
     lossTimer = setTimeout(() => {
@@ -265,8 +271,8 @@ async function resume(m) {
   state = m.state || state;
   // Clear only the old session before awaiting publication. A stream-added
   // received during negotiation belongs to the new session and must survive.
-  for (const id of [...remotes.keys()]) unwatch(id);
-  for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
+  for (const id of [...remoteInfo.keys()]) unwatch(id);
+  for (const s of m.streams || []) watch(s.id, s.kind, s.owner, "", s.revision);
   try { pub?.pc.close(); } catch {}
   pub = null;
   await connectMedia();
@@ -300,15 +306,16 @@ async function enter(m) {
   await connectMedia();
   if (sig.closed) return;
   setMic(micOn()); setCam(camOn());
-  for (const s of m.streams || []) watch(s.id, s.kind, s.owner);
+  for (const s of m.streams || []) watch(s.id, s.kind, s.owner, "", s.revision);
   for (const c of m.chat || []) addChat(c);
   updateStageBadge();
   if (params.has("screenshare") || params.has("ss")) $("#screenBtn").click();
 }
 
 // ---------- remote media ----------
-sig.on("stream-added", (m) => watch(m.info.id, m.info.kind, m.info.owner, m.name));
-sig.on("stream-removed", (m) => unwatch(m.stream));
+sig.on("stream-added", (m) => watch(m.info.id, m.info.kind, m.info.owner, m.name, m.info.revision));
+sig.on("stream-updated", (m) => { if (staleRevision(m.info.revision, remoteInfo.get(m.info.id)?.revision)) return; unwatch(m.info.id); watch(m.info.id, m.info.kind, m.info.owner, m.name, m.info.revision); });
+sig.on("stream-removed", (m) => { const current = remoteInfo.get(m.stream); if (m.revision && current?.revision && m.revision !== current.revision) return; unwatch(m.stream); });
 sig.on("state", (m) => { state = m.state; updateStageBadge(); });
 sig.on("screen-permission", screenPermission);
 sig.on("chat", (m) => addChat(m.comment));
@@ -396,7 +403,7 @@ async function remoteControl(action, v) {
     }
     case "deafen": case "undeafen":
       deafened = action === "deafen";
-      for (const r of remotes.values()) if (r.video) r.video.muted = deafened;
+      for (const id of remotes.keys()) { const audio = roomAudio.get(id); if (audio) audio.muted = deafened; }
       return toast(deafened ? "El anfitrión silenció lo que escuchas (por ejemplo, para que no se acople)" : "Vuelves a escuchar la sala");
     case "message":
       return showHostMessage(String(v || "").slice(0, 500));
@@ -430,30 +437,50 @@ function ask(text, btn, fn) {
   setTimeout(() => box.remove(), 15000);
 }
 
-async function watch(id, kind, owner, name) {
-  if (kind === "program" || owner === myId || remotes.has(id) || id === pub?.id || id === screenPub?.id || extraCams.has(id)) return;
-  const pending = {};
+async function watch(id, kind, owner, name, revision) {
+  if (kind === "program" || owner === myId || id === pub?.id || id === screenPub?.id || extraCams.has(id)) return;
+  const previous = remoteInfo.get(id);
+  if (staleRevision(revision, previous?.revision)) return;
+  if (remotes.has(id) && (!revision || previous?.revision === revision)) return;
+  if (remotes.has(id)) unwatch(id);
+  remoteInfo.set(id, { kind, owner, name, revision });
+  clearTimeout(remoteRetries.get(id)); remoteRetries.delete(id);
+  const pending = { revision };
   remotes.set(id, pending);
   try {
     const sub = await subscribe(sig, id);
     if (remotes.get(id) !== pending) { sub.close(); return; }
     const lvl = sub.stream.getAudioTracks().length ? levelMeter(sub.stream) : () => 0;
     const tile = addTile(id, sub.stream, sub.name || name || "Invitado", false, lvl, kind, owner);
-    remotes.set(id, { sub, tile, level: lvl, video: tile.querySelector("video") });
-  } catch { if (remotes.get(id) === pending) remotes.delete(id); }
+    const entry = { sub, tile, level: lvl, video: tile.querySelector("video"), revision };
+    remotes.set(id, entry);
+    entry.stopWatch = watchConnection(sub.pc, () => retryRemote(id, entry));
+  } catch { if (remotes.get(id) === pending) retryRemote(id, pending); }
 }
-function unwatch(id) {
+function retryRemote(id, entry) {
+  if (remotes.get(id) !== entry || sig.closed || !remoteInfo.has(id)) return;
+  unwatch(id, false);
+  remoteRetries.set(id, setTimeout(() => {
+    remoteRetries.delete(id); const info = remoteInfo.get(id);
+    if (info && sig.ready) watch(id, info.kind, info.owner, info.name, info.revision);
+  }, 1000));
+}
+function unwatch(id, forget = true) {
+  clearTimeout(remoteRetries.get(id)); remoteRetries.delete(id);
   const r = remotes.get(id);
-  r?.sub?.close(); r?.level?.close?.(); r?.tile?.remove();
+  r?.stopWatch?.(); r?.sub?.close(); r?.level?.close?.(); r?.tile?.remove(); roomAudio.remove(id);
   remotes.delete(id);
+  if (forget) remoteInfo.delete(id);
 }
 
 function addTile(id, stream, name, mine, level, kind = "camera", owner = "") {
   const v = el("video", { playsinline: true, autoplay: true });
-  v.muted = mine || deafened; v.srcObject = stream;
+  v.muted = true; v.srcObject = stream;
   if (mine) mirrorPreview(v); else applySink(v, prefs.speaker);
-  v.play().catch(() => { v.muted = true; v.play().catch(() => {}); document.addEventListener("click", () => { v.muted = mine || deafened; v.play().catch(() => {}); }, { once: true }); });
-  const vol = mine ? null : el("input", { type: "range", min: 0, max: 1, step: 0.05, value: 1, title: "Volumen (solo para ti)", class: "tilevol", oninput: (e) => { v.volume = Number(e.target.value); } });
+  v.play().catch(() => {});
+  const audio = mine ? null : roomAudio.add(id, stream); if (audio) audio.muted = deafened;
+  if (audio) applySink(audio, prefs.speaker);
+  const vol = mine ? null : el("input", { type: "range", min: 0, max: 1, step: 0.05, value: 1, title: "Volumen (solo para ti)", class: "tilevol", oninput: (e) => { if (audio) audio.volume = Number(e.target.value); } });
   const tile = el("div", { class: "tile", "data-id": id, "data-name": name, "data-kind": kind, "data-peer": mine ? myId : owner }, v,
     el("span", { class: "tile-latency", title: "Latencia de ida y vuelta (RTT) de este participante al servidor; no es el retraso total del video", text: "RTT —" }),
     el("button", { class: "tile-focus", type: "button", "aria-label": `Ampliar video de ${name}`, "aria-pressed": "false" }),
@@ -571,6 +598,7 @@ async function shareScreen() {
     const publication = await publish(sig, opened, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail", codec: prefs.codec, stereo: true, audioKbps: 192 });
     if (sig.closed || attempt !== screenAttempt || !screenAllowed) { publication.stop(); opened.getTracks().forEach(t => t.stop()); return; }
     screenPub = publication;
+    toast(screenAudioNotice(opened), opened.getAudioTracks().length ? "ok" : "");
     opened.getVideoTracks()[0].onended = () => stopScreen();
   } catch (e) { if (attempt === screenAttempt) { stopScreen(); if (!sig.closed && e.name !== "NotAllowedError" && e.name !== "AbortError") toast(explain(e), "err"); } }
   finally { if (attempt === screenAttempt) screenOpening = false; renderScreenPermission(); }
@@ -615,7 +643,9 @@ function leave(text) {
   // Closing signalling first avoids queued unpublish operations delaying the
   // server's leave cleanup when a TURN connection takes time to shut down.
   sig.close(); pub?.stop(); screenPub?.stop(); for (const x of extraCams.values()) x.pub.stop();
-  clearTimeout(lossTimer); clearInterval(meterTimer); stopMediaWatch(); gridLayout.destroy(); telemetry.destroy(); cinema.destroy();
+  clearTimeout(lossTimer); clearInterval(meterTimer); stopMediaWatch(); gridLayout.destroy(); telemetry.destroy(); cinema.destroy(); closePiP();
+  for (const id of [...remoteInfo.keys()]) unwatch(id);
+  roomAudio.close();
   screenMedia?.getTracks().forEach(t => t.stop());
   for (const x of extraCams.values()) x.media.getTracks().forEach(t => t.stop());
   media?.getTracks().forEach((t) => t.stop());
@@ -658,3 +688,26 @@ function fly(e) {
 }
 
 window.addEventListener("beforeunload", () => savePrefs(prefs));
+
+// Switching tabs is not leaving the room. Resume real media after OS/browser
+// interruptions; never close a healthy socket merely because the page is hidden.
+let foregroundRecovery = false;
+async function resumeForeground() {
+  if (document.visibilityState !== "visible" || !entered || sig.closed || foregroundRecovery) return;
+  foregroundRecovery = true;
+  try {
+    roomAudio.resume(); resumeCaptureAudio(); levelMeter.ctx?.resume().catch(() => {});
+    for (const video of document.querySelectorAll("#grid video")) video.play().catch(() => {});
+    if (!sig.ready || sig.ws?.readyState !== 1) { if (navigator.onLine !== false) await sig.reconnect(); return; }
+    for (const kind of ["audio", "video"]) {
+      const tracks = kind === "audio" ? media.getAudioTracks() : media.getVideoTracks();
+      if (tracks.some(t => t.readyState === "ended")) await swapDevices(kind === "audio" ? "audio" : "video", true);
+    }
+    if (pub && ["failed", "closed"].includes(pub.pc.connectionState)) await connectMedia();
+  } catch (e) { if (!sig.closed) toast(`No se pudo recuperar la llamada: ${explain(e)}`, "err"); }
+  finally { foregroundRecovery = false; }
+}
+document.addEventListener("visibilitychange", resumeForeground);
+document.addEventListener("resume", resumeForeground);
+window.addEventListener("pageshow", resumeForeground);
+window.addEventListener("online", resumeForeground);

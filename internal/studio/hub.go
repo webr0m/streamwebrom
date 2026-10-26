@@ -329,7 +329,11 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 	case "unpublish":
 		p.mu.Lock()
 		s := p.pubs[m.Stream]
-		delete(p.pubs, m.Stream)
+		if s != nil && p.matchesNegotiation(m.Negotiation, s.PC()) {
+			delete(p.pubs, m.Stream)
+		} else {
+			s = nil
+		}
 		p.mu.Unlock()
 		if s != nil {
 			// TURN teardown can block. Free the room ID before closing the PC,
@@ -341,7 +345,7 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 			}
 			r.mu.Unlock()
 			if removed {
-				r.broadcast(Msg{Type: "stream-removed", Stream: s.ID}, "")
+				r.broadcast(Msg{Type: "stream-removed", Stream: s.ID, Revision: s.Revision}, "")
 				h.dropStreams(r, map[string]*sfu.Stream{s.ID: s}, true)
 			}
 			s.Close()
@@ -352,7 +356,11 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 	case "answer":
 		p.mu.Lock()
 		sub := p.subs[m.Stream]
+		stale := sub != nil && !p.matchesNegotiation(m.Negotiation, sub.PC())
 		p.mu.Unlock()
+		if stale {
+			return nil
+		}
 		if sub == nil || m.SDP == nil {
 			return errors.New("no pending subscription")
 		}
@@ -360,7 +368,11 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 	case "unsubscribe":
 		p.mu.Lock()
 		sub := p.subs[m.Stream]
-		delete(p.subs, m.Stream)
+		if sub != nil && p.matchesNegotiation(m.Negotiation, sub.PC()) {
+			delete(p.subs, m.Stream)
+		} else {
+			sub = nil
+		}
 		p.mu.Unlock()
 		if sub != nil {
 			sub.Close()
@@ -611,7 +623,7 @@ func (h *Hub) leave(p *Peer) {
 	}
 	r.mu.Unlock()
 	for _, id := range removed {
-		r.broadcast(Msg{Type: "stream-removed", Stream: id}, "")
+		r.broadcast(Msg{Type: "stream-removed", Stream: id, Revision: pubs[id].Revision}, "")
 	}
 	for _, s := range pubs {
 		s.Close()
@@ -774,7 +786,7 @@ func (h *Hub) publish(ctx context.Context, p *Peer, m Msg) error {
 	}
 	p.pubs[id] = s
 	p.mu.Unlock()
-	if m.Trickle {
+	if m.Negotiation != "" {
 		p.registerICE(m.Negotiation, s.PC(), s.Done())
 	}
 	var permit func() bool
@@ -835,7 +847,7 @@ func (h *Hub) subscribe(ctx context.Context, p *Peer, m Msg) error {
 	}
 	p.subs[s.ID] = sub
 	p.mu.Unlock()
-	if m.Trickle {
+	if m.Negotiation != "" {
 		p.registerICE(m.Negotiation, sub.PC(), sub.Done())
 	}
 	p.Send(Msg{Type: "offer", Stream: s.ID, SDP: offer, ReqID: m.ReqID, Name: p.room.label(s)})

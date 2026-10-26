@@ -37,6 +37,7 @@ type Msg struct {
 
 	// media
 	Stream      string                     `json:"stream,omitempty"`
+	Revision    string                     `json:"revision,omitempty"`
 	Kind        string                     `json:"kind,omitempty"`
 	SDP         *webrtc.SessionDescription `json:"sdp,omitempty"`
 	Info        *sfu.Info                  `json:"info,omitempty"`
@@ -120,7 +121,7 @@ func (p *Peer) registerICE(id string, pc *webrtc.PeerConnection, done <-chan str
 }
 
 func (p *Peer) iceCallback(m Msg) ([]func(webrtc.ICECandidateInit), error) {
-	if !m.Trickle {
+	if !m.Trickle && m.Negotiation == "" {
 		return nil, nil
 	}
 	if !streamIDRe.MatchString(m.Negotiation) {
@@ -132,9 +133,18 @@ func (p *Peer) iceCallback(m Msg) ([]func(webrtc.ICECandidateInit), error) {
 	if exists {
 		return nil, errors.New("ICE negotiation already exists")
 	}
+	if !m.Trickle {
+		return nil, nil
+	}
 	return []func(webrtc.ICECandidateInit){func(c webrtc.ICECandidateInit) {
 		p.Send(Msg{Type: "ice", Negotiation: m.Negotiation, Candidate: &c})
 	}}, nil
+}
+
+// Legacy clients omit negotiation. Modern clients scope every control message
+// so delayed teardown/answers cannot touch a replacement with the same ID.
+func (p *Peer) matchesNegotiation(id string, pc *webrtc.PeerConnection) bool {
+	return id == "" || p.icePCs[id] == pc
 }
 
 // role reads the peer's role; it changes once, when the host admits a

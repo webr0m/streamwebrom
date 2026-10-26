@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace StreamWebRom.Launcher;
 
 /// <summary>
-/// Publishes the local server on a public hostname (e.g. https://stream.webrom.lat)
+/// Publishes the local server on a public hostname (e.g. https://stream.webrom.cc)
 /// through a Cloudflare Tunnel. Cloudflare terminates TLS and proxies HTTP and
 /// WebSockets to http://localhost:PORT; WebRTC media still flows over UDP straight
 /// to this PC (forward the UDP media port on your router for best results).

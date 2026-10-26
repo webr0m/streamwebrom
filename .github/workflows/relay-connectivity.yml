@@ -5,7 +5,7 @@ on:
       url:
         description: HTTPS address of the installation to test
         type: string
-        default: https://stream.webrom.lat
+        default: https://stream.webrom.cc
         required: true
       provider:
         type: choice

@@ -5,6 +5,7 @@ import { senderProfile } from "./bandwidth.js";
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+export const staleRevision = (incoming, current) => !!(incoming && current && incoming < current);
 
 export function el(tag, attrs = {}, ...children) {
   const n = document.createElement(tag);
@@ -282,7 +283,7 @@ function incrementalICE(sig, pc) {
     if (ready) send(value); else if (local.length < 128) local.push(value);
   };
   return {
-    fields: sig.trickle ? { trickle: true, negotiation } : {},
+    fields: { ...(sig.trickle ? { trickle: true } : {}), negotiation },
     signal: controller.signal,
     ready() { if (stopped) return; ready = true; local.splice(0).forEach(send); remote.splice(0).forEach(add); },
     close: cleanup,
@@ -348,7 +349,7 @@ export async function publish(sig, media, opts = {}) {
   } catch (e) {
     ice.close();
     pc.close(); // do not leak a half-open connection (and its camera reference)
-    if (res?.stream && sig.ws === socket) sig.send({ type: "unpublish", stream: res.stream });
+    if (res?.stream && sig.ws === socket) sig.send({ type: "unpublish", stream: res.stream, negotiation: ice.fields.negotiation });
     throw e;
   }
   let tuning = Promise.resolve(), appliedMode = sig.bandwidthMode;
@@ -359,7 +360,7 @@ export async function publish(sig, media, opts = {}) {
   sig.addEventListener("state", onMode); sig.addEventListener("disconnected", cleanup);
   return {
     id: res.stream, pc, senders, opts,
-    stop() { cleanup(); ice.close(); try { if (sig.ws === socket) sig.send({ type: "unpublish", stream: res.stream }); } catch {} pc.close(); },
+    stop() { cleanup(); ice.close(); try { if (sig.ws === socket) sig.send({ type: "unpublish", stream: res.stream, negotiation: ice.fields.negotiation }); } catch {} pc.close(); },
     /** Hot-swap a device without renegotiating (falls back to null = silence/black). */
     async replaceTrack(kind, track) {
       if (!senders[kind]) return false;
@@ -421,16 +422,16 @@ export async function subscribe(sig, id, opts = {}) {
     await pc.setLocalDescription(await pc.createAnswer());
     if (!sig.trickle) await gathered(pc, 10000);
     if (sig.ws !== socket || ice.signal.aborted) throw new Error("Se perdió la conexión con el servidor.");
-    sig.send({ type: "answer", stream: id, sdp: pc.localDescription });
+    sig.send({ type: "answer", stream: id, sdp: pc.localDescription, negotiation: ice.fields.negotiation });
     ice.ready();
     await waitConnected(pc, sig.ice, opts.timeout || 30000, ice.signal);
   } catch (e) {
     ice.close();
     pc.close();
-    if (offer && sig.ws === socket) sig.send({ type: "unsubscribe", stream: id });
+    if (offer && sig.ws === socket) sig.send({ type: "unsubscribe", stream: id, negotiation: ice.fields.negotiation });
     throw e;
   }
-  return { id, name: offer.name, stream: media, pc, close() { ice.close(); if (sig.ws === socket) sig.send({ type: "unsubscribe", stream: id }); pc.close(); } };
+  return { id, name: offer.name, stream: media, pc, close() { ice.close(); if (sig.ws === socket) sig.send({ type: "unsubscribe", stream: id, negotiation: ice.fields.negotiation }); pc.close(); } };
 }
 
 /** Audio level 0..1 for a stream, polled by the caller. */

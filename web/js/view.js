@@ -8,7 +8,7 @@
 //   &label=1 show the name · &mirror=1 · &rotate=90|180|270 · &bg=#hex
 //   &audioonly=1 sound only · &status=0 hide status text · &transparent=1
 //   &stats=1 show resolution / fps / bitrate overlay
-import { $, params, hashParams, Signal, subscribe } from "./rtc.js";
+import { $, params, hashParams, Signal, subscribe, staleRevision } from "./rtc.js";
 import { singleOutput } from "./output-quality.js";
 import { watchConnection } from "./connection-health.js";
 import { Compositor, programGain } from "./compositor.js";
@@ -137,11 +137,22 @@ function syncSubscriptions() {
   for (const [id] of sources) if (!available.has(id) || !needed(available.get(id))) discard(id);
   for (const info of available.values()) if (needed(info)) watch(info);
 }
-function discover(streams) { for (const info of streams || []) available.set(info.id, info); syncSubscriptions(); }
+function discover(streams) {
+  for (const info of streams || []) {
+    const previous = available.get(info.id);
+    if (staleRevision(info.revision, previous?.revision)) continue;
+    if (info.revision && previous?.revision && info.revision !== previous.revision) discard(info.id);
+    available.set(info.id, info);
+  }
+  syncSubscriptions();
+}
 
 sig.on("state", (m) => { state = m.state; syncSubscriptions(); syncAudio(); });
 sig.on("stream-added", (m) => discover([m.info]));
+sig.on("stream-updated", (m) => { if (staleRevision(m.info.revision, available.get(m.info.id)?.revision)) return; discard(m.info.id); discover([m.info]); });
 sig.on("stream-removed", (m) => {
+  const current = available.get(m.stream);
+  if (m.revision && current?.revision && m.revision !== current.revision) return;
   available.delete(m.stream); clearTimeout(retries.get(m.stream)); retries.delete(m.stream);
   const s = sources.get(m.stream); s?.stopWatch?.(); clearTimeout(s?.frameTimer); s?.sub?.close(); if (s) s.video.srcObject = null; sources.delete(m.stream);
   const audio = audios.get(m.stream); if (audio) { audio.pause(); audio.srcObject = null; audio.remove(); } audios.delete(m.stream);
@@ -180,7 +191,7 @@ function startStats(pc) {
   }, 1000);
 }
 
-window.addEventListener("pagehide", () => { sig.close(); resetMedia(); compositor?.stop(); output?.stop(); });
+window.addEventListener("pagehide", e => { if (!e.persisted) { sig.close(); resetMedia(); compositor?.stop(); output?.stop(); } });
 
 // Double-click = full screen (handy for the "pantalla virtual" window on a projector or second monitor).
 document.addEventListener("dblclick", () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {}); else document.exitFullscreen(); });
