@@ -105,7 +105,12 @@ with tempfile.TemporaryDirectory(prefix='swr-multiparty-') as folder,sync_playwr
     guests[1].wait_for_function('()=>__updates.includes("host-screen")',timeout=20000)
     obs=page();obs.goto(a.url+'/view?room='+keys['room']+'&stream=host-screen#key='+keys['viewKey']);advancing(obs,'#single')
     scene=page();scene.goto(a.url+'/view?room='+keys['room']+'&scene=1#key='+keys['viewKey'])
-    scene.wait_for_function('''async()=>{for(const pc of __pcs){if(pc.connectionState!=='connected'||!pc.remoteDescription?.sdp.includes('host-screen'))continue;const track=pc.getReceivers().find(r=>r.track.kind==='audio')?.track;if(!track)continue;const stats=await pc.getStats();const received=[...stats.values()].some(s=>s.type==='inbound-rtp'&&s.kind==='audio'&&s.totalAudioEnergy>0);if(received&&__audios.some(a=>!a.paused&&!a.muted&&a.volume>0&&a.srcObject?.getAudioTracks().some(t=>t.id===track.id)))return true}return false}''',timeout=40000)
+    scene_ready=False;scene_deadline=time.monotonic()+40
+    while time.monotonic()<scene_deadline:
+        scene_ready=scene.evaluate('''async()=>{for(const pc of __pcs){if(pc.connectionState!=='connected'||!pc.remoteDescription?.sdp.includes('host-screen'))continue;const track=pc.getReceivers().find(r=>r.track.kind==='audio')?.track;if(!track)continue;const stats=await pc.getStats();const received=[...stats.values()].some(s=>s.type==='inbound-rtp'&&s.kind==='audio'&&s.totalAudioEnergy>0);if(received&&__audios.some(a=>!a.paused&&!a.muted&&a.volume>0&&a.srcObject?.getAudioTracks().some(t=>t.id===track.id)))return true}return false}''')
+        if scene_ready:break
+        scene.wait_for_timeout(150)
+    assert scene_ready,'Screen audio was not audible in the OBS scene'
     # An authorized panelist also shares audio to the host and other panelists.
     host.locator('#backstage [data-id="'+ids[1]+'"] .stagebtn').click()
     guests[0].locator('#screenBtn').click();host.get_by_role('button',name='Autorizar pantalla',exact=True).click();guests[0].locator('#startScreen').click()
