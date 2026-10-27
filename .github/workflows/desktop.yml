@@ -27,6 +27,10 @@ jobs:
       - name: capture authorization and lifecycle tests
         working-directory: desktop
         run: npm test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-audio-windows
+          path: desktop/vendor/native-audio/build/Release/electron_native_screenshare.node
       - name: desktop UI smoke
         shell: pwsh
         run: |

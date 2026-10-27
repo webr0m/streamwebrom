@@ -1,4 +1,4 @@
-const {_electron,expect}=require('playwright');
+const {_electron}=require('playwright');const {expect}=require('@playwright/test');
 const http=require('node:http');const path=require('node:path');const assert=require('node:assert/strict');
 (async()=>{
   const content=http.createServer((_q,r)=>{r.setHeader('Content-Type','text/html');r.end('<!doctype html><title>Contenido de prueba</title><body style="background:#258;color:white"><h1>Contenido de prueba</h1><canvas id="c" width="640" height="360"></canvas><script>const x=c.getContext("2d");let n=0;setInterval(()=>{x.fillStyle=`hsl(${n++%360} 80% 50%)`;x.fillRect(0,0,640,360)},30)</script>')});
@@ -9,10 +9,10 @@ const http=require('node:http');const path=require('node:path');const assert=req
   try{
     const errors=[],room=await app.firstWindow();room.on('pageerror',e=>errors.push(e.message));
     await expect(room.locator('#status')).toHaveText('conectado',{timeout:30000});
-    assert.equal(await app.evaluate(()=>require(process.cwd()+'/main.cjs').nativeAvailable()),true,'native N-API module must load inside Electron');
+    assert.equal(await app.evaluate(({app})=>require(app.getAppPath()+'/main.cjs').nativeAvailable()),true,'native N-API module must load inside Electron');
     assert.equal(await room.evaluate(()=>window.StreamWebRomCapture.version),1);
     await assert.rejects(room.evaluate(()=>window.StreamWebRomCapture.start('not-authorized')));
-    await app.evaluate(async(_electron,url)=>require(process.cwd()+'/main.cjs').openContent(url),'http://127.0.0.1:'+content.address().port);
+    await app.evaluate(async({app},url)=>require(app.getAppPath()+'/main.cjs').openContent(url),'http://127.0.0.1:'+content.address().port);
     const [tab]=app.windows().filter(p=>p!==room);
     assert.equal(await tab.evaluate(()=>typeof window.StreamWebRomCapture),'undefined','content tabs must not receive the native bridge');
     await room.locator('#addScreen').click();

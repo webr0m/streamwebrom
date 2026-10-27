@@ -1,7 +1,7 @@
-const packager=require('@electron/packager');
 const path=require('node:path');
 const fs=require('node:fs');
 (async()=>{
+  const {packager}=await import('@electron/packager');
   const runtime=path.join(__dirname,'vendor/native-audio/build/Release/electron_native_screenshare.node');
   if(!fs.existsSync(runtime))throw new Error('Build native audio before packaging');
   const keep=new Set(['/vendor/native-audio/build','/vendor/native-audio/build/Release','/vendor/native-audio/build/Release/electron_native_screenshare.node']);
