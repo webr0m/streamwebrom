@@ -95,13 +95,42 @@ type Peer struct {
 	subs            map[string]*sfu.Subscriber
 	pubs            map[string]*sfu.Stream
 	icePCs          map[string]*webrtc.PeerConnection
+	retiredICE      map[string]time.Time
 	once            sync.Once
 	gone            chan struct{}
 }
 
 func newPeer(conn *websocket.Conn, lim *rate.Limiter) *Peer {
 	return &Peer{ID: token(12), conn: conn, out: make(chan []byte, 256), lim: lim,
-		subs: map[string]*sfu.Subscriber{}, pubs: map[string]*sfu.Stream{}, icePCs: map[string]*webrtc.PeerConnection{}, gone: make(chan struct{})}
+		subs: map[string]*sfu.Subscriber{}, pubs: map[string]*sfu.Stream{}, icePCs: map[string]*webrtc.PeerConnection{}, retiredICE: map[string]time.Time{}, gone: make(chan struct{})}
+}
+
+const retiredICETTL = 2 * time.Minute
+const maxRetiredICE = 256
+
+// Keep a bounded, socket-local tombstone for controls already in flight when
+// a receiver closes (for example when its publisher adds a late audio track).
+// Unknown IDs still fail; a tombstone never resolves to a replacement PC.
+func (p *Peer) retireICELocked(id string) {
+	now := time.Now()
+	oldestID := ""
+	var oldest time.Time
+	for key, until := range p.retiredICE {
+		if !until.After(now) {
+			delete(p.retiredICE, key)
+		} else if oldestID == "" || until.Before(oldest) {
+			oldestID, oldest = key, until
+		}
+	}
+	if len(p.retiredICE) >= maxRetiredICE {
+		delete(p.retiredICE, oldestID)
+	}
+	p.retiredICE[id] = now.Add(retiredICETTL)
+}
+
+func (p *Peer) retiredICELocked(id string) bool {
+	until, ok := p.retiredICE[id]
+	return ok && until.After(time.Now())
 }
 
 // Each negotiation belongs to this authenticated socket. Removing it on close
@@ -115,6 +144,7 @@ func (p *Peer) registerICE(id string, pc *webrtc.PeerConnection, done <-chan str
 		p.mu.Lock()
 		if p.icePCs[id] == pc {
 			delete(p.icePCs, id)
+			p.retireICELocked(id)
 		}
 		p.mu.Unlock()
 	}()
@@ -129,8 +159,9 @@ func (p *Peer) iceCallback(m Msg) ([]func(webrtc.ICECandidateInit), error) {
 	}
 	p.mu.Lock()
 	_, exists := p.icePCs[m.Negotiation]
+	retired := p.retiredICELocked(m.Negotiation)
 	p.mu.Unlock()
-	if exists {
+	if exists || retired {
 		return nil, errors.New("ICE negotiation already exists")
 	}
 	if !m.Trickle {

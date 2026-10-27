@@ -108,39 +108,44 @@ with sync_playwright() as pw:
     blocked.locator('#joinBtn').click()
     expect(blocked.locator('#call')).to_be_visible(timeout=15000)
     expect(blocked.locator('#connectionText')).to_contain_text('TURN', timeout=40000)
-    expect(blocked.locator('#retryMedia')).to_be_enabled()
-    # Restore routing and recover in the same page, without repeating admission.
-    blocked.evaluate('window.__blockICE=false')
-    blocked.locator('#retryMedia').click()
+    assert blocked.locator('#retryMedia').count()==0
+    assert blocked.evaluate('window.__sockets.length===1'), 'Failed entry must not loop or replace the live socket'
+    # A failed initial entry can be retried by reopening the invitation.
+    blocked.reload();expect(blocked.locator('#pre')).to_be_visible()
+    blocked.evaluate('window.__blockICE=false');blocked.locator('#joinBtn').click()
     blocked.wait_for_function("()=>__pcs.some(pc=>pc.connectionState==='connected'&&pc.getSenders().some(s=>s.track))",timeout=30000)
     expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
-    assert blocked.evaluate('window.__sockets.length===2'), 'Retry must replace the signalling socket'
-    assert blocked.evaluate("window.__pcs.some(pc=>pc.connectionState==='connected')")
-    # Lose just the media transport while signalling is still open, as on a
-    # mobile network handover. Clicking reconnect must republish on a new socket
-    # and keep the muted microphone and the existing live camera track.
+    # Weak signal and Android background/foreground transitions must not
+    # recreate any transport, even after the old ten-second warning interval.
     blocked.locator('#micBtn').click()
     blocked.evaluate("""() => {
       window.__camera=document.querySelector('[data-id="me"] video').srcObject.getVideoTracks()[0];
-      const pc=window.__pcs.find(p=>p.connectionState==='connected'&&p.getSenders().some(s=>s.track));
-      pc.close();Object.defineProperty(pc,'connectionState',{value:'failed'});
-      pc.dispatchEvent(new Event('connectionstatechange'));
+      window.__originalPCs=__pcs.length;
+      window.__weak=__pcs.find(p=>p.connectionState==='connected'&&p.getSenders().some(s=>s.track));
+      Object.defineProperty(__weak,'connectionState',{configurable:true,value:'disconnected'});
+      __weak.dispatchEvent(new Event('connectionstatechange'));
+      Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'));
     }""")
-    expect(blocked.locator('#retryMedia')).to_be_visible(timeout=15000)
-    blocked.locator('#retryMedia').click()
-    blocked.wait_for_function("()=>__pcs.some(pc=>pc.connectionState==='connected'&&pc.getSenders().some(s=>s.track))",timeout=30000)
-    expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
-    assert blocked.evaluate('window.__sockets.length===3')
-    expect(blocked.locator('#waiting')).to_be_hidden()
+    blocked.wait_for_timeout(12000)
+    assert blocked.evaluate('__sockets.length===1&&__pcs.length===__originalPCs')
+    expect(blocked.locator('#connection')).to_be_hidden()
+    blocked.evaluate("""()=>{
+      delete __weak.connectionState;
+      delete document.visibilityState;document.dispatchEvent(new Event('visibilitychange'));
+      document.dispatchEvent(new Event('resume'));window.dispatchEvent(new Event('online'));
+    }""")
+    blocked.wait_for_timeout(1000)
+    assert blocked.evaluate('__sockets.length===1&&__pcs.length===__originalPCs')
     assert blocked.evaluate("""() => {
       const media=document.querySelector('[data-id="me"] video').srcObject;
       return media.getVideoTracks()[0]===window.__camera&&window.__camera.readyState==='live'&&media.getAudioTracks().every(t=>!t.enabled);
     }""")
+    # Only an actual closed signalling socket causes a silent rejoin.
     blocked.evaluate('window.__sockets.at(-1).close()')
-    blocked.wait_for_function('() => window.__sockets.length>=4 && window.__sockets.at(-1).readyState===1',timeout=15000)
+    blocked.wait_for_function('() => window.__sockets.length===2 && window.__sockets.at(-1).readyState===1',timeout=15000)
     blocked.wait_for_function("()=>__pcs.some(pc=>pc.connectionState==='connected'&&pc.getSenders().some(s=>s.track))",timeout=30000)
     expect(blocked.locator('#connection')).to_be_hidden(timeout=20000)
-    assert blocked.evaluate("window.__pcs.some(pc=>pc.connectionState==='connected')")
+    expect(blocked.locator('#waiting')).to_be_hidden()
     # Exit and return from a real invitation URL. A same-URL #invite link used
     # to leave the closed session and goodbye DOM in place, especially on phones.
     await_return = blocked.url
@@ -179,5 +184,5 @@ with sync_playwright() as pw:
     expect(safari.locator('#checks')).to_contain_text('Conectado', timeout=10000)
     safari.close(); webkit.close()
     assert not errors, errors
-    print(json.dumps({'ok':True, 'checks':['corrupt storage', 'host camera', 'lobby admission', 'late trickle ICE in both directions', 'guest publication', 'stage', 'OBS media', 'signalling reconnect', 'preflight', 'missing TURN detection', 'blocked ICE deadline and retry', 'media-only reconnect preserves camera, mute and admission', 'exit and return twice with invitation fragment', 'WebKit diagnostics'], 'pageErrors':errors}, ensure_ascii=False))
+    print(json.dumps({'ok':True, 'checks':['corrupt storage', 'host camera', 'lobby admission', 'late trickle ICE in both directions', 'guest publication', 'stage', 'OBS media', 'signalling reconnect', 'preflight', 'missing TURN detection', 'failed initial entry has no reconnect button', 'weak signal and background preserve all transports', 'real socket loss recovers silently', 'exit and return twice with invitation fragment', 'WebKit diagnostics'], 'pageErrors':errors}, ensure_ascii=False))
     mobile_context.close(); context.close(); browser.close()

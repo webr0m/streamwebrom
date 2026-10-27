@@ -17,7 +17,6 @@ import { automaticRoute } from "./network.js";
 import { callGrid } from "./call-grid.js";
 import { roomTelemetry, metricText } from "./telemetry.js";
 import { immersive } from "./immersive.js";
-import { watchConnection, connectionHealthy } from "./connection-health.js";
 import { RoomAudio, pictureInPicture } from "./room-audio.js";
 import { screenAudioNotice, resumeCaptureAudio } from "./devices.js";
 
@@ -181,74 +180,39 @@ if ((params.has("autostart") || params.has("autojoin") || params.has("aj")) && $
 
 let entered = false, rewait = false;
 let connectingMedia = false;
-let mediaGeneration = 0, reconnectingGuest = false;
-let hadMediaConnection = false, lossTimer, stopMediaWatch = () => {};
-function connectionStatus(text, retry = false) {
+let mediaGeneration = 0;
+let hadMediaConnection = false;
+function connectionStatus(text) {
   if (sig.closed) return;
-  $("#connection").classList.toggle("hidden", !text);
+  // Initial entry only: weak signal, paused capture and transient ICE states
+  // must never put a reconnect overlay over a live call.
+  $("#connection").classList.toggle("hidden", hadMediaConnection || !text);
   $("#connectionText").textContent = text;
-  $("#connectionActions").classList.toggle("hidden", !retry);
-  $("#retryMedia").textContent = hadMediaConnection ? "Reconectar" : "Reintentar entrada";
 }
 async function connectMedia() {
   if (connectingMedia) return;
   if (!media.getTracks().length) { connectionStatus(""); return; }
   const generation = ++mediaGeneration;
   connectingMedia = true;
-  $("#retryMedia").disabled = true;
-  if (!hadMediaConnection || reconnectingGuest) connectionStatus("Conectando audio y video…");
+  if (!hadMediaConnection) connectionStatus("Conectando audio y video…");
   try {
     pub?.stop(); pub = null;
     const fresh = await publish(sig, media, pubOpts($("#name").value));
     if (generation !== mediaGeneration) { fresh.stop(); return; }
     pub = fresh;
-    // A reconnect welcome can still list our old transport. Never keep an
-    // audible subscription to our own stable camera ID after republishing.
-    unwatch(pub.id);
-    hadMediaConnection = true; clearTimeout(lossTimer); stopMediaWatch();
+    unwatch(pub.id); // A rejoin snapshot can still contain our old stable ID.
+    hadMediaConnection = true;
     connectionStatus(""); sendMedia(); updateStageBadge();
-    const current = pub;
-    stopMediaWatch = watchConnection(pub.pc,
-      () => { if (pub === current) connectionStatus("Se perdió la conexión de audio y video. Puedes volver a conectarte.", true); },
-      () => { if (pub === current) connectionStatus(""); });
-  } catch (e) { if (generation === mediaGeneration) connectionStatus(e.message, true); }
-  finally { if (generation === mediaGeneration) { connectingMedia = false; if (!sig.closed) $("#retryMedia").disabled = false; } }
+  } catch (e) { if (generation === mediaGeneration) connectionStatus(e.message); }
+  finally { if (generation === mediaGeneration) connectingMedia = false; }
 }
-async function reconnectGuest() {
-  if (reconnectingGuest || sig.closed) return;
-  if (sig.ready && connectionHealthy(pub?.pc)) { connectionStatus(""); return; }
-  reconnectingGuest = true; $("#retryMedia").disabled = true;
-  connectionStatus("Comprobando la conexión para volver a entrar…");
-  try {
-    await sig.reconnect(async () => {
-      const cfg = await api("/api/config");
-      sig.mediaMode = await automaticRoute(cfg, mode => connectionStatus(mode === "local" ? "Comprobando la conexión alternativa…" : "Comprobando la mejor conexión…"), { room, password: sig.joinMsg?.password || $("#pw").value });
-      if (media.getTracks().length && media.getTracks().every(t => t.readyState === "ended")) {
-        const mic = micOn(), cam = camOn();
-        media = await open();
-        media.getAudioTracks().forEach(t => { t.enabled = mic; });
-        media.getVideoTracks().forEach(t => { t.enabled = cam; });
-        const me = $('[data-id="me"] video'); if (me) me.srcObject = media;
-      }
-    });
-  } catch (e) { connectionStatus(`No se pudo reconectar: ${e.message}`, true); }
-  finally { reconnectingGuest = false; if (!sig.closed) $("#retryMedia").disabled = false; }
-}
-$("#retryMedia").onclick = reconnectGuest;
 sig.on("disconnected", () => {
   ++mediaGeneration; connectingMedia = false;
   stopScreen(false);
-  clearTimeout(lossTimer); stopMediaWatch();
-  if (sig.closed) return; // Leave/kick already replaced the call's DOM.
-  $("#retryMedia").disabled = reconnectingGuest;
+  if (sig.closed) return;
   try { pub?.pc.close(); } catch {} pub = null;
   for (const id of [...remoteInfo.keys()]) unwatch(id);
-  if (entered) {
-    connectionStatus("");
-    lossTimer = setTimeout(() => {
-      if (!sig.closed && !sig.ready && !reconnectingGuest) connectionStatus("Se perdió la conexión con el servidor.", true);
-    }, 10000);
-  }
+  if (entered) connectionStatus("");
 });
 sig.on("welcome", (m) => {
   if (rewait) { rewait = false; $("#waiting").classList.add("hidden"); $("#call").classList.remove("hidden"); resume(m); return; }
@@ -257,7 +221,6 @@ sig.on("welcome", (m) => {
 sig.on("denied", () => { document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card" }, el("h2", { text: "El anfitrión no aprobó tu ingreso." })))); });
 sig.on("kicked", () => { sig.close(); leave("El anfitrión te retiró de la sala."); });
 sig.on("reconnected", (m) => {
-  clearTimeout(lossTimer);
   if (!entered) return; // still in the waiting room: the server re-sent "waiting" and the host sees the knock again
   if (m.type === "waiting") { // the server forgot us (e.g. it restarted): wait to be let back in
     rewait = true;
@@ -458,7 +421,6 @@ async function watch(id, kind, owner, name, revision) {
     const tile = addTile(id, sub.stream, sub.name || name || "Invitado", false, lvl, kind, owner);
     const entry = { sub, tile, level: lvl, video: tile.querySelector("video"), revision };
     remotes.set(id, entry);
-    entry.stopWatch = watchConnection(sub.pc, () => retryRemote(id, entry));
   } catch { if (remotes.get(id) === pending) retryRemote(id, pending); }
 }
 function retryRemote(id, entry) {
@@ -647,7 +609,7 @@ function leave(text) {
   // Closing signalling first avoids queued unpublish operations delaying the
   // server's leave cleanup when a TURN connection takes time to shut down.
   sig.close(); pub?.stop(); screenPub?.stop(); for (const x of extraCams.values()) x.pub.stop();
-  clearTimeout(lossTimer); clearInterval(meterTimer); stopMediaWatch(); gridLayout.destroy(); telemetry.destroy(); cinema.destroy(); closePiP();
+  clearInterval(meterTimer); gridLayout.destroy(); telemetry.destroy(); cinema.destroy(); closePiP();
   for (const id of [...remoteInfo.keys()]) unwatch(id);
   roomAudio.close();
   screenMedia?.getTracks().forEach(t => t.stop());
@@ -702,12 +664,13 @@ async function resumeForeground() {
   try {
     roomAudio.resume(); resumeCaptureAudio(); levelMeter.ctx?.resume().catch(() => {});
     for (const video of document.querySelectorAll("#grid video")) video.play().catch(() => {});
-    if (!sig.ready || sig.ws?.readyState !== 1) { if (navigator.onLine !== false) await sig.reconnect(); return; }
+    // Signal alone recovers after a real socket close. Foregrounding must not
+    // replace an open/joining socket or race an existing recovery attempt.
+    if (!sig.ready || sig.ws?.readyState !== 1) return;
     for (const kind of ["audio", "video"]) {
       const tracks = kind === "audio" ? media.getAudioTracks() : media.getVideoTracks();
       if (tracks.some(t => t.readyState === "ended")) await swapDevices(kind === "audio" ? "audio" : "video", true);
     }
-    if (pub && ["failed", "closed"].includes(pub.pc.connectionState)) await connectMedia();
   } catch (e) { if (!sig.closed) toast(`No se pudo recuperar la llamada: ${explain(e)}`, "err"); }
   finally { foregroundRecovery = false; }
 }

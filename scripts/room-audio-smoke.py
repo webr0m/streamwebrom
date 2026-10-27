@@ -13,7 +13,7 @@ if a.public_relay_host:
     with urllib.request.urlopen(req,timeout=15) as r:ip=next(x['data'] for x in json.load(r)['Answer'] if x['type']==1)
     flags.append('--host-resolver-rules=MAP '+a.public_relay_host+' '+ip)
 INIT='''
-window.__pcs=[];window.__sockets=[];window.__sources={};window.__updates=[];window.__providers=[];window.__holdUnsubscribe=false;window.__held=[];window.__answers={};window.__delayScreenAudio=false;window.__audios=[];
+window.__pcs=[];window.__sockets=[];window.__sources={};window.__updates=[];window.__providers=[];window.__holdUnsubscribe=false;window.__held=[];window.__answers={};window.__delayScreenAudio=false;window.__audios=[];window.__signalErrors=[];window.__iceMessages={};
 const NativeAudio=window.Audio;window.Audio=function(...args){const audio=new NativeAudio(...args);__audios.push(audio);return audio};window.Audio.prototype=NativeAudio.prototype;
 const PC=window.RTCPeerConnection;
 window.RTCPeerConnection=class extends PC {
@@ -28,13 +28,19 @@ window.RTCPeerConnection=class extends PC {
 };
 const WS=window.WebSocket;
 window.WebSocket=class extends WS {
- constructor(...args){super(...args);__sockets.push(this);this.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.type==='welcome')__providers.push(m.relayProvider);for(const s of m.streams||[])__sources[s.id]=s;if(m.info){__sources[m.info.id]=m.info;if(m.type==='stream-updated')__updates.push(m.info.id)}})}
- send(data){const m=JSON.parse(data);if(m.type==='answer')__answers[m.stream]=m;if(m.type==='unsubscribe'&&__holdUnsubscribe){__held.push([this,data]);return}return super.send(data)}
+ constructor(...args){super(...args);__sockets.push(this);this.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.type==='error')__signalErrors.push(m.error);if(m.type==='welcome')__providers.push(m.relayProvider);for(const s of m.streams||[])__sources[s.id]=s;if(m.info){__sources[m.info.id]=m.info;if(m.type==='stream-updated')__updates.push(m.info.id)}})}
+ send(data){const m=JSON.parse(data);if(m.type==='ice')__iceMessages[m.negotiation]=m;if(m.type==='answer')__answers[m.stream]=m;if(m.type==='unsubscribe'&&__holdUnsubscribe){__held.push([this,data]);return}return super.send(data)}
 };
 window.__flush=()=>{__holdUnsubscribe=false;for(const [ws,data] of __held.splice(0))if(ws.readyState===1)WS.prototype.send.call(ws,data)};
 navigator.mediaDevices.getDisplayMedia=async()=>{
  const media=document.querySelector('[data-id="me"] video, #backstage [data-id="host-camera"] video').srcObject;
- return new MediaStream(media.getTracks().filter(t=>!window.__screenNoAudio||t.kind==='video').map(t=>t.clone()));
+ const video=media.getVideoTracks()[0].clone(),settings=video.getSettings.bind(video);
+ video.getSettings=()=>({...settings(),displaySurface:window.__screenSurface||'browser'});
+ // External shared-tab sound, distinct from every participant's 440 Hz voice.
+ const ctx=new AudioContext(),tone=ctx.createOscillator(),gain=ctx.createGain(),dest=ctx.createMediaStreamDestination();
+ tone.frequency.value=880;gain.gain.value=.2;tone.connect(gain).connect(dest);tone.start();
+ window.__screenContext=ctx;window.__screenTone=tone;
+ return new MediaStream([video,...(window.__screenNoAudio?[]:dest.stream.getAudioTracks())]);
 };
 '''
 AUDIO='''async selector=>{
@@ -86,22 +92,35 @@ with tempfile.TemporaryDirectory(prefix='swr-multiparty-') as folder,sync_playwr
     all_audio()
     for repeat in range(3):
         victim,observer=guests[0],guests[1]
-        observer.evaluate('id=>{window.__oldInfo=__sources[id];window.__oldAnswer=__answers[id];__holdUnsubscribe=true}',ids[1])
+        observer.evaluate('id=>{window.__oldInfo=__sources[id];window.__oldAnswer=__answers[id];window.__oldICE=Object.values(__iceMessages).find(m=>m.negotiation===__oldAnswer?.negotiation);__holdUnsubscribe=true}',ids[1])
         victim.evaluate('()=>__sockets.at(-1).close()')
         victim.wait_for_function('()=>__sockets.at(-1).readyState===1&&__pcs.some(p=>p.connectionState==="connected"&&p.getSenders().some(s=>s.track))',timeout=45000)
         all_audio()
-        observer.evaluate('''id=>{__flush();if(__oldAnswer)__sockets.at(-1).send(JSON.stringify(__oldAnswer));__sockets.at(-1).dispatchEvent(new MessageEvent('message',{data:JSON.stringify({type:'stream-removed',stream:id,revision:__oldInfo.revision})}));__sockets.at(-1).dispatchEvent(new MessageEvent('message',{data:JSON.stringify({type:'stream-added',info:__oldInfo})}))}''',ids[1])
+        observer.evaluate('''id=>{__flush();if(__oldICE)__sockets.at(-1).send(JSON.stringify(__oldICE));if(__oldAnswer)__sockets.at(-1).send(JSON.stringify(__oldAnswer));__sockets.at(-1).dispatchEvent(new MessageEvent('message',{data:JSON.stringify({type:'stream-removed',stream:id,revision:__oldInfo.revision})}));__sockets.at(-1).dispatchEvent(new MessageEvent('message',{data:JSON.stringify({type:'stream-added',info:__oldInfo})}))}''',ids[1])
         all_audio()
     # Video may be paused by Android while its separate audio remains audible.
     mobile=guests[2]
-    mobile.evaluate('''()=>{Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'));for(const v of document.querySelectorAll('#grid video'))v.pause()}''')
+    mobile.evaluate('''()=>{window.__backgroundCounts=[__pcs.length,__sockets.length];Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'));for(const v of document.querySelectorAll('#grid video'))v.pause()}''')
     all_audio()
+    assert mobile.evaluate('__pcs.length===__backgroundCounts[0]&&__sockets.length===__backgroundCounts[1]'),'Backgrounding replaced an active transport'
     mobile.evaluate('''()=>{delete document.visibilityState;document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}))}''')
     all_audio()
     # A real delayed audio RTP track reaches the SFU after the initial offer.
     host.evaluate('__delayScreenAudio=true');host.locator('#addScreen').click();expect(host.locator('#backstage [data-id="host-screen"]')).to_be_visible(timeout=30000)
     expect(host.locator('#backstage [data-id="host-screen"] .stagebtn.on')).to_be_visible(timeout=15000)
     for g in guests:advancing(g,'[data-id="host-screen"] video')
+    # Screen content is an 880 Hz tone. Participants voices are 440 Hz: the
+    # received screen track must carry content, without a second voice copy.
+    for g in guests:
+        spectrum=g.evaluate('''async()=>{
+          const stream=document.querySelector('[data-id="host-screen"] video').srcObject;
+          const ctx=new AudioContext(),src=ctx.createMediaStreamSource(new MediaStream(stream.getAudioTracks())),an=ctx.createAnalyser();
+          an.fftSize=8192;src.connect(an);await ctx.resume();await new Promise(r=>setTimeout(r,400));
+          const bins=new Float32Array(an.frequencyBinCount);an.getFloatFrequencyData(bins);
+          const power=f=>{const n=Math.round(f*an.fftSize/ctx.sampleRate);return Math.max(...bins.slice(n-2,n+3))};
+          const result={content:power(880),voice:power(440)};src.disconnect();await ctx.close();return result;
+        }''')
+        assert spectrum['content']>-45 and (spectrum['voice'] is None or spectrum['content']-spectrum['voice']>18),spectrum
     guests[1].wait_for_function('()=>__updates.includes("host-screen")',timeout=20000)
     obs=page();obs.goto(a.url+'/view?room='+keys['room']+'&stream=host-screen#key='+keys['viewKey']);advancing(obs,'#single')
     scene=page();scene.goto(a.url+'/view?room='+keys['room']+'&scene=1#key='+keys['viewKey'])
@@ -119,6 +138,7 @@ with tempfile.TemporaryDirectory(prefix='swr-multiparty-') as folder,sync_playwr
     for g in guests[1:]:advancing(g,'[data-id="'+screen_id+'"] video')
     if a.screenshots:
         Path(a.screenshots).mkdir(parents=True,exist_ok=True);host.screenshot(path=str(Path(a.screenshots)/'audio-recovery-host.png'));guests[1].screenshot(path=str(Path(a.screenshots)/'audio-recovery-guest.png'))
+    for item in participants:assert not item.evaluate('__signalErrors'),item.evaluate('__signalErrors')
     assert not errors,errors
     print(json.dumps({'fixture':a.fixture,'participants':4,'reconnections':3,'allDirectedAudioPairs':12,'staleControlsIgnored':True,'staleSourceEventsIgnored':True,'videoPausedAudioContinues':True,'lateHostScreenAudio':True,'guestScreenAudio':True,'obsScreenAudio':True,'pageErrors':errors}),flush=True)
     ctx.close();browser.close()

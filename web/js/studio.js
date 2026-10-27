@@ -9,7 +9,6 @@ import { chatMessage, appendChat, mountComposer } from "./chat.js";
 import { listDevices, openScreen, loadPrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain, QUALITIES, FPS } from "./devices.js";
 import { screenAudioNotice } from "./devices.js";
 import { RoomAudio } from "./room-audio.js";
-import { watchConnection } from "./connection-health.js";
 
 const prefs = loadPrefs();
 const studioWorkspace = workspace(document.querySelector("#studioRoot"));
@@ -234,7 +233,6 @@ async function addRemote(id, kind, owner, name, revision) {
     sub.stream.addEventListener("addtrack", refreshAudio);
     placeholder.audioCleanup = () => sub.stream.removeEventListener("addtrack", refreshAudio);
     monitor(id, sub.stream); refreshAudio();
-    placeholder.stopWatch = watchConnection(sub.pc, () => retryRemote(id, placeholder));
     renderBackstage();
   } catch (e) {
     if (sources.get(id) === placeholder) retryRemote(id, placeholder);
@@ -287,7 +285,8 @@ async function addLocal(media, kind, name, extra = {}, cleanup = null) {
     v.muted = true; v.srcObject = media; v.play().catch(() => {});
     sources.set(pub.id, { video: v, stream: media, name, kind, owner: "me", level: levelMeter(media), local: true, pub, cleanup });
     local.set(pub.id, pub);
-    media.getVideoTracks()[0]?.addEventListener("ended", () => stopLocal(pub.id));
+    // Camera suspension or a device swap must not unpublish its live microphone.
+    if (kind !== "camera") media.getVideoTracks()[0]?.addEventListener("ended", () => stopLocal(pub.id));
     renderBackstage();
     return pub.id;
   } catch (e) { toast(explain(e), "err"); media.getTracks().forEach((t) => t.stop()); cleanup?.(); }
@@ -340,16 +339,18 @@ async function pickExtraCamera() {
 }
 
 // ---------- device settings (host) ----------
-async function onPrefChange(p, what) {
+async function onPrefChange(p, what, quiet = false) {
   scheduleRoomOptions();
   if (what === "speaker") { for (const a of monitors.values()) applySink(a, p.speaker); return; }
   const s = hostCamId && sources.get(hostCamId);
   if (!s || what === "other") return;
   const kind = what === "video" ? "video" : "audio";
   const { stream, warnings } = await openMedia({ ...prefs, camera: kind === "video" ? prefs.camera : "none", mic: kind === "audio" ? prefs.mic : "none" });
+  if (sources.get(hostCamId) !== s || sig.closed) { stream.getTracks().forEach(t => t.stop()); return; }
   warnings.forEach((w) => toast(w, "err"));
   const fresh = kind === "video" ? stream.getVideoTracks()[0] : stream.getAudioTracks()[0];
   const old = kind === "video" ? s.stream.getVideoTracks()[0] : s.stream.getAudioTracks()[0];
+  if (fresh && old) fresh.enabled = old.enabled;
   if (old) { s.stream.removeTrack(old); old.stop(); }
   if (fresh) s.stream.addTrack(fresh);
   await s.pub.replaceTrack(kind, fresh || null);
@@ -358,7 +359,7 @@ async function onPrefChange(p, what) {
   s.video.srcObject = s.stream; s.preview && (s.preview.srcObject = s.stream);
   $("#devCamCtl").replaceChildren(cameraControls(s.stream.getVideoTracks()[0]) || "");
   syncAudio();
-  toast(kind === "video" ? "Cámara cambiada" : "Micrófono cambiado", "ok");
+  if (!quiet) toast(kind === "video" ? "Cámara cambiada" : "Micrófono cambiado", "ok");
 }
 $("#settings").onclick = async () => {
   const dlg = settingsDialog();
@@ -1018,10 +1019,22 @@ $("#invCopy").onclick = () => copy(inviteURL());
 renderInvite();
 
 window.addEventListener("pagehide", e => { if (!e.persisted) { studioWorkspace.destroy(); telemetry.destroy(); cinema.destroy(); comp.stop(); scenePrev.stop(); roomAudio.close(); } });
-const resumeStudioAudio = () => {
+let restoringHostCapture = false;
+const resumeStudioAudio = async () => {
   if (document.visibilityState !== "visible") return;
   roomAudio.resume(); mixer.ctx.resume().catch(() => {}); levelMeter.ctx?.resume().catch(() => {});
   for (const source of sources.values()) source.video?.play().catch(() => {});
+  if (restoringHostCapture || !sig.ready || sig.closed) return;
+  const source = hostCamId && sources.get(hostCamId);
+  if (!source?.local) return;
+  restoringHostCapture = true;
+  try {
+    for (const kind of ["audio", "video"]) {
+      const tracks = kind === "audio" ? source.stream.getAudioTracks() : source.stream.getVideoTracks();
+      if (tracks.some(t => t.readyState === "ended")) await onPrefChange(prefs, kind, true);
+    }
+  } catch (e) { if (!sig.closed) toast(`No se pudo recuperar el dispositivo: ${explain(e)}`, "err"); }
+  finally { restoringHostCapture = false; }
 };
 document.addEventListener("visibilitychange", resumeStudioAudio);
 document.addEventListener("pointerdown", resumeStudioAudio, true);

@@ -311,11 +311,22 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 	case "ice":
 		p.mu.Lock()
 		pc := p.icePCs[m.Negotiation]
+		retired := p.retiredICELocked(m.Negotiation)
 		p.mu.Unlock()
-		if pc == nil || m.Candidate == nil {
+		if m.Candidate == nil || !streamIDRe.MatchString(m.Negotiation) {
+			return errors.New("invalid ICE negotiation")
+		}
+		if retired {
+			return nil
+		}
+		if pc == nil {
 			return errors.New("unknown ICE negotiation")
 		}
-		return pc.AddICECandidate(*m.Candidate)
+		err := pc.AddICECandidate(*m.Candidate)
+		if errors.Is(err, webrtc.ErrConnectionClosed) {
+			return nil // Close and its registry cleanup may run concurrently.
+		}
+		return err
 	case "screen-request":
 		return h.requestScreen(p, m)
 	case "screen-cancel":
@@ -357,14 +368,19 @@ func (h *Hub) handle(ctx context.Context, p *Peer, m Msg) error {
 		p.mu.Lock()
 		sub := p.subs[m.Stream]
 		stale := sub != nil && !p.matchesNegotiation(m.Negotiation, sub.PC())
+		retired := p.retiredICELocked(m.Negotiation)
 		p.mu.Unlock()
-		if stale {
+		if stale || retired {
 			return nil
 		}
 		if sub == nil || m.SDP == nil {
 			return errors.New("no pending subscription")
 		}
-		return sub.PC().SetRemoteDescription(*m.SDP)
+		err := sub.PC().SetRemoteDescription(*m.SDP)
+		if errors.Is(err, webrtc.ErrConnectionClosed) {
+			return nil
+		}
+		return err
 	case "unsubscribe":
 		p.mu.Lock()
 		sub := p.subs[m.Stream]

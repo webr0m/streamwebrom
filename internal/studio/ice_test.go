@@ -2,6 +2,7 @@ package studio
 
 import (
 	"context"
+	"fmt"
 	"github.com/pion/webrtc/v4"
 	"golang.org/x/time/rate"
 	"testing"
@@ -45,5 +46,37 @@ func TestICEIsScopedToAuthenticatedSocket(t *testing.T) {
 			t.Fatal("closed negotiation leaked")
 		}
 		time.Sleep(time.Millisecond)
+	}
+	// A late candidate from an authenticated, already-closed negotiation is
+	// harmless. Never display it as a new participant's connection failure.
+	if err := h.handle(context.Background(), p, Msg{Type: "ice", Negotiation: "owned", Candidate: candidate}); err != nil {
+		t.Fatalf("late candidate for a known retired negotiation: %v", err)
+	}
+	if err := h.handle(context.Background(), other, Msg{Type: "ice", Negotiation: "owned", Candidate: candidate}); err == nil {
+		t.Fatal("retired negotiation leaked across sockets")
+	}
+	if _, err := p.iceCallback(Msg{Trickle: true, Negotiation: "owned"}); err == nil {
+		t.Fatal("retired ID can be reused by a replacement")
+	}
+	if err := h.handle(context.Background(), p, Msg{Type: "answer", Stream: "gone", Negotiation: "owned", SDP: &webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer}}); err != nil {
+		t.Fatalf("late answer for a retired receiver: %v", err)
+	}
+}
+
+func TestRetiredICEMemoryIsBoundedAndExpires(t *testing.T) {
+	p := newPeer(nil, rate.NewLimiter(30, 60))
+	for i := range maxRetiredICE + 30 {
+		p.retireICELocked(fmt.Sprintf("old-%d", i))
+	}
+	if len(p.retiredICE) != maxRetiredICE {
+		t.Fatalf("retired registry size = %d", len(p.retiredICE))
+	}
+	p.retiredICE["expired"] = time.Now().Add(-time.Second)
+	if p.retiredICELocked("expired") {
+		t.Fatal("expired tombstone is still accepted")
+	}
+	p.retireICELocked("fresh")
+	if _, ok := p.retiredICE["expired"]; ok {
+		t.Fatal("expired tombstone was not pruned")
 	}
 }

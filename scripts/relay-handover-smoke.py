@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory(prefix='swr-audio-') as folder, sync_playwright
     # Reproduce a late stream-removed for the old host transport deterministically.
     host.evaluate('()=>__sockets.at(-1).dispatchEvent(new MessageEvent("message",{data:JSON.stringify({type:"stream-removed",stream:"host-camera"})}))')
     expect(host.locator('#backstage [data-id="host-camera"]')).to_be_visible()
-    guest.evaluate('''()=>{window.__retryPrompts=0;new MutationObserver(()=>{if(!document.querySelector('#connection').classList.contains('hidden')&&!document.querySelector('#connectionActions').classList.contains('hidden'))window.__retryPrompts++}).observe(document.querySelector('#connection'),{attributes:true,subtree:true})}''')
+    guest.evaluate('''()=>{window.__retryPrompts=0;new MutationObserver(()=>{if(!document.querySelector('#connection').classList.contains('hidden'))window.__retryPrompts++}).observe(document.querySelector('#connection'),{attributes:true,subtree:true})}''')
     for provider in ['cloudflare','local','cloudflare']:
         host.locator('#studioViewMenu summary').click();host.locator('#relayInfo').click()
         if provider=='cloudflare':host.locator('#cloudflareMaster').fill(master);host.locator('#useCloudflare').click()

@@ -1,4 +1,4 @@
-# Conexión, cuota y alternativa VDO.Ninja (v1.11.3)
+# Conexión, cuota y alternativa VDO.Ninja (v1.11.4)
 
 Al crear un estudio elige **StreamWebRom · relé local** o **VDO.Ninja · sala independiente**. Son salas distintas: crear una sala VDO.Ninja no crea una sala en el SFU local ni usa las credenciales Cloudflare del servidor StreamWebRom.
 

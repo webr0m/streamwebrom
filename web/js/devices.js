@@ -353,24 +353,54 @@ export function settingsDialog(title = "Ajustes de audio y video") {
   return dlg;
 }
 
-/** Screen/window/tab capture with audio where possible, degrading for Safari/Firefox. */
+// Mark our call/output tabs so a browser which ignores selfBrowserSurface can
+// still identify a captured room. No room IDs, keys or participant data leave it.
+const ROOM_CAPTURE_HANDLE = "streamwebrom-room-audio";
+try {
+  if (["/studio", "/guest", "/view"].includes(location.pathname)) navigator.mediaDevices?.setCaptureHandleConfig?.({ handle: ROOM_CAPTURE_HANDLE, permittedOrigins: [location.origin] });
+} catch { /* Capture Handle is optional. */ }
+const screenAudioBlocked = new WeakSet();
+
+// A mixed desktop loopback cannot be unmixed per listener: every participant
+// would hear their voice again. Keep isolated tab audio, or system audio only
+// when the browser confirms that it excludes this document's playback.
+function protectScreenAudio(stream) {
+  const video = stream.getVideoTracks?.()[0];
+  const check = () => {
+    const surface = video?.getSettings?.().displaySurface;
+    const ownRoom = video?.getCaptureHandle?.()?.handle === ROOM_CAPTURE_HANDLE;
+    for (const track of stream.getAudioTracks()) {
+      if (!ownRoom && (surface === "browser" || track.getSettings?.().restrictOwnAudio === true)) continue;
+      screenAudioBlocked.add(stream); stream.removeTrack(track); track.stop();
+    }
+  };
+  check();
+  video?.addEventListener?.("capturehandlechange", check);
+  video?.addEventListener?.("ended", () => video.removeEventListener("capturehandlechange", check), { once: true });
+  return stream;
+}
+
+/** Prefer isolated tab audio; never publish an unfiltered desktop loopback. */
 export async function openScreen() {
   if (!navigator.mediaDevices?.getDisplayMedia) throw Object.assign(new Error("Este dispositivo no permite compartir pantalla."), { name: "NotSupportedError" });
   const video = { frameRate: { ideal: 30, max: 60 }, width: { ideal: 1920 }, height: { ideal: 1080 } };
+  let stream;
   try {
-    return await navigator.mediaDevices.getDisplayMedia({
-      video, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      systemAudio: "include", windowAudio: "system", selfBrowserSurface: "exclude", surfaceSwitching: "include", preferCurrentTab: false,
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { ...video, displaySurface: "browser" }, audio: { restrictOwnAudio: true, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      systemAudio: "exclude", windowAudio: "exclude", selfBrowserSurface: "exclude", surfaceSwitching: "exclude", preferCurrentTab: false,
     });
   } catch (e) {
     if (!["TypeError", "OverconstrainedError"].includes(e.name)) throw e;
     // Unsupported optional hints must never silently discard the requested audio.
-    return navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
   }
+  return protectScreenAudio(stream);
 }
 
 export function screenAudioNotice(stream) {
-  return stream.getAudioTracks().length ? "Pantalla compartida con audio." : "La pantalla no incluye audio. Para enviarlo, comparte una pestaña y marca «Compartir audio de la pestaña»; el audio del sistema depende del navegador y del equipo.";
+  if (screenAudioBlocked.has(stream)) return "Pantalla compartida sin audio del sistema para evitar que las voces vuelvan a la sala. Para enviar sonido, comparte otra pestaña y marca «Compartir audio de la pestaña».";
+  return stream.getAudioTracks().length ? "Pantalla compartida con audio de la fuente, sin mezclar el sonido de la sala." : "La pantalla no incluye audio. Para enviarlo sin eco, comparte otra pestaña y marca «Compartir audio de la pestaña».";
 }
 
 export function resumeCaptureAudio() {
