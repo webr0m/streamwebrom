@@ -119,10 +119,16 @@ ipcMain.handle('capture:start',async(e,id)=>{
 });
 ipcMain.on('capture:ack',(e,id)=>{if(trustedFrame(e,main?.webContents,origin)){const s=lease.get(id);if(s){s.frames=Math.max(0,s.frames-1);backend.ack()}}});
 ipcMain.handle('capture:stop',(e,id)=>{roomEvent(e);return lease.clear(id)});
+// Opening the launcher button twice must not create a second audible copy of
+// the room outside the process tree excluded by system capture.
+if(!app.requestSingleInstanceLock())app.quit();
+else {
+app.on('second-instance',()=>{const win=main||home;if(win&&!win.isDestroyed()){if(win.isMinimized())win.restore();win.show();win.focus()}});
 app.whenReady().then(()=>{
   Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'StreamWebRom',submenu:[{label:'Cambiar servidor',click:()=>{showHome();if(main)main.close()}},{role:'quit'}]},{label:'Vista',submenu:[{role:'reload'},{role:'togglefullscreen'},{role:'zoomIn'},{role:'zoomOut'},{role:'resetZoom'}]}]));
   const arg=process.argv.find(a=>a.startsWith('--url='));if(arg)createRoom(arg.slice(6));else showHome();
 });
+}
 app.on('before-quit',stopAll);
 app.on('window-all-closed',()=>app.quit());
 module.exports={openContent,createRoom,nativeAvailable:()=>!!native,testMode};
