@@ -36,4 +36,4 @@ const http=require('node:http');const path=require('node:path');const assert=req
     console.log(JSON.stringify({sameStudioInterface:true,nativeModuleLoaded:true,unauthorizedCaptureRejected:true,contentTabSandboxed:true,selectedTabVideoPublished:true,pageErrors:errors}));
   }catch(e){console.error('Studio notices:',await room?.locator('#toasts').innerText().catch(()=>''));console.error(diagnostic.join(''));throw e}
   finally{step('close');await Promise.race([app.close(),new Promise(resolve=>setTimeout(()=>{app.process().kill();resolve()},5000).unref())]);await new Promise(resolve=>content.close(resolve));clearTimeout(watchdog)}
-})().catch(e=>{console.error(e);process.exitCode=1});
+})().catch(e=>{console.error(e);process.exit(1)});

@@ -47,6 +47,10 @@ jobs:
         timeout-minutes: 3
         shell: pwsh
         run: |
+          # Windows runners terminate the previous step's child server. Start a
+          # new disposable fixture in the same step as the packaged-client test.
+          Start-Process -FilePath "$env:RUNNER_TEMP/swr-desktop-fixture.exe" -WindowStyle Hidden -ArgumentList '-addr','127.0.0.1:18443','-stun=','-data',"$env:RUNNER_TEMP/swr-packaged-data" -RedirectStandardOutput "$env:RUNNER_TEMP/swr-packaged.log" -RedirectStandardError "$env:RUNNER_TEMP/swr-packaged-error.log"
+          for($i=0;$i -lt 30;$i++){try{Invoke-RestMethod http://127.0.0.1:18443/api/health | Out-Null;break}catch{Start-Sleep -Seconds 1}}
           $env:SWR_CAPTURE_EXECUTABLE = Join-Path $env:GITHUB_WORKSPACE 'desktop/out/StreamWebRom-Capture-win32-x64/StreamWebRom-Capture.exe'
           node desktop/test/smoke.cjs
       - name: archive portable client
