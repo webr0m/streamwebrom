@@ -19,3 +19,5 @@ __pycache__/
 /desktop/node_modules/
 /desktop/vendor/native-audio/build/
 /desktop/out/
+/desktop/test/tone/bin/
+/desktop/test/tone/obj/

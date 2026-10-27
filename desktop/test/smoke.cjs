@@ -6,8 +6,10 @@ const http=require('node:http');const path=require('node:path');const assert=req
   const base=process.env.SWR_DESKTOP_TEST_URL||'http://127.0.0.1:18443';
   const keys=await fetch(base+'/api/rooms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room:'desktop-'+Date.now(),lobby:false})}).then(r=>r.json());
   const app=await _electron.launch({executablePath:require('electron'),args:[path.resolve(__dirname,'..'),'--url='+base+'/studio?room='+keys.room+'#key='+keys.hostKey,'--capture-test','--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
+  const diagnostic=[];app.process().stderr.on('data',data=>{diagnostic.push(String(data));if(diagnostic.length>30)diagnostic.shift()});
+  let room;
   try{
-    const errors=[],room=await app.firstWindow();room.on('pageerror',e=>errors.push(e.message));
+    const errors=[];room=await app.firstWindow();room.on('pageerror',e=>errors.push(e.message));
     await expect(room.locator('#status')).toHaveText('conectado',{timeout:30000});
     assert.equal(await room.evaluate(()=>window.StreamWebRomCapture.version),1);
     await assert.rejects(room.evaluate(()=>window.StreamWebRomCapture.start('not-authorized')));
@@ -27,5 +29,6 @@ const http=require('node:http');const path=require('node:path');const assert=req
     assert.equal(await room.evaluate(()=>typeof require),'undefined');
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({sameStudioInterface:true,nativeModuleLoaded:true,unauthorizedCaptureRejected:true,contentTabSandboxed:true,selectedTabVideoPublished:true,pageErrors:errors}));
-  }finally{await app.close();await new Promise(resolve=>content.close(resolve))}
+  }catch(e){console.error('Studio notices:',await room?.locator('#toasts').innerText().catch(()=>''));console.error(diagnostic.join(''));throw e}
+  finally{await app.close();await new Promise(resolve=>content.close(resolve))}
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -46,7 +46,7 @@ async function openContent(value){
   await win.loadURL(u.href);return true;
 }
 function showPicker(request,callback){
-  if(pendingPicker||!main||request.frame!==main.webContents.mainFrame||!request.userGesture||new URL(request.securityOrigin).origin!==origin){callback(null);return}
+  if(pendingPicker||!main||request.frame!==main.webContents.mainFrame||!request.userGesture||new URL(request.securityOrigin).origin!==origin){console.error('Capture request denied',{pending:!!pendingPicker,topFrame:!!main&&request.frame===main.webContents.mainFrame,userGesture:request.userGesture});callback(null);return}
   pendingPicker={request,callback,sources:new Map()};
   picker=new BrowserWindow({parent:main,width:840,height:700,minWidth:560,minHeight:450,modal:true,title:'Compartir · StreamWebRom',webPreferences:opts('picker-preload.cjs')});
   picker.setMenu(null);
@@ -57,7 +57,9 @@ function createRoom(value){
   const u=serverURL(value);origin=u.origin;
   main=new BrowserWindow({width:1380,height:900,minWidth:720,minHeight:500,title:'StreamWebRom',webPreferences:{...opts('preload.cjs'),partition:'persist:streamwebrom-room'}});
   const wc=main.webContents;
-  wc.session.setPermissionCheckHandler((contents,permission,requestingOrigin)=>contents===wc&&['media','display-capture','fullscreen','speaker-selection'].includes(permission)&&requestingOrigin===origin);
+  wc.session.setPermissionCheckHandler((contents,permission,requestingOrigin)=>{
+    try{return contents===wc&&['media','display-capture','fullscreen','speaker-selection'].includes(permission)&&new URL(requestingOrigin).origin===origin}catch{return false}
+  });
   wc.session.setPermissionRequestHandler((contents,permission,callback,details)=>{
     let allowed=false;try{allowed=contents===wc&&new URL(details.requestingUrl||wc.getURL()).origin===origin&&['media','display-capture','fullscreen','speaker-selection'].includes(permission)}catch{}
     callback(allowed);

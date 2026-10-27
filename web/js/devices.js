@@ -395,7 +395,9 @@ export async function openScreen(options = {}) {
   const audio=options.audio!==false;
   const surface=["window","monitor","browser"].includes(options.surface)?options.surface:"browser";
   const native=globalThis.window?.StreamWebRomCapture;
-  if(native)await native.preferences({theme:document.documentElement.dataset.theme});
+  // Theme selection is advisory. Do not consume the capture click's user
+  // activation by waiting for a round trip to the desktop main process.
+  if(native)native.preferences({theme:document.documentElement.dataset.theme}).catch(()=>{});
   let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
