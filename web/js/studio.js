@@ -6,7 +6,7 @@ import { mountVdo } from "./vdo.js";
 import { immersive } from "./immersive.js";
 import { Compositor, AudioMixer } from "./compositor.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
-import { listDevices, openScreen, loadPrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain, QUALITIES, FPS } from "./devices.js";
+import { listDevices, loadPrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain, QUALITIES, FPS } from "./devices.js";
 import { screenAudioNotice, stopScreenCapture } from "./devices.js";
 import { chooseScreen } from "./screen-share.js";
 import { RoomAudio } from "./room-audio.js";
@@ -377,7 +377,7 @@ $("#addScreen").onclick = async () => {
     if(local.has("host-screen"))stopLocal("host-screen");
     const id = await addLocal(m, "screen", "Pantalla", { stream:"host-screen", stereo: true, audioKbps: 192, codec: prefs.codec });
     if (id) toast(screenAudioNotice(m), m.getAudioTracks().length ? "ok" : "");
-    if (id) setState({ stage: [...(state.stage || []), id], layout: "screen" });
+    if (id) setState({ stage: [...new Set([...(state.stage || []), id])], layout: "screen" });
   } catch (e) { if (e.name !== "NotAllowedError") toast("Pantalla: " + e.message, "err"); }
 };
 $("#addMedia").onclick = () => $("#mediaFile").click();

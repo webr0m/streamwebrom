@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.11.4:** Audio compartido sin devolver las voces de la sala, descarte de ICE atrasado y continuidad al cambiar a otras apps. Sin botones ni reinicios por bajas de señal: recuperación silenciosa únicamente tras el cierre real del enlace. Relé local predeterminado y Cloudflare opcional para salas con contraseña y clave maestra. [Audio y segundo plano](docs/AUDIO-Y-SEGUNDO-PLANO.md), [conexión y VDO.Ninja](docs/CONEXION-Y-VDO.md), [interfaz](docs/INTERFAZ.md), [salas persistentes](docs/SALAS-PERSISTENTES.md), [estudio y OBS](docs/ESTUDIO-Y-OBS.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.12.0:** Captura avanzada de ventanas, pestañas y sistema con audio aislado en Windows x64, conservando la interfaz del estudio. Selector web de fuentes y sonido, con protección frente al retorno de voces. [Captura avanzada](docs/CAPTURA-AVANZADA.md), [audio y segundo plano](docs/AUDIO-Y-SEGUNDO-PLANO.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 

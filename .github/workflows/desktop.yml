@@ -42,6 +42,11 @@ jobs:
       - name: package advanced capture client
         working-directory: desktop
         run: npm run package:windows
+      - name: verify packaged client with the same studio
+        shell: pwsh
+        run: |
+          $env:SWR_CAPTURE_EXECUTABLE = Join-Path $env:GITHUB_WORKSPACE 'desktop/out/StreamWebRom-Capture-win32-x64/StreamWebRom-Capture.exe'
+          node desktop/test/smoke.cjs
       - name: archive portable client
         shell: pwsh
         run: |

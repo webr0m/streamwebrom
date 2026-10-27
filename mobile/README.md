@@ -1,6 +1,6 @@
-# Clientes móviles 1.11.4
+# Clientes móviles 1.12.0
 
-La corrección de conexión móvil incluye cambios del servidor y de la web: actualiza también el servidor a 1.11.4. Las redes con CGNAT/UDP bloqueado necesitan un servicio TURN configurado; instalar un APK nuevo por sí solo no proporciona un relé. Chrome conserva las conexiones activas al cambiar de aplicación mientras Android permita su ejecución. El APK Android ofrece además un modo explícito de audio en segundo plano con servicio y notificación. Ver [redes móviles](../docs/REDES-MOVILES.md) y [audio y segundo plano](../docs/AUDIO-Y-SEGUNDO-PLANO.md).
+La corrección de conexión móvil incluye cambios del servidor y de la web: actualiza también el servidor a 1.12.0. Las redes con CGNAT/UDP bloqueado necesitan un servicio TURN configurado; instalar un APK nuevo por sí solo no proporciona un relé. Chrome conserva las conexiones activas al cambiar de aplicación mientras Android permita su ejecución. El APK Android ofrece además un modo explícito de audio en segundo plano con servicio y notificación. Ver [redes móviles](../docs/REDES-MOVILES.md) y [audio y segundo plano](../docs/AUDIO-Y-SEGUNDO-PLANO.md).
 
 Android e iOS abren el estudio servido por tu instalación de StreamWebRom usando WebRTC del sistema. No ejecutan el SFU, ffmpeg ni las grabaciones en el teléfono. Usa HTTPS con certificado válido; los certificados autofirmados sin confianza no se aceptan.
 

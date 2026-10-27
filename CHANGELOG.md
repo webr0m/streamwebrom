@@ -1,5 +1,14 @@
 # Cambios
 
+## v1.12.0 — Captura avanzada con audio aislado
+
+- Cliente Windows x64 con la misma interfaz: ventanas con audio de aplicación, pantalla con audio del sistema sin el árbol de voces de la sala y pestañas de contenido con audio propio.
+- Selector web de fuente y sonido, manteniendo las limitaciones reales del navegador y la protección contra eco. Permisos de invitados sin cambios.
+- Motor WASAPI MIT fijado y auditado: silencios inicializados, colas limitadas, errores de inicio controlados y captura en proceso auxiliar. Limpieza al detener, cambiar fuente o cerrar la sala.
+- El lanzador abre Captura avanzada. ZIP portable adicional con licencias; reconstrucción de servidores, lanzador y clientes móviles.
+- Pruebas físicas de separación de audio en Windows, selector y cliente empaquetado en CI; se evita duplicar la fuente de pantalla al cambiarla.
+- Publicación conjunta con manifiesto SHA256; los trabajos de etiquetas ya no sobrescriben APK u otros artefactos validados.
+
 ## v1.11.4 — Audio sin retorno y continuidad de la sala
 
 - Los candidatos ICE y respuestas atrasados de negociaciones ya terminadas se descartan sin errores visibles. El registro es temporal, limitado y separado por socket; no acepta candidatos de otros participantes.

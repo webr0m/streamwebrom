@@ -10,7 +10,7 @@
 //   &videodevice= &audiodevice= &outputdevice=  index (1..n), part of the name, or 0 = off
 //   &novideo / &noaudio     audio-only / video-only
 import { $, el, toast, params, api, Signal, publish, subscribe, levelMeter, staleRevision } from "./rtc.js";
-import { listDevices, openScreen, loadPrefs, savePrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain } from "./devices.js";
+import { listDevices, loadPrefs, savePrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain } from "./devices.js";
 import { remoteSnapshot, remoteStats, CAMCTL } from "./remote.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
 import { automaticRoute } from "./network.js";

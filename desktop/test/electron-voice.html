@@ -1,0 +1,3 @@
+<!doctype html><meta charset="utf-8"><title>Audio de prueba</title><script>
+window.voiceReady=(async()=>{const ctx=new AudioContext({sampleRate:48000}),tone=ctx.createOscillator(),gain=ctx.createGain();tone.frequency.value=Number(new URL(location.href).searchParams.get('frequency'))||440;gain.gain.value=.06;tone.connect(gain).connect(ctx.destination);tone.start();await ctx.resume();window.stopVoice=()=>ctx.close();return ctx.state})();
+</script>

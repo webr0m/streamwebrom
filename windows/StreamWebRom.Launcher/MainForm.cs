@@ -91,7 +91,9 @@ public sealed class MainForm : Form
             "Multistream a YouTube/Twitch: instala ffmpeg (winget install ffmpeg) o copia ffmpeg.exe junto a StreamWebRom.exe.",
             "StreamWebRom + OBS", MessageBoxButtons.OK, MessageBoxIcon.Information);
         _startStop.Click += (_, _) => { if (_server.Running) StopServer(); else StartServer(); };
-        actions.Controls.AddRange(new Control[] { _startStop, folder, obsHelp });
+        var capture = Btn("Captura avanzada");
+        capture.Click += (_, _) => OpenCapture();
+        actions.Controls.AddRange(new Control[] { _startStop, folder, obsHelp, capture });
         root.Controls.Add(Card("Servidor", actions));
 
         var opts = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, BackColor = Panel, Padding = new Padding(6), Margin = new Padding(0) };
@@ -138,6 +140,7 @@ public sealed class MainForm : Form
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Abrir estudio", null, (_, _) => OpenUrl(_localUrl.Text));
+        menu.Items.Add("Captura avanzada", null, (_, _) => OpenCapture());
         menu.Items.Add("Mostrar ventana", null, (_, _) => ShowWindow());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Salir", null, (_, _) => Quit());
@@ -238,6 +241,16 @@ public sealed class MainForm : Form
         _log.AppendText(line + Environment.NewLine);
     }
 
+    private void OpenCapture()
+    {
+        var exe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "StreamWebRomCapture", "StreamWebRom-Capture.exe");
+        if (!File.Exists(exe)) { OpenUrl("https://github.com/webr0m/streamwebrom/releases/latest"); return; }
+        var url = _settings.TunnelActive ? _publicUrl.Text : _localUrl.Text;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return;
+        var start = new ProcessStartInfo(exe) { UseShellExecute = false };
+        start.ArgumentList.Add("--url=" + uri.GetLeftPart(UriPartial.Authority));
+        Process.Start(start);
+    }
     private static void OpenUrl(string url) => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 
     private void ShowWindow() { Show(); ShowInTaskbar = true; WindowState = FormWindowState.Normal; Activate(); }

@@ -1,4 +1,4 @@
-// Native code remains in the desktop main process. The page receives only the
+// Native capture runs in an isolated desktop utility process. The page receives only the
 // PCM of a source explicitly selected in the trusted local picker.
 export async function attachNativeAudio(stream) {
   const bridge=window.StreamWebRomCapture,selection=await bridge.take();

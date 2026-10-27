@@ -61,10 +61,8 @@ jobs:
           sha256sum * > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with: { name: streamwebrom, path: dist/* }
-      - name: release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with: { files: "dist/*", generate_release_notes: true }
+      # Release assets are published together from the verified manifest after
+      # server, mobile and desktop builds pass. Tag builds must not overwrite it.
 
   browser:
     runs-on: ubuntu-latest

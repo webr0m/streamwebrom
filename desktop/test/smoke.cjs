@@ -5,7 +5,8 @@ const http=require('node:http');const path=require('node:path');const assert=req
   await new Promise(resolve=>content.listen(0,'127.0.0.1',resolve));
   const base=process.env.SWR_DESKTOP_TEST_URL||'http://127.0.0.1:18443';
   const keys=await fetch(base+'/api/rooms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room:'desktop-'+Date.now(),lobby:false})}).then(r=>r.json());
-  const app=await _electron.launch({executablePath:require('electron'),args:[path.resolve(__dirname,'..'),'--url='+base+'/studio?room='+keys.room+'#key='+keys.hostKey,'--capture-test','--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
+  const packaged=process.env.SWR_CAPTURE_EXECUTABLE;
+  const app=await _electron.launch({executablePath:packaged||require('electron'),args:[...(packaged?[]:[path.resolve(__dirname,'..')]),'--url='+base+'/studio?room='+keys.room+'#key='+keys.hostKey,'--capture-test','--use-fake-device-for-media-stream']});
   const diagnostic=[];app.process().stderr.on('data',data=>{diagnostic.push(String(data));if(diagnostic.length>30)diagnostic.shift()});
   let room;
   try{
