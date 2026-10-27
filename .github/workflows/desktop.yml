@@ -32,6 +32,7 @@ jobs:
           name: native-audio-windows
           path: desktop/vendor/native-audio/build/Release/electron_native_screenshare.node
       - name: desktop UI smoke
+        timeout-minutes: 3
         shell: pwsh
         run: |
           go build -o "$env:RUNNER_TEMP/swr-desktop-fixture.exe" ./cmd/streamwebrom
@@ -43,6 +44,7 @@ jobs:
         working-directory: desktop
         run: npm run package:windows
       - name: verify packaged client with the same studio
+        timeout-minutes: 3
         shell: pwsh
         run: |
           $env:SWR_CAPTURE_EXECUTABLE = Join-Path $env:GITHUB_WORKSPACE 'desktop/out/StreamWebRom-Capture-win32-x64/StreamWebRom-Capture.exe'
