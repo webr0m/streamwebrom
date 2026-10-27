@@ -30,14 +30,17 @@ public:
     ~WasapiCapture();
 
     HRESULT Initialize(DWORD processId, bool isIncludeMode, std::string& outError);
-    void Start(DataCallback callback);
+    bool Start(DataCallback callback);
     void Stop();
+    bool IsCapturing() const { return isCapturing.load(); }
 
 private:
     IMMDevice* pDevice = nullptr;
     IAudioClient* pAudioClient = nullptr;
     IAudioCaptureClient* pCaptureClient = nullptr;
     HANDLE hCaptureThread = nullptr;
+    HANDLE hStarted = nullptr;
+    std::atomic<bool> startSucceeded{false};
     std::atomic<bool> isCapturing{false};
     DataCallback onData;
 

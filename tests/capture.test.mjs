@@ -59,3 +59,17 @@ test('denial or a failed display device does not reopen a picker or hide the err
  }
  assert.match(screenAudioNotice({getAudioTracks:()=>[]}),/no incluye audio/);
 });
+
+test('window and full-screen requests keep source selection and request protected system audio',async()=>{
+ for(const surface of ['window','monitor']){
+  let options;const {result}=capture(surface,true);navigator.mediaDevices.getDisplayMedia=async value=>{options=value;return result};
+  await openScreen({surface});assert.equal(options.video.displaySurface,surface);assert.equal(options.systemAudio,'include');assert.equal(options.windowAudio,'window');
+  assert.equal(options.audio.restrictOwnAudio,true);assert.equal(result.getAudioTracks().length,1);
+ }
+});
+
+test('no-audio selection cannot accidentally publish sound returned by an over-permissive picker',async()=>{
+ const {result,audio}=capture('browser');let options;navigator.mediaDevices.getDisplayMedia=async value=>{options=value;return result};
+ await openScreen({surface:'monitor',audio:false});assert.equal(options.audio,false);assert.equal(options.systemAudio,'exclude');
+ assert.equal(result.getAudioTracks().length,0);assert.equal(audio.stopped,true);
+});

@@ -8,5 +8,8 @@ Upstream: https://github.com/CilginSinek/electron-native-screenshare
 Only the Windows implementation is vendored. The original MIT notice accompanies
 the sources and is included in desktop distributions. StreamWebRom changes bound
 the callback queue, release rejected queued buffers, handle shutdown callbacks,
-and make the capture-stop flag atomic. The renderer has no Node/native access;
+make the capture-stop flag atomic, honor silent buffers, validate capture start
+and packet errors, and bound stop latency. Audio initialization and capture run
+in a disposable utility process with an explicit startup deadline.
+The renderer has no Node/native access;
 the application main process authorizes each user-selected capture.

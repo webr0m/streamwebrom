@@ -79,7 +79,11 @@ Napi::Value StartCapture(const Napi::CallbackInfo& info) {
         if (tsfn.NonBlockingCall(payload, napiCallback) != napi_ok) delete payload;
     };
 
-    capture.Start(callback);
+    if (!capture.Start(callback)) {
+        tsfn.Release(); tsfn = nullptr;
+        Napi::Error::New(env, "WASAPI capture could not start").ThrowAsJavaScriptException();
+        return env.Null();
+    }
     return Napi::Boolean::New(env, true);
 }
 
@@ -139,6 +143,7 @@ Napi::Value GetPidFromHwnd(const Napi::CallbackInfo& info) {
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set(Napi::String::New(env, "startCapture"), Napi::Function::New(env, StartCapture));
     exports.Set(Napi::String::New(env, "stopCapture"), Napi::Function::New(env, StopCapture));
+    exports.Set("isRunning", Napi::Function::New(env, [](const Napi::CallbackInfo& info) { return Napi::Boolean::New(info.Env(), capture.IsCapturing()); }));
     exports.Set(Napi::String::New(env, "getPidFromHwnd"), Napi::Function::New(env, GetPidFromHwnd));
     return exports;
 }

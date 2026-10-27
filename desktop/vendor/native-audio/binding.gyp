@@ -6,6 +6,6 @@
     "defines": ["NAPI_DISABLE_CPP_EXCEPTIONS", "_WIN32_WINNT=0x0A00", "NTDDI_VERSION=0x0A00000A"],
     "sources": ["src/win/addon.cpp", "src/win/wasapi_capture.cpp"],
     "libraries": ["-lMmdevapi.lib", "-lAvrt.lib"],
-    "msvs_settings": { "VCCLCompilerTool": { "AdditionalOptions": ["/std:c++17"] } }
+    "msvs_settings": { "VCCLCompilerTool": { "AdditionalOptions": ["/std:c++17"], "RuntimeLibrary": 0 } }
   }]
 }

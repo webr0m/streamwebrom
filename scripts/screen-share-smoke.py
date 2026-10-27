@@ -58,7 +58,7 @@ with sync_playwright() as pw:
 
     authorize()
     assert guest.evaluate('__pickerCalls===0'), 'approval opened the picker without a guest click'
-    guest.locator('#startScreen').click()
+    guest.locator('#startScreen').click();guest.locator('#confirmShare').click()
     expect(guest.locator('#screenBtn')).to_have_class('icon on',timeout=20000)
     screen=host.locator('#backstage [data-kind="screen"]')
     expect(screen).to_have_count(1,timeout=20000)
@@ -72,7 +72,7 @@ with sync_playwright() as pw:
     guest.locator('#cancelScreen').click()
     expect(screen).to_have_count(0,timeout=15000)
     expect(host.locator('#sceneBar .scenecount').first).to_have_text('1 en escena')
-    authorize();guest.locator('#startScreen').click()
+    authorize();guest.locator('#startScreen').click();guest.locator('#confirmShare').click()
     expect(screen).to_have_count(1,timeout=20000)
     host.locator('[data-tab="people"]').click()
     host.get_by_role('button',name='Revocar pantalla',exact=True).click()
@@ -81,7 +81,7 @@ with sync_playwright() as pw:
     assert guest.evaluate('__captures.every(t=>t.readyState==="ended")')
 
     # A pending OS picker must not leak a capture when approval is revoked.
-    authorize();guest.evaluate('__holdPicker=true');guest.locator('#startScreen').click()
+    authorize();guest.evaluate('__holdPicker=true');guest.locator('#startScreen').click();guest.locator('#confirmShare').click()
     guest.wait_for_function('()=>typeof __releasePicker==="function"')
     host.get_by_role('button',name='Revocar pantalla',exact=True).click()
     guest.evaluate('__holdPicker=false;__releasePicker()')
@@ -89,7 +89,7 @@ with sync_playwright() as pw:
     expect(screen).to_have_count(0)
 
     # Removing the guest from all scenes automatically revokes the grant.
-    authorize();guest.locator('#startScreen').click()
+    authorize();guest.locator('#startScreen').click();guest.locator('#confirmShare').click()
     expect(screen).to_have_count(1,timeout=20000)
     host.locator('#backstage [data-kind="camera"] .stagebtn').click()
     expect(screen).to_have_count(0,timeout=15000)
@@ -98,7 +98,7 @@ with sync_playwright() as pw:
 
     # Restore stage membership and check that leaving releases an active share.
     host.locator('#backstage [data-kind="camera"] .stagebtn').click()
-    authorize();guest.locator('#startScreen').click()
+    authorize();guest.locator('#startScreen').click();guest.locator('#confirmShare').click()
     expect(screen).to_have_count(1,timeout=20000)
     if args.screenshots:
         folder=Path(args.screenshots);folder.mkdir(parents=True,exist_ok=True)

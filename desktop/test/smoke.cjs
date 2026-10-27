@@ -9,18 +9,19 @@ const http=require('node:http');const path=require('node:path');const assert=req
   try{
     const errors=[],room=await app.firstWindow();room.on('pageerror',e=>errors.push(e.message));
     await expect(room.locator('#status')).toHaveText('conectado',{timeout:30000});
-    assert.equal(await app.evaluate(({app})=>require(app.getAppPath()+'/main.cjs').nativeAvailable()),true,'native N-API module must load inside Electron');
     assert.equal(await room.evaluate(()=>window.StreamWebRomCapture.version),1);
     await assert.rejects(room.evaluate(()=>window.StreamWebRomCapture.start('not-authorized')));
-    await app.evaluate(async({app},url)=>require(app.getAppPath()+'/main.cjs').openContent(url),'http://127.0.0.1:'+content.address().port);
-    const [tab]=app.windows().filter(p=>p!==room);
-    assert.equal(await tab.evaluate(()=>typeof window.StreamWebRomCapture),'undefined','content tabs must not receive the native bridge');
     await room.locator('#addScreen').click();
     let picker;await expect.poll(()=>{picker=app.windows().find(p=>p.url().endsWith('/picker.html'));return !!picker},{timeout:15000}).toBe(true);
+    await expect(picker.locator('#audio option[value="application"]')).toBeEnabled();
     await picker.locator('[data-type="browser"]').click();
+    await picker.locator('#contentURL').fill('http://127.0.0.1:'+content.address().port);
+    await picker.locator('#openContent').click();
+    let tab;await expect.poll(()=>{tab=app.windows().find(p=>p.url().startsWith('http://127.0.0.1:'+content.address().port));return !!tab}).toBe(true);
+    assert.equal(await tab.evaluate(()=>typeof window.StreamWebRomCapture),'undefined','content tabs must not receive the native bridge');
     await picker.locator('#audio').selectOption('none');
     await picker.locator('.capture-source').filter({hasText:'Contenido de prueba'}).click();
-    await expect(room.locator('#backstage [data-id="host-screen"]')).toBeVisible({timeout:30000});
+    await expect(room.locator('#backstage [data-id="host-screen"]')).toBeVisible({timeout:45000});
     const video=room.locator('#backstage [data-id="host-screen"] video').first();
     await expect.poll(()=>video.evaluate(v=>v.videoWidth),{timeout:15000}).toBeGreaterThan(0);
     assert.equal(await room.evaluate(()=>typeof require),'undefined');

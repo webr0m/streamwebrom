@@ -2,12 +2,17 @@
 // PCM of a source explicitly selected in the trusted local picker.
 export async function attachNativeAudio(stream) {
   const bridge=window.StreamWebRomCapture,selection=await bridge.take();
-  let ctx,node,destination,unsubscribe,stopped=false,timer;
+  let ctx,node,destination,unsubscribe,unsubscribeError,stopped=false,timer;
   const stop=()=>{
-    if(stopped)return;stopped=true;clearInterval(timer);unsubscribe?.();
+    if(stopped)return;stopped=true;clearInterval(timer);unsubscribe?.();unsubscribeError?.();
     bridge.stop(selection.id).catch(()=>{});node?.disconnect();destination?.stream.getTracks().forEach(t=>t.stop());ctx?.close().catch(()=>{});
   };
   try {
+    unsubscribeError=bridge.onError(packet=>{
+      if(packet.id!==selection.id||stopped)return;
+      stream.dispatchEvent(new CustomEvent('captureerror',{detail:packet.message}));
+      stop();stream.getTracks().forEach(t=>t.stop());
+    });
     if(selection.mode==='native'){
       ctx=new AudioContext({sampleRate:48000,latencyHint:'interactive'});
       await ctx.audioWorklet.addModule(new URL('./native-audio-worklet.js',import.meta.url));

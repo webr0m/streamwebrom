@@ -286,6 +286,7 @@ async function addLocal(media, kind, name, extra = {}, cleanup = null) {
     v.muted = true; v.srcObject = media; v.play().catch(() => {});
     sources.set(pub.id, { video: v, stream: media, name, kind, owner: "me", level: levelMeter(media), local: true, pub, cleanup });
     local.set(pub.id, pub);
+    media.addEventListener('captureerror',e=>{stopLocal(pub.id);toast(e.detail||'La captura se detuvo',"err")},{once:true});
     // Camera suspension or a device swap must not unpublish its live microphone.
     if (kind !== "camera") media.getVideoTracks()[0]?.addEventListener("ended", () => stopLocal(pub.id));
     renderBackstage();

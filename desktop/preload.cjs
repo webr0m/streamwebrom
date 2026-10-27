@@ -11,4 +11,5 @@ contextBridge.exposeInMainWorld('StreamWebRomCapture',Object.freeze({
     ipcRenderer.on('capture:audio',listener);
     return ()=>ipcRenderer.removeListener('capture:audio',listener);
   },
+  onError:fn=>{const listener=(_e,packet)=>fn(packet);ipcRenderer.on('capture:error',listener);return ()=>ipcRenderer.removeListener('capture:error',listener)},
 }));

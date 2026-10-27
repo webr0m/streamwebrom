@@ -3,12 +3,14 @@ const {app,BrowserWindow,desktopCapturer,ipcMain,Menu,shell,powerSaveBlocker}=re
 const path=require('node:path');
 const {pathToFileURL}=require('node:url');
 const {serverURL,trustedFrame,audioPlan,CaptureLease}=require('./policy.cjs');
+const {NativeBackend}=require('./native-backend.cjs');
 let native=null;
 if(process.platform==='win32')try{native=require('./vendor/native-audio/build/Release/electron_native_screenshare.node')}catch(e){console.error('Native audio could not load:',e.message)}
 const testMode=process.argv.includes('--capture-test');
 let main=null,home=null,origin='',picker=null,pendingPicker=null,preferences={},blocker=null;
 const contents=new Map();
-const lease=new CaptureLease(()=>{try{native?.stopCapture()}finally{if(blocker!==null){powerSaveBlocker.stop(blocker);blocker=null}}});
+const backend=new NativeBackend();
+const lease=new CaptureLease(()=>{backend.stop();if(blocker!==null){powerSaveBlocker.stop(blocker);blocker=null}});
 const opts=preload=>({contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true,backgroundThrottling:false,preload:path.join(__dirname,preload)});
 function safeOpen(url){try{if(new URL(url).protocol==='https:')shell.openExternal(url)}catch{}}
 function roomEvent(e){if(!trustedFrame(e,main?.webContents,origin))throw new Error('La captura solo está disponible en la sala abierta');}
@@ -88,7 +90,7 @@ ipcMain.handle('picker:choose',async(e,choice)=>{
   const source=current.sources.get(choice?.id);if(!source)throw new Error('Actualiza la lista y elige una fuente disponible');
   let pid=0;
   if(source.kind==='window'&&choice.audio==='application'&&native)pid=native.getPidFromHwnd(Number(source.id.split(':')[1]));
-  const plan=audioPlan({...source,pid},choice.audio,process.pid);
+  const plan=audioPlan({...source,pid},current.request.audioRequested?choice.audio:'none',process.pid);
   if(plan.mode==='native'&&!native)throw new Error('El audio nativo no está disponible. Elige Sin audio o una pestaña web');
   if(source.kind==='browser'&&(source.frame?.detached||!contents.has(Number(source.id.slice(4)))))throw new Error('La pestaña ya se cerró');
   const approved=lease.create({plan,kind:source.kind,name:source.name,owner:main.webContents,frames:0});
@@ -99,19 +101,21 @@ ipcMain.handle('picker:choose',async(e,choice)=>{
   picker.close();picker=null;return true;
 });
 ipcMain.handle('capture:take',e=>{roomEvent(e);const s=lease.current;if(!s||s.owner!==e.sender)throw new Error('No hay una selección autorizada');return {id:s.id,kind:s.kind,name:s.name,mode:s.plan.mode}});
-ipcMain.handle('capture:start',(e,id)=>{
+ipcMain.handle('capture:start',async(e,id)=>{
   roomEvent(e);const s=lease.get(id);if(!s||s.owner!==e.sender||s.plan.mode!=='native'||s.started)throw new Error('La selección de audio ya no está disponible');
   s.started=true;
   try{
-    if(!native.startCapture(s.plan.pid,s.plan.include,(data,meta)=>{
-      if(lease.current!==s||s.owner.isDestroyed()||s.frames>=6||new URL(s.owner.getURL()).origin!==origin)return;
-      if(!meta.isFloat||meta.bitsPerSample!==32||meta.channels!==2||meta.sampleRate!==48000||data.length>384000||data.length%8)return;
-      s.frames++;s.owner.send('capture:audio',{id:s.id,rate:48000,channels:2,pcm:data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength)});
-    }))throw new Error('Native capture did not start');
+    await backend.start(s.plan,packet=>{
+      let authorized=false;try{authorized=lease.current===s&&!s.owner.isDestroyed()&&new URL(s.owner.getURL()).origin===origin}catch{}
+      const {meta,pcm}=packet;
+      if(!authorized||s.frames>=6||!meta.isFloat||meta.bitsPerSample!==32||meta.channels!==2||meta.sampleRate!==48000||pcm.byteLength>384000||pcm.byteLength%8){backend.ack();return}
+      s.frames++;s.owner.send('capture:audio',{id:s.id,rate:48000,channels:2,pcm});
+    },()=>{if(lease.current===s){s.owner.send('capture:error',{id:s.id,message:'La fuente de audio se detuvo. Vuelve a elegir qué compartir.'});lease.clear(s.id)}});
+    if(lease.current!==s){backend.stop();throw new Error('La selección terminó')}
     blocker=powerSaveBlocker.start('prevent-app-suspension');return true;
   }catch(error){console.error('Native capture:',error.message);lease.clear(id);throw new Error('Windows no permitió capturar el audio. Elige otra aplicación o Sin audio.')}
 });
-ipcMain.on('capture:ack',(e,id)=>{if(trustedFrame(e,main?.webContents,origin)){const s=lease.get(id);if(s)s.frames=Math.max(0,s.frames-1)}});
+ipcMain.on('capture:ack',(e,id)=>{if(trustedFrame(e,main?.webContents,origin)){const s=lease.get(id);if(s){s.frames=Math.max(0,s.frames-1);backend.ack()}}});
 ipcMain.handle('capture:stop',(e,id)=>{roomEvent(e);return lease.clear(id)});
 app.whenReady().then(()=>{
   Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'StreamWebRom',submenu:[{label:'Cambiar servidor',click:()=>{showHome();if(main)main.close()}},{role:'quit'}]},{label:'Vista',submenu:[{role:'reload'},{role:'togglefullscreen'},{role:'zoomIn'},{role:'zoomOut'},{role:'resetZoom'}]}]));

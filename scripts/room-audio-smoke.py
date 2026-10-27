@@ -106,7 +106,7 @@ with tempfile.TemporaryDirectory(prefix='swr-multiparty-') as folder,sync_playwr
     mobile.evaluate('''()=>{delete document.visibilityState;document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}))}''')
     all_audio()
     # A real delayed audio RTP track reaches the SFU after the initial offer.
-    host.evaluate('__delayScreenAudio=true');host.locator('#addScreen').click();expect(host.locator('#backstage [data-id="host-screen"]')).to_be_visible(timeout=30000)
+    host.evaluate('__delayScreenAudio=true');host.locator('#addScreen').click();host.locator('#confirmShare').click();expect(host.locator('#backstage [data-id="host-screen"]')).to_be_visible(timeout=30000)
     expect(host.locator('#backstage [data-id="host-screen"] .stagebtn.on')).to_be_visible(timeout=15000)
     for g in guests:advancing(g,'[data-id="host-screen"] video')
     # Screen content is an 880 Hz tone. Participants voices are 440 Hz: the
@@ -132,7 +132,7 @@ with tempfile.TemporaryDirectory(prefix='swr-multiparty-') as folder,sync_playwr
     assert scene_ready,'Screen audio was not audible in the OBS scene'
     # An authorized panelist also shares audio to the host and other panelists.
     host.locator('#backstage [data-id="'+ids[1]+'"] .stagebtn').click()
-    guests[0].locator('#screenBtn').click();host.get_by_role('button',name='Autorizar pantalla',exact=True).click();guests[0].locator('#startScreen').click()
+    guests[0].locator('#screenBtn').click();host.get_by_role('button',name='Autorizar pantalla',exact=True).click();guests[0].locator('#startScreen').click();guests[0].locator('#confirmShare').click()
     guest_screen=host.locator('#backstage [data-kind="screen"]:not([data-id="host-screen"])');expect(guest_screen).to_have_count(1,timeout=30000);screen_id=guest_screen.get_attribute('data-id')
     advancing(host,'[data-id="'+screen_id+'"] video')
     for g in guests[1:]:advancing(g,'[data-id="'+screen_id+'"] video')

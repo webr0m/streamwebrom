@@ -565,6 +565,7 @@ async function shareScreen() {
     const publication = await publish(sig, opened, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail", codec: prefs.codec, stereo: true, audioKbps: 192 });
     if (sig.closed || attempt !== screenAttempt || !screenAllowed) { publication.stop(); stopScreenCapture(opened); return; }
     screenPub = publication;
+    opened.addEventListener('captureerror',e=>{stopScreen();toast(e.detail||'La captura se detuvo',"err")},{once:true});
     toast(screenAudioNotice(opened), opened.getAudioTracks().length ? "ok" : "");
     opened.getVideoTracks()[0].onended = () => stopScreen();
   } catch (e) { if (attempt === screenAttempt) { stopScreen(); if (!sig.closed && e.name !== "NotAllowedError" && e.name !== "AbortError") toast(explain(e), "err"); } }

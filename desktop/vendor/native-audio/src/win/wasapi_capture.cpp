@@ -203,6 +203,7 @@ public:
 #include <thread>
 
 HRESULT WasapiCapture::Initialize(DWORD processId, bool isIncludeMode, std::string& outError) {
+    Stop();
     // Release any leftover COM interfaces from a previous session.
     // Without this, calling Initialize() a second time leaves stale COM objects
     // that cause IAudioClient::Initialize to return 0x8000FFFF (E_UNEXPECTED).
@@ -327,11 +328,18 @@ HRESULT WasapiCapture::Initialize(DWORD processId, bool isIncludeMode, std::stri
 
 // --- Capture thread --------------------------------------------------------
 
-void WasapiCapture::Start(DataCallback callback) {
-    if (isCapturing || !pAudioClient) return;
+bool WasapiCapture::Start(DataCallback callback) {
+    if (isCapturing || !pAudioClient) return false;
     onData = callback;
+    startSucceeded = false;
+    hStarted = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!hStarted) return false;
     isCapturing = true;
     hCaptureThread = CreateThread(NULL, 0, CaptureThreadProc, this, 0, NULL);
+    if (!hCaptureThread) { isCapturing = false; CloseHandle(hStarted); hStarted = nullptr; return false; }
+    const DWORD ready = WaitForSingleObject(hStarted, 5000);
+    if (ready != WAIT_OBJECT_0 || !startSucceeded) { Stop(); return false; }
+    return true;
 }
 
 void WasapiCapture::Stop() {
@@ -341,6 +349,7 @@ void WasapiCapture::Stop() {
         CloseHandle(hCaptureThread);
         hCaptureThread = nullptr;
     }
+    if (hStarted) { CloseHandle(hStarted); hStarted = nullptr; }
 }
 
 DWORD WINAPI WasapiCapture::CaptureThreadProc(LPVOID pContext) {
@@ -351,22 +360,29 @@ DWORD WINAPI WasapiCapture::CaptureThreadProc(LPVOID pContext) {
 
 void WasapiCapture::CaptureLoop() {
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    const bool comReady = SUCCEEDED(hr);
     HANDLE hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-    pAudioClient->SetEventHandle(hEvent);
-    pAudioClient->Start();
+    if (SUCCEEDED(hr) && hEvent) hr = pAudioClient->SetEventHandle(hEvent);
+    else hr = E_FAIL;
+    if (SUCCEEDED(hr)) hr = pAudioClient->Start();
+    startSucceeded = SUCCEEDED(hr);
+    if (hStarted) SetEvent(hStarted);
+    if (FAILED(hr)) { isCapturing = false; if (hEvent) CloseHandle(hEvent); if (comReady) CoUninitialize(); return; }
 
     while (isCapturing) {
         DWORD waitResult = WaitForSingleObject(hEvent, 100);
         if (waitResult == WAIT_OBJECT_0) {
             UINT32 packetLength = 0;
-            pCaptureClient->GetNextPacketSize(&packetLength);
-            while (packetLength != 0) {
-                BYTE* pData;
-                UINT32 numFramesAvailable;
-                DWORD flags;
-                pCaptureClient->GetBuffer(&pData, &numFramesAvailable, &flags, NULL, NULL);
+            hr = pCaptureClient->GetNextPacketSize(&packetLength);
+            if (FAILED(hr)) break;
+            while (packetLength != 0 && isCapturing) {
+                BYTE* pData = nullptr;
+                UINT32 numFramesAvailable = 0;
+                DWORD flags = 0;
+                hr = pCaptureClient->GetBuffer(&pData, &numFramesAvailable, &flags, NULL, NULL);
+                if (FAILED(hr)) { isCapturing = false; break; }
 
-                if (onData && pData) {
+                if (onData && numFramesAvailable) {
                     size_t bytesPerFrame = 8; // 2 channels * 4 bytes (float32)
 
                     AudioMetadata meta;
@@ -374,14 +390,23 @@ void WasapiCapture::CaptureLoop() {
                     meta.channels = 2;
                     meta.bitsPerSample = 32;
                     meta.isFloat = true;
-                    onData(pData, numFramesAvailable * bytesPerFrame, meta);
+                    // SILENT buffers may have a non-null pointer containing old
+                    // samples. Reading it can replay excluded process audio.
+                    if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) || !pData) {
+                        std::vector<uint8_t> silence(numFramesAvailable * bytesPerFrame, 0);
+                        onData(silence.data(), silence.size(), meta);
+                    } else {
+                        onData(pData, numFramesAvailable * bytesPerFrame, meta);
+                    }
                 }
                 pCaptureClient->ReleaseBuffer(numFramesAvailable);
-                pCaptureClient->GetNextPacketSize(&packetLength);
+                hr = pCaptureClient->GetNextPacketSize(&packetLength);
+                if (FAILED(hr)) { isCapturing = false; break; }
             }
         }
     }
     pAudioClient->Stop();
+    isCapturing = false;
     CloseHandle(hEvent);
-    CoUninitialize();
+    if (comReady) CoUninitialize();
 }
