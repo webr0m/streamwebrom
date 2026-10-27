@@ -1,0 +1,49 @@
+name: desktop
+on:
+  push:
+    branches: [main, codex/native-capture]
+    tags: ['v*']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '24'}
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.27.x'}
+      - name: install locked build dependencies without implicit lifecycle scripts
+        working-directory: desktop
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: download pinned Electron runtime
+        working-directory: desktop
+        run: node node_modules/electron/install.js
+      - name: compile pinned MIT WASAPI component
+        working-directory: desktop
+        run: npm run native:build
+      - name: capture authorization and lifecycle tests
+        working-directory: desktop
+        run: npm test
+      - name: desktop UI smoke
+        shell: pwsh
+        run: |
+          go build -o "$env:RUNNER_TEMP/swr-desktop-fixture.exe" ./cmd/streamwebrom
+          Start-Process -FilePath "$env:RUNNER_TEMP/swr-desktop-fixture.exe" -WindowStyle Hidden -ArgumentList '-addr','127.0.0.1:18443','-stun=','-data',"$env:RUNNER_TEMP/swr-desktop-data" -RedirectStandardOutput "$env:RUNNER_TEMP/swr-desktop.log" -RedirectStandardError "$env:RUNNER_TEMP/swr-desktop-error.log"
+          for($i=0;$i -lt 30;$i++){try{Invoke-RestMethod http://127.0.0.1:18443/api/health | Out-Null;break}catch{Start-Sleep -Seconds 1}}
+          Set-Location desktop
+          node test/smoke.cjs
+      - name: package advanced capture client
+        working-directory: desktop
+        run: npm run package:windows
+      - name: archive portable client
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -LiteralPath desktop/out/StreamWebRom-Capture-win32-x64 -DestinationPath dist/StreamWebRom-Capture-Windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: dist/StreamWebRom-Capture-Windows-x64.zip

@@ -16,3 +16,6 @@
 /.cache/
 __pycache__/
 *.py[cod]
+/desktop/node_modules/
+/desktop/vendor/native-audio/build/
+/desktop/out/

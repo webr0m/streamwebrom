@@ -7,7 +7,8 @@ import { immersive } from "./immersive.js";
 import { Compositor, AudioMixer } from "./compositor.js";
 import { chatMessage, appendChat, mountComposer } from "./chat.js";
 import { listDevices, openScreen, loadPrefs, openMedia, renderPanel, cameraControls, applySink, onDeviceChange, settingsDialog, kbpsFor, explain, QUALITIES, FPS } from "./devices.js";
-import { screenAudioNotice } from "./devices.js";
+import { screenAudioNotice, stopScreenCapture } from "./devices.js";
+import { chooseScreen } from "./screen-share.js";
 import { RoomAudio } from "./room-audio.js";
 
 const prefs = loadPrefs();
@@ -71,7 +72,7 @@ $("#useLocalRelay").onclick = () => changeRelay("local");
 $("#relayDialog").addEventListener("close", () => { $("#cloudflareMaster").value = ""; });
 window.addEventListener("pagehide", e => { if (!e.persisted) relayUI.destroy(); });
 const vdoUI = mountVdo({ root: $("#vdoDialog"), copy, notify: message => toast(message,"err"), onCapture: async () => {
-  const media = await openScreen();
+  const media = await chooseScreen();
   const id = await addLocal(media, "camera", "VDO.Ninja", { stream:"host-vdo-" + crypto.randomUUID().slice(0,20), videoKbps: 1500, fps: 24 });
   if (id) {
     if (!media.getAudioTracks().length) toast("Se agregó el video. Para recibir audio, vuelve a capturar la pestaña y activa Compartir audio.","err");
@@ -289,14 +290,14 @@ async function addLocal(media, kind, name, extra = {}, cleanup = null) {
     if (kind !== "camera") media.getVideoTracks()[0]?.addEventListener("ended", () => stopLocal(pub.id));
     renderBackstage();
     return pub.id;
-  } catch (e) { toast(explain(e), "err"); media.getTracks().forEach((t) => t.stop()); cleanup?.(); }
+  } catch (e) { toast(explain(e), "err"); stopScreenCapture(media); cleanup?.(); }
 }
 
 function stopLocal(id) {
   const pub = local.get(id), s = sources.get(id);
   if (!pub) return;
   pub.stop();
-  s?.stream.getTracks().forEach((t) => t.stop());
+  stopScreenCapture(s?.stream);
   s?.cleanup?.();
   local.delete(id); sources.delete(id);
   if (id === hostCamId) { hostCamId = ""; $("#addCam").textContent = "Cámara"; }
@@ -371,7 +372,8 @@ $("#settings").onclick = async () => {
 onDeviceChange(() => { if ($("#devDialog")?.open) renderPanel($("#devPanel"), prefs, onPrefChange); });
 $("#addScreen").onclick = async () => {
   try {
-    const m = await openScreen();
+    const m = await chooseScreen();
+    if(local.has("host-screen"))stopLocal("host-screen");
     const id = await addLocal(m, "screen", "Pantalla", { stream:"host-screen", stereo: true, audioKbps: 192, codec: prefs.codec });
     if (id) toast(screenAudioNotice(m), m.getAudioTracks().length ? "ok" : "");
     if (id) setState({ stage: [...(state.stage || []), id], layout: "screen" });

@@ -13,6 +13,7 @@
 // - Mic gain is applied with a Web Audio GainNode only when != 100 %.
 import { $, el, toast, params } from "./rtc.js";
 import { applyEffect, effectActive, needsCamera, effectsPanel } from "./effects.js";
+import { attachNativeAudio } from "./native-audio.js";
 
 const STORE = "swr.devices";
 
@@ -360,6 +361,13 @@ try {
   if (["/studio", "/guest", "/view"].includes(location.pathname)) navigator.mediaDevices?.setCaptureHandleConfig?.({ handle: ROOM_CAPTURE_HANDLE, permittedOrigins: [location.origin] });
 } catch { /* Capture Handle is optional. */ }
 const screenAudioBlocked = new WeakSet();
+const nativeScreens = new WeakMap();
+
+export function stopScreenCapture(stream) {
+  if (!stream) return;
+  nativeScreens.get(stream)?.cleanup(); nativeScreens.delete(stream);
+  stream.getTracks().forEach(t=>t.stop());
+}
 
 // A mixed desktop loopback cannot be unmixed per listener: every participant
 // would hear their voice again. Keep isolated tab audio, or system audio only
@@ -370,7 +378,7 @@ function protectScreenAudio(stream) {
     const surface = video?.getSettings?.().displaySurface;
     const ownRoom = video?.getCaptureHandle?.()?.handle === ROOM_CAPTURE_HANDLE;
     for (const track of stream.getAudioTracks()) {
-      if (!ownRoom && (surface === "browser" || track.getSettings?.().restrictOwnAudio === true)) continue;
+      if (!ownRoom && (nativeScreens.has(stream) || surface === "browser" || track.getSettings?.().restrictOwnAudio === true)) continue;
       screenAudioBlocked.add(stream); stream.removeTrack(track); track.stop();
     }
   };
@@ -381,25 +389,33 @@ function protectScreenAudio(stream) {
 }
 
 /** Prefer isolated tab audio; never publish an unfiltered desktop loopback. */
-export async function openScreen() {
+export async function openScreen(options = {}) {
   if (!navigator.mediaDevices?.getDisplayMedia) throw Object.assign(new Error("Este dispositivo no permite compartir pantalla."), { name: "NotSupportedError" });
   const video = { frameRate: { ideal: 30, max: 60 }, width: { ideal: 1920 }, height: { ideal: 1080 } };
+  const audio=options.audio!==false;
+  const surface=["window","monitor","browser"].includes(options.surface)?options.surface:"browser";
+  const native=globalThis.window?.StreamWebRomCapture;
+  if(native)await native.preferences({theme:document.documentElement.dataset.theme});
   let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { ...video, displaySurface: "browser" }, audio: { restrictOwnAudio: true, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      systemAudio: "exclude", windowAudio: "exclude", selfBrowserSurface: "exclude", surfaceSwitching: "exclude", preferCurrentTab: false,
+      video: { ...video, displaySurface: surface }, audio: audio ? { restrictOwnAudio: true, echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false,
+      systemAudio: audio ? "include" : "exclude", windowAudio: audio ? "window" : "exclude", selfBrowserSurface: "exclude", surfaceSwitching: "exclude", preferCurrentTab: false,
     });
   } catch (e) {
     if (!["TypeError", "OverconstrainedError"].includes(e.name)) throw e;
     // Unsupported optional hints must never silently discard the requested audio.
-    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio });
   }
+  if(native)nativeScreens.set(stream,await attachNativeAudio(stream));
+  if(!audio)for(const track of stream.getAudioTracks()){stream.removeTrack(track);track.stop()}
   return protectScreenAudio(stream);
 }
 
 export function screenAudioNotice(stream) {
-  if (screenAudioBlocked.has(stream)) return "Pantalla compartida sin audio del sistema para evitar que las voces vuelvan a la sala. Para enviar sonido, comparte otra pestaña y marca «Compartir audio de la pestaña».";
+  const native=nativeScreens.get(stream)?.selection;
+  if(native&&stream.getAudioTracks().length)return native.mode==='tab'?"Pestaña compartida con su audio aislado.":"Contenido compartido con audio aislado; las voces de la sala quedan fuera de la captura.";
+  if (screenAudioBlocked.has(stream)) return "Vídeo compartido. Este navegador no pudo aislar las voces del audio general; usa Captura avanzada en PC para compartir esta aplicación o el sistema con sonido.";
   return stream.getAudioTracks().length ? "Pantalla compartida con audio de la fuente, sin mezclar el sonido de la sala." : "La pantalla no incluye audio. Para enviarlo sin eco, comparte otra pestaña y marca «Compartir audio de la pestaña».";
 }
 

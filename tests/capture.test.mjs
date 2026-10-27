@@ -17,8 +17,8 @@ function capture(surface='browser',restricted=false){
 test('unsupported display hints retry with audio instead of silently dropping it',async()=>{
  const calls=[];const {result}=capture();
  navigator.mediaDevices.getDisplayMedia=async opts=>{calls.push(opts);if(calls.length===1)throw new TypeError('unsupported hint');return result};
- assert.equal(await openScreen(),result);assert.equal(calls[0].systemAudio,'exclude');assert.equal(calls[1].audio,true);
- assert.equal(calls[0].windowAudio,'exclude');assert.equal(calls[0].audio.restrictOwnAudio,true);
+ assert.equal(await openScreen(),result);assert.equal(calls[0].systemAudio,'include');assert.equal(calls[1].audio,true);
+ assert.equal(calls[0].windowAudio,'window');assert.equal(calls[0].audio.restrictOwnAudio,true);
  assert.equal(calls[0].selfBrowserSurface,'exclude');assert.equal(result.getAudioTracks().length,1);
  assert.deepEqual(captureConfig.permittedOrigins,['https://studio.test']);
  assert.match(screenAudioNotice(result),/con audio/);
@@ -30,7 +30,7 @@ test('unfiltered desktop/window or unknown audio cannot rebroadcast the particip
   navigator.mediaDevices.getDisplayMedia=async()=>result;
   assert.equal(await openScreen(),result);assert.deepEqual(result.getAudioTracks(),[]);
   assert.equal(audio.stopped,true);assert.equal(video.stopped,false);
-  assert.match(screenAudioNotice(result),/evitar que las voces vuelvan/);
+  assert.match(screenAudioNotice(result),/Captura avanzada/);
  }
 });
 

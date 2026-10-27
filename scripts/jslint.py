@@ -14,6 +14,7 @@ MediaStream MediaStreamTrack RTCPeerConnection RTCRtpSender RTCRtpReceiver WebSo
 HTMLMediaElement HTMLVideoElement Node FileReader Blob self caches clients undefined globalThis structuredClone
 OffscreenCanvas ImageBitmap createImageBitmap Path2D DOMException queueMicrotask AbortController TextEncoder TextDecoder
 arguments matchMedia screen getComputedStyle ResizeObserver IntersectionObserver MutationObserver""".split())
+GLOBALS.update("AudioWorkletNode AudioWorkletProcessor registerProcessor sampleRate ArrayBuffer".split())
 
 def walk(node, fn, parent=None, key=None):
     if isinstance(node, list):

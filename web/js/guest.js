@@ -18,7 +18,8 @@ import { callGrid } from "./call-grid.js";
 import { roomTelemetry, metricText } from "./telemetry.js";
 import { immersive } from "./immersive.js";
 import { RoomAudio, pictureInPicture } from "./room-audio.js";
-import { screenAudioNotice, resumeCaptureAudio } from "./devices.js";
+import { screenAudioNotice, resumeCaptureAudio, stopScreenCapture } from "./devices.js";
+import { chooseScreen } from "./screen-share.js";
 
 const room = (params.get("room") || "").toLowerCase();
 if (!room) location.href = "/";
@@ -527,7 +528,7 @@ function stopScreen(notify = true) {
   const active = screenAllowed || screenPending || screenPub || screenOpening;
   ++screenAttempt;
   screenAllowed = false; screenPending = false; screenOpening = false; screenNotice = "";
-  screenPub?.stop(); screenMedia?.getTracks().forEach((t) => t.stop());
+  screenPub?.stop(); stopScreenCapture(screenMedia);
   screenPub = null; screenMedia = null;
   if (notify && active && !sig.closed) sig.send({ type: "screen-cancel" });
   renderScreenPermission();
@@ -558,11 +559,11 @@ async function shareScreen() {
   try {
     // This call must remain in the guest's own click: a host approval cannot
     // open the browser's display picker without a fresh user gesture.
-    const opened = await openScreen();
-    if (sig.closed || attempt !== screenAttempt || !screenAllowed || !onLiveStage()) { opened.getTracks().forEach(t => t.stop()); return; }
+    const opened = await chooseScreen();
+    if (sig.closed || attempt !== screenAttempt || !screenAllowed || !onLiveStage()) { stopScreenCapture(opened); return; }
     screenMedia = opened;
     const publication = await publish(sig, opened, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail", codec: prefs.codec, stereo: true, audioKbps: 192 });
-    if (sig.closed || attempt !== screenAttempt || !screenAllowed) { publication.stop(); opened.getTracks().forEach(t => t.stop()); return; }
+    if (sig.closed || attempt !== screenAttempt || !screenAllowed) { publication.stop(); stopScreenCapture(opened); return; }
     screenPub = publication;
     toast(screenAudioNotice(opened), opened.getAudioTracks().length ? "ok" : "");
     opened.getVideoTracks()[0].onended = () => stopScreen();
@@ -612,7 +613,7 @@ function leave(text) {
   clearInterval(meterTimer); gridLayout.destroy(); telemetry.destroy(); cinema.destroy(); closePiP();
   for (const id of [...remoteInfo.keys()]) unwatch(id);
   roomAudio.close();
-  screenMedia?.getTracks().forEach(t => t.stop());
+  stopScreenCapture(screenMedia);
   for (const x of extraCams.values()) x.media.getTracks().forEach(t => t.stop());
   media?.getTracks().forEach((t) => t.stop());
   // With #invite in the URL, a link to location.href is a same-document
