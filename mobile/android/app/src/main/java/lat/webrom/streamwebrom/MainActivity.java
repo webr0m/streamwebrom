@@ -6,13 +6,14 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.*;
 import android.widget.*;
 import java.util.ArrayList;
 
-/** Foreground WebRTC client. The SFU continues to run on the user's server. */
+/** WebRTC client with opt-in foreground-service support for background audio. */
 public final class MainActivity extends Activity {
     private WebView web;
     private LinearLayout root;
@@ -22,6 +23,8 @@ public final class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private String resumeURL;
     private boolean active;
+    private boolean backgroundEnabled;
+    private Button backgroundButton;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -50,9 +53,27 @@ public final class MainActivity extends Activity {
             if (valid(Uri.parse(url == null ? "" : url))) external(Uri.parse(url));
         });
         bar.addView(browser);
+        backgroundButton = new Button(this); backgroundButton.setText("Segundo plano");
+        backgroundButton.setOnClickListener(v -> {
+            if (backgroundEnabled) { disableBackground(); return; }
+            if (web == null || !sameOrigin(Uri.parse(web.getUrl() == null ? "" : web.getUrl()))) {
+                message("Abre tu sala antes de activar el segundo plano"); return;
+            }
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                message("Activa el micrófono de la sala y concede el permiso antes de habilitar el segundo plano"); return;
+            }
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 12); return;
+            }
+            enableBackground();
+        });
+        // A separate row keeps the address usable on narrow phones.
+        LinearLayout backgroundBar = new LinearLayout(this);
+        backgroundBar.addView(backgroundButton);
         root.addView(bar);
+        root.addView(backgroundBar);
         TextView help = new TextView(this);
-        help.setText("Conecta tu servidor HTTPS. Cámara y micrófono se solicitan al usarlos. Para compartir pantalla, usa un navegador compatible.");
+        help.setText("Conecta tu servidor HTTPS. Entra a la sala y activa Segundo plano para mantener audio y conexión al usar otras apps. Android puede pausar la cámara. Para compartir pantalla, usa un navegador compatible.");
         help.setPadding(12, 8, 12, 8); root.addView(help);
         setContentView(root);
     }
@@ -72,6 +93,7 @@ public final class MainActivity extends Activity {
     private void open(String url) {
         Uri u = Uri.parse(url);
         if (!valid(u)) { message("Usa una URL HTTPS con un certificado válido"); return; }
+        disableBackground();
         denyPending();
         if (fileCallback != null) { fileCallback.onReceiveValue(null); fileCallback = null; }
         if (web != null) { ((LinearLayout) web.getParent()).removeView(web); web.destroy(); }
@@ -157,6 +179,7 @@ public final class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
         if (code == 10) grantPending();
+        if (code == 12 && results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) enableBackground();
     }
     @Override protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
@@ -167,11 +190,12 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onStart() {
         super.onStart(); active = true;
+        if (backgroundEnabled && !CallAudioService.running) disableBackground();
         if (web != null && resumeURL != null) { web.loadUrl(resumeURL); resumeURL = null; }
     }
     @Override protected void onStop() {
         active = false; denyPending();
-        if (web != null && fileCallback == null) { resumeURL = web.getUrl(); web.loadUrl("about:blank"); }
+        if (web != null && fileCallback == null && !backgroundEnabled) { resumeURL = web.getUrl(); web.loadUrl("about:blank"); }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         super.onStop();
     }
@@ -179,8 +203,25 @@ public final class MainActivity extends Activity {
         if (web != null && web.canGoBack()) web.goBack(); else super.onBackPressed();
     }
     @Override protected void onDestroy() {
+        disableBackground();
         denyPending(); if (fileCallback != null) fileCallback.onReceiveValue(null);
         if (web != null) web.destroy(); super.onDestroy();
     }
     private void message(String text) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); }
+    private void enableBackground() {
+        if (!active || web == null || !sameOrigin(Uri.parse(web.getUrl() == null ? "" : web.getUrl()))) return;
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return;
+        try {
+            Intent service = new Intent(this, CallAudioService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+            backgroundEnabled = true; backgroundButton.setText("Segundo plano: activo");
+        } catch (IllegalStateException | SecurityException e) {
+            disableBackground(); message("Android no permitió activar el audio en segundo plano. Inténtalo con la sala visible.");
+        }
+    }
+    private void disableBackground() {
+        backgroundEnabled = false;
+        stopService(new Intent(this, CallAudioService.class));
+        if (backgroundButton != null) backgroundButton.setText("Segundo plano");
+    }
 }

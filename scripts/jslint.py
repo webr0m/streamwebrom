@@ -8,7 +8,7 @@ import os, sys, esprima
 
 GLOBALS = set("""window document CSS Worker AbortSignal postMessage navigator location history localStorage sessionStorage console setTimeout clearTimeout
 setInterval clearInterval requestAnimationFrame cancelAnimationFrame fetch URL URLSearchParams JSON Math Date Number String
-Boolean BigInt Object Array Promise Map Set WeakMap Error TypeError RegExp Uint8Array Float32Array Infinity NaN isNaN parseInt
+Boolean BigInt Object Array Promise Map Set WeakMap WeakSet Error TypeError RegExp Uint8Array Float32Array Infinity NaN isNaN parseInt
 parseFloat encodeURIComponent decodeURIComponent alert confirm prompt crypto performance Image Audio AudioContext
 MediaStream MediaStreamTrack RTCPeerConnection RTCRtpSender RTCRtpReceiver WebSocket EventTarget CustomEvent Event
 HTMLMediaElement HTMLVideoElement Node FileReader Blob self caches clients undefined globalThis structuredClone

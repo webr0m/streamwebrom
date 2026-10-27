@@ -12,7 +12,9 @@ El sonido de los participantes se reproduce en elementos de audio separados de l
 
 En la llamada, **Ventana flotante** abre la cámara ampliada, o la primera cámara remota disponible, mediante Picture-in-Picture cuando el navegador dispone de esa API. Debes pulsar el botón; una web no puede abrir esa ventana arbitrariamente. Si Chrome bloqueó el audio, **Activar audio de la sala** permite reanudarlo con un toque, sin silenciar permanentemente los vídeos como alternativa.
 
-Esto conserva las conexiones mientras Chrome y Android permitan su ejecución. No obliga al sistema a mantener una pestaña descartada, una cámara suspendida, un navegador cerrado o un teléfono bajo restricciones de batería. La disponibilidad de Picture-in-Picture depende de la versión y del dispositivo. Las pruebas de pestaña oculta verifican la lógica web y el flujo de audio, no certifican todos los teléfonos físicos. Las apps WebView incluidas siguen siendo clientes de primer plano.
+Esto conserva las conexiones mientras Chrome y Android permitan su ejecución. No obliga al sistema a mantener una pestaña descartada, una cámara suspendida, un navegador cerrado o un teléfono bajo restricciones de batería. La disponibilidad de Picture-in-Picture depende de la versión y del dispositivo. Las pruebas de pestaña oculta verifican la lógica web y el flujo de audio, no certifican todos los teléfonos físicos.
+
+El APK Android ofrece **Segundo plano** después de conceder acceso al micrófono y entrar a la sala. Mantiene la página mediante un servicio de audio iniciado con la app visible y una notificación permanente; no vacía la página al usar otras apps. La notificación permite volver o desactivar el modo. Cerrar la app desde tareas recientes lo detiene. La cámara sigue sujeta a restricciones de Android. La app iOS mantiene su comportamiento de primer plano. Ver [instalación y detalles](../mobile/README.md).
 
 ## Compartir sonido de una pantalla
 

@@ -6,6 +6,7 @@
 - Se retiran el botón y los avisos de reconexión durante la llamada. Los estados ICE, ping, bajas de señal y segundo plano no reinician transportes. Solo el cierre real de señalización recupera la sesión automáticamente y sin intervención.
 - Compartir pantalla prefiere audio aislado de otra pestaña. La mezcla general del equipo se excluye y, si el navegador la entrega sin un filtro propio confirmado, se conserva el vídeo y se explica cómo compartir sonido sin devolver las voces de la sala.
 - Al suspenderse la cámara del anfitrión se mantiene su micrófono y publicación. Al volver se recupera la captura sin sustituir un socket activo, conservando los controles elegidos. Chrome y Android siguen controlando la suspensión de procesos y permisos.
+- El APK Android incorpora un modo explícito «Segundo plano», con servicio de audio y notificación, que conserva la página al cambiar de app. Se inicia desde la app visible tras conceder el micrófono y se detiene al cerrar la tarea; no arranca tras un reinicio. iOS sigue siendo de primer plano.
 - Pruebas de entrada sin errores ICE atrasados, audio entre cuatro participantes, estados de señal débil sin reconstrucción, segundo plano, recuperación tras cierre real y aislamiento del sonido compartido.
 
 ## v1.11.3 — Audio entre participantes, pantalla y segundo plano
