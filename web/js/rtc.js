@@ -2,6 +2,7 @@
 // One WebSocket per page; one RTCPeerConnection per published or received stream
 // (no renegotiation dance, which is the #1 source of flakiness in mesh apps).
 import { senderProfile } from "./bandwidth.js";
+import { t } from "./i18n.js";
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -29,8 +30,8 @@ export function toast(text, kind = "") {
 }
 
 export async function copy(text) {
-  try { await navigator.clipboard.writeText(text); toast("Copiado ✓", "ok"); }
-  catch { prompt("Copia este texto:", text); }
+  try { await navigator.clipboard.writeText(text); toast(t("misc.copied"), "ok"); }
+  catch { prompt(t("misc.copyPrompt"), text); }
 }
 
 export const params = new URLSearchParams(location.search);
@@ -48,7 +49,7 @@ export function iceConfiguration(servers, mode = "auto") {
       return url.protocol === "turns:" && url.pathname.endsWith(":443") && [null, "tcp"].includes(url.searchParams.get("transport"));
     } catch { return false; }
   }) })).filter(s => s.urls.length);
-  if (!filtered.length) throw new Error("Esta ruta no tiene TURN cifrado en el puerto 443. Prueba otro modo de conexión.");
+  if (!filtered.length) throw new Error(t("misc.rtcNoEncryptedTurn"));
   return { iceServers: filtered, iceTransportPolicy: "relay", bundlePolicy: "max-bundle" };
 }
 
@@ -111,7 +112,7 @@ export class Signal extends EventTarget {
       let welcomed = false, terminal = false;
       const deadline = setTimeout(() => {
         if (this.ws !== ws || welcomed) return;
-        reject(new Error("El servidor no respondió. Revisa tu conexión e inténtalo de nuevo."));
+        reject(new Error(t("misc.serverNoResponse")));
         ws.close();
       }, 20000);
       this.cancelJoin = (reason = "connection restarted") => { clearTimeout(deadline); reject(new Error(reason)); };
@@ -294,9 +295,9 @@ export function waitConnected(pc, iceServers = [], timeout = 30000, signal) {
   return new Promise((resolve, reject) => {
     const hasTURN = iceServers.some(s => [s.urls].flat().some(url => /^turns?:/i.test(url)));
     const error = () => new Error(hasTURN
-      ? "No se pudo conectar el audio y video. Comprueba el servicio TURN y vuelve a intentar."
-      : "No se pudo conectar el audio y video. Esta red puede necesitar un relé TURN; el servidor no tiene uno configurado.");
-    const aborted = () => finish(new Error("Se perdió la conexión con el servidor."));
+      ? t("misc.mediaConnectTurn")
+      : t("misc.mediaConnectNoTurn"));
+    const aborted = () => finish(new Error(t("misc.connectionLost")));
     const finish = (err) => { clearTimeout(timer); pc.removeEventListener("connectionstatechange", changed); signal?.removeEventListener("abort", aborted); err ? reject(err) : resolve(); };
     const changed = () => {
       if (pc.connectionState === "connected") finish();
@@ -340,7 +341,7 @@ export async function publish(sig, media, opts = {}) {
   try {
     await pc.setLocalDescription(await pc.createOffer());
     if (!sig.trickle) await gathered(pc, 10000);
-    if (sig.ws !== socket || ice.signal.aborted) throw new Error("Se perdió la conexión con el servidor.");
+    if (sig.ws !== socket || ice.signal.aborted) throw new Error(t("misc.connectionLost"));
     res = await sig.request({ type: "publish", kind: opts.kind || "camera", stream: opts.stream || "", name: opts.name || "", sdp: pc.localDescription, ...ice.fields });
     const answer = opts.stereo ? { type: res.sdp.type, sdp: stereoOpus(res.sdp.sdp, opts.audioKbps || 256) } : res.sdp;
     await pc.setRemoteDescription(answer);
@@ -421,7 +422,7 @@ export async function subscribe(sig, id, opts = {}) {
     await pc.setRemoteDescription(offer.sdp);
     await pc.setLocalDescription(await pc.createAnswer());
     if (!sig.trickle) await gathered(pc, 10000);
-    if (sig.ws !== socket || ice.signal.aborted) throw new Error("Se perdió la conexión con el servidor.");
+    if (sig.ws !== socket || ice.signal.aborted) throw new Error(t("misc.connectionLost"));
     sig.send({ type: "answer", stream: id, sdp: pc.localDescription, negotiation: ice.fields.negotiation });
     ice.ready();
     await waitConnected(pc, sig.ice, opts.timeout || 30000, ice.signal);

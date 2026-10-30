@@ -2,14 +2,17 @@
 // badge, links and @mentions, big emoji-only messages, an emoji picker (with
 // recents) and stickers.
 import { el } from "./rtc.js";
+import { t } from "./i18n.js";
 import { STICKERS, stickerById } from "./stickers.js";
 
+// Category names are i18n keys, resolved when the picker renders so a language
+// switch relabels the groups without touching the emoji lists.
 export const EMOJIS = [
-  ["😀", "Caras", "😀 😃 😄 😁 😆 😅 😂 🤣 🙂 😉 😊 😇 🥰 😍 🤩 😘 😋 😛 😜 🤪 🤗 🤭 🤫 🤔 🤐 🤨 😐 😏 😒 🙄 😬 😌 😴 🤤 😷 🤒 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😲 😳 🥺 😢 😭 😱 😤 😡 🤬 💀 🤡 👻 👽 🤖 😺 🙈 🙉 🙊"],
-  ["👍", "Gestos", "👍 👎 👌 🤌 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ ✋ 🤚 🖐️ 🖖 👋 👏 🙌 👐 🤲 🤝 🙏 💪 🫶 ✍️ 👀 🧠 🗣️ 🙋 🙆 🙅 🤷 🤦 💃 🕺"],
-  ["❤️", "Corazones", "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💯 💢 💥 💫 💦 💨 💬 💭"],
-  ["🎉", "Fiesta", "🎉 🎊 🎈 🎁 🎂 🍾 🥂 🍻 🏆 🥇 🏅 🎖️ ⭐ 🌟 ✨ 🔥 ⚡ 🌈 ☀️ 🎶 🎵 🎤 🎧 🎸 🥁 🎮 🎬 📸 🎯"],
-  ["⚽", "Varios", "⚽ 🏀 🏈 ⚾ 🎾 🏐 🚀 ✈️ 🚗 🏠 💻 📱 ⌚ 💡 📌 📣 🔔 ⏰ ⏳ ✅ ❌ ❓ ❗ ⚠️ 🆗 🆕 🔴 🟢 🔵 ☕ 🍕 🍔 🌮 🍿 🍩 🍓 🥑 🐶 🐱 🦄 🐔 🇨🇱"],
+  ["😀", "misc.emojiFaces", "😀 😃 😄 😁 😆 😅 😂 🤣 🙂 😉 😊 😇 🥰 😍 🤩 😘 😋 😛 😜 🤪 🤗 🤭 🤫 🤔 🤐 🤨 😐 😏 😒 🙄 😬 😌 😴 🤤 😷 🤒 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😲 😳 🥺 😢 😭 😱 😤 😡 🤬 💀 🤡 👻 👽 🤖 😺 🙈 🙉 🙊"],
+  ["👍", "misc.emojiGestures", "👍 👎 👌 🤌 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ ✋ 🤚 🖐️ 🖖 👋 👏 🙌 👐 🤲 🤝 🙏 💪 🫶 ✍️ 👀 🧠 🗣️ 🙋 🙆 🙅 🤷 🤦 💃 🕺"],
+  ["❤️", "misc.emojiHearts", "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💯 💢 💥 💫 💦 💨 💬 💭"],
+  ["🎉", "misc.emojiParty", "🎉 🎊 🎈 🎁 🎂 🍾 🥂 🍻 🏆 🥇 🏅 🎖️ ⭐ 🌟 ✨ 🔥 ⚡ 🌈 ☀️ 🎶 🎵 🎤 🎧 🎸 🥁 🎮 🎬 📸 🎯"],
+  ["⚽", "misc.emojiMisc", "⚽ 🏀 🏈 ⚾ 🎾 🏐 🚀 ✈️ 🚗 🏠 💻 📱 ⌚ 💡 📌 📣 🔔 ⏰ ⏳ ✅ ❌ ❓ ❗ ⚠️ 🆗 🆕 🔴 🟢 🔵 ☕ 🍕 🍔 🌮 🍿 🍩 🍓 🥑 🐶 🐱 🦄 🐔 🇨🇱"],
 ].map(([icon, name, list]) => ({ icon, name, list: list.split(" ") }));
 
 const RECENT_KEY = "swr.emoji.recent";
@@ -62,7 +65,7 @@ export function chatMessage(c, opts = {}) {
     ...(opts.actions || []),
     el("div", { class: "meta" },
       el("b", { text: c.from }),
-      c.role === "host" ? el("span", { class: "badge", text: "Anfitrión" }) : null,
+      c.role === "host" ? el("span", { class: "badge", text: t("misc.chatHostBadge") }) : null,
       c.source && c.source !== "chat" ? el("span", { class: "badge src", text: c.source }) : null,
       el("span", { class: "time", text: hhmm(c.ts) })),
     body);
@@ -83,7 +86,7 @@ export function appendChat(box, msg) {
  * send(payload) is called with { text } or { sticker }.
  */
 export function mountComposer(row, input, send) {
-  const picker = el("div", { class: "chatpicker hidden", role: "dialog", "aria-label": "Emojis y stickers" });
+  const picker = el("div", { class: "chatpicker hidden", role: "dialog", "aria-label": t("misc.chatPickerAria") });
   let tab = "emoji";
   const insert = (e) => {
     const s = input.selectionStart ?? input.value.length, t = input.selectionEnd ?? s;
@@ -94,16 +97,16 @@ export function mountComposer(row, input, send) {
   };
   const render = () => {
     const tabs = el("div", { class: "pickertabs" },
-      el("button", { type: "button", class: tab === "emoji" ? "on" : "", onclick: () => { tab = "emoji"; render(); }, text: "😊 Emojis" }),
-      el("button", { type: "button", class: tab === "stickers" ? "on" : "", onclick: () => { tab = "stickers"; render(); }, text: "🏷️ Stickers" }));
+      el("button", { type: "button", class: tab === "emoji" ? "on" : "", onclick: () => { tab = "emoji"; render(); }, text: t("misc.chatTabEmojis") }),
+      el("button", { type: "button", class: tab === "stickers" ? "on" : "", onclick: () => { tab = "stickers"; render(); }, text: t("misc.chatTabStickers") }));
     let content;
     if (tab === "emoji") {
       const groups = [];
       const rec = recents();
-      if (rec.length) groups.push({ name: "Recientes", list: rec });
+      if (rec.length) groups.push({ name: "misc.emojiRecent", list: rec });
       groups.push(...EMOJIS);
       content = el("div", { class: "emojigrid" }, ...groups.flatMap((g) => [
-        el("div", { class: "grouptitle", text: g.name }),
+        el("div", { class: "grouptitle", text: t(g.name) }),
         ...g.list.map((e) => el("button", { type: "button", class: "emo", title: e, onclick: () => insert(e), text: e })),
       ]));
     } else {
@@ -118,8 +121,8 @@ export function mountComposer(row, input, send) {
   const open = (which) => { tab = which; render(); picker.classList.remove("hidden"); };
   const close = () => picker.classList.add("hidden");
   const toggle = (which) => (!picker.classList.contains("hidden") && tab === which ? close() : open(which));
-  const emojiBtn = el("button", { type: "button", class: "small chattool", title: "Emojis", "aria-label": "Emojis", onclick: () => toggle("emoji"), text: "😊" });
-  const stickBtn = el("button", { type: "button", class: "small chattool", title: "Stickers", "aria-label": "Stickers", onclick: () => toggle("stickers"), text: "🏷️" });
+  const emojiBtn = el("button", { type: "button", class: "small chattool", title: t("misc.chatEmojis"), "aria-label": t("misc.chatEmojis"), onclick: () => toggle("emoji"), text: "😊" });
+  const stickBtn = el("button", { type: "button", class: "small chattool", title: t("misc.chatStickers"), "aria-label": t("misc.chatStickers"), onclick: () => toggle("stickers"), text: "🏷️" });
   row.classList.add("chatcomposer");
   row.prepend(emojiBtn, stickBtn);
   row.after(picker);

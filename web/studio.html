@@ -2,81 +2,81 @@
 <html lang="es">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Estudio · StreamWebRom</title>
+<title data-i18n="studio.pageTitle">Estudio · StreamWebRom</title>
 <link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#141518"><link rel="apple-touch-icon" href="/img/icon-192.png"><script src="/js/appearance.js"></script><link rel="stylesheet" href="/css/app.css">
 </head>
 <body class="sy">
 <div class="studio" id="studioRoot">
-  <div class="stage-clean-controls"><button id="cleanFullscreen" class="small">Pantalla completa</button><button id="exitFullscreen" class="small hidden">Volver al estudio</button></div>
+  <div class="stage-clean-controls"><button id="cleanFullscreen" class="small" data-i18n="studio.fullscreen">Pantalla completa</button><button id="exitFullscreen" class="small hidden" data-i18n="studio.backToStudio">Volver al estudio</button></div>
   <!-- Top bar: show title on the left, Record + Go live on the right (StreamYard style) -->
   <header class="topbar">
-    <a class="brand" href="/" title="Inicio"><img src="/img/logo.svg" alt=""></a>
+    <a class="brand" href="/" title="Inicio" data-i18n-title="studio.home"><img src="/img/logo.svg" alt=""></a>
     <div class="titlebox">
-      <span class="title" id="title">Estudio</span>
-      <span class="sub"><span class="pill" id="status">conectando…</span><span class="pill hidden" id="liveTimer"></span></span>
+      <span class="title" id="title" data-i18n="studio.studioWord">Estudio</span>
+      <span class="sub"><span class="pill" id="status" data-i18n="studio.connecting">conectando…</span><span class="pill hidden" id="liveTimer"></span></span>
     </div>
     <span class="grow"></span>
-    <label class="appearance-control"><span class="sr-only">Tema visual</span><select data-theme-picker aria-label="Tema visual"><option value="light">Día</option><option value="dark">Noche</option><option value="auto">Automático</option></select></label>
+    <label class="appearance-control"><span class="sr-only" data-i18n="studio.visualTheme">Tema visual</span><select data-theme-picker aria-label="Tema visual" data-i18n-aria="studio.visualTheme"><option value="light" data-i18n="studio.themeDay">Día</option><option value="dark" data-i18n="studio.themeNight">Noche</option><option value="auto" data-i18n="studio.themeAuto">Automático</option></select></label><span class="lang-slot" data-lang-slot></span>
     <div class="header-actions">
-      <button id="openRoomDialog" class="save-room" data-icon="save" aria-haspopup="dialog"><span id="roomActionLabel">Guardar sala</span></button>
+      <button id="openRoomDialog" class="save-room" data-icon="save" aria-haspopup="dialog"><span id="roomActionLabel" data-i18n="studio.saveRoom">Guardar sala</span></button>
       <details class="view-menu" id="studioViewMenu">
-        <summary class="btn" data-icon="settings">Vista</summary>
+        <summary class="btn" data-icon="settings" data-i18n="studio.view">Vista</summary>
         <div class="view-options">
-          <span class="section-label">Área de trabajo</span>
-          <button id="toggleScenes" aria-expanded="true" aria-controls="scenesRail">Ocultar escenas</button>
-          <button id="togglePanel" aria-expanded="true" aria-controls="studioPanes">Ocultar panel</button>
-          <button id="stageView" aria-pressed="false">Solo escenario</button>
-          <button id="stageFullscreen" aria-pressed="false">Pantalla completa</button>
-          <span class="section-label">Conexión</span>
-          <button id="relayInfo" aria-haspopup="dialog">Conexión y ahorro</button>
-          <span class="pill" id="roomPing" title="Ping de señalización entre tu equipo y la sala">Sala —</span>
-          <button id="networkToggle" aria-pressed="true">Mostrar latencias</button>
+          <span class="section-label" data-i18n="studio.workArea">Área de trabajo</span>
+          <button id="toggleScenes" aria-expanded="true" aria-controls="scenesRail" data-i18n="studio.hideScenes">Ocultar escenas</button>
+          <button id="togglePanel" aria-expanded="true" aria-controls="studioPanes" data-i18n="studio.hidePanel">Ocultar panel</button>
+          <button id="stageView" aria-pressed="false" data-i18n="studio.stageOnly">Solo escenario</button>
+          <button id="stageFullscreen" aria-pressed="false" data-i18n="studio.fullscreen">Pantalla completa</button>
+          <span class="section-label" data-i18n="studio.connection">Conexión</span>
+          <button id="relayInfo" aria-haspopup="dialog" data-i18n="studio.connectionAndSavings">Conexión y ahorro</button>
+          <span class="pill" id="roomPing" title="Ping de señalización entre tu equipo y la sala" data-i18n-title="studio.pingHint" data-i18n="studio.roomPing">Sala —</span>
+          <button id="networkToggle" aria-pressed="true" data-i18n="studio.showLatencies">Mostrar latencias</button>
         </div>
       </details>
-      <button id="record" class="topbtn" data-icon="record" title="Graba cada fuente por separado en el servidor"><span id="recordLabel">Grabar</span></button>
-      <button class="primary golive" id="golive" data-icon="live">Transmitir</button>
+      <button id="record" class="topbtn" data-icon="record" title="Graba cada fuente por separado en el servidor" data-i18n-title="studio.recordHint"><span id="recordLabel" data-i18n="studio.record">Grabar</span></button>
+      <button class="primary golive" id="golive" data-icon="live" data-i18n="studio.goLive">Transmitir</button>
     </div>
   </header>
 
   <!-- Left rail: live scenes (Programa + escenas 2–8) and the preview of the scene being edited -->
   <aside class="scenes-rail" id="scenesRail">
-    <div class="railhead"><div>Escenas <span class="rail-caption">Organiza tu programa</span></div><button id="collapseScenes" class="small ghost" aria-label="Ocultar escenas" aria-controls="scenesRail" aria-expanded="true">‹</button></div>
+    <div class="railhead"><div><span data-i18n="studio.scenes">Escenas</span> <span class="rail-caption" data-i18n="studio.organizeProgram">Organiza tu programa</span></div><button id="collapseScenes" class="small ghost" aria-label="Ocultar escenas" data-i18n-aria="studio.hideScenes" aria-controls="scenesRail" aria-expanded="true">‹</button></div>
     <div class="scenebar" id="sceneBar"></div>
     <div class="program-wrap hidden scene-preview" id="scenePreviewWrap"><canvas id="scenePreview"></canvas><span class="badge pill" id="scenePreviewLabel"></span></div>
   </aside>
 
   <section class="main">
-    <div class="relay-banner" id="relayBanner" role="status" aria-live="polite"><div><strong id="relayLabel">Conexión y ahorro</strong><span id="relayText"></span></div><button id="relayDetails" class="small" aria-haspopup="dialog">Detalles</button></div>
-    <button id="restoreScenes" class="small scene-restore hidden" data-icon="layers" title="Mostrar escenas" aria-label="Mostrar escenas" aria-controls="scenesRail" aria-expanded="false">›</button>
+    <div class="relay-banner" id="relayBanner" role="status" aria-live="polite"><div><strong id="relayLabel" data-i18n="studio.connectionAndSavings">Conexión y ahorro</strong><span id="relayText"></span></div><button id="relayDetails" class="small" aria-haspopup="dialog" data-i18n="studio.details">Detalles</button></div>
+    <button id="restoreScenes" class="small scene-restore hidden" data-icon="layers" title="Mostrar escenas" data-i18n-title="studio.showScenes" aria-label="Mostrar escenas" data-i18n-aria="studio.showScenes" aria-controls="scenesRail" aria-expanded="false">›</button>
     <div class="stagearea">
       <div class="program-wrap">
         <canvas id="program"></canvas>
-        <span class="badge pill red hidden" id="liveBadge">EN VIVO</span>
+        <span class="badge pill red hidden" id="liveBadge" data-i18n="studio.liveBadge">EN VIVO</span>
       </div>
     </div>
 
     <div class="stagebar">
-      <div class="layouts" id="layouts" aria-label="Layouts"></div>
+      <div class="layouts" id="layouts" aria-label="Layouts" data-i18n-aria="studio.layouts"></div>
       <span class="vsep"></span>
-      <button class="chip" id="countdown" data-icon="clock">Cuenta regresiva 5:00</button>
-      <button class="chip" id="clearScreen" data-icon="clear">Limpiar pantalla</button>
+      <button class="chip" id="countdown" data-icon="clock" data-i18n="studio.countdown">Cuenta regresiva 5:00</button>
+      <button class="chip" id="clearScreen" data-icon="clear" data-i18n="studio.clearScreen">Limpiar pantalla</button>
     </div>
 
     <div class="trayhead">
-      <span class="traytitle">Backstage</span><span id="sourceCount" class="pill">0 fuentes</span>
-      <span class="muted trayhint" title="Atajos: 1–8 layouts · B banner · C limpiar · S silenciar escenario">Gestiona las fuentes antes de salir en vivo.</span>
+      <span class="traytitle" data-i18n="studio.backstage">Backstage</span><span id="sourceCount" class="pill" data-i18n="studio.sourceCountInitial">0 fuentes</span>
+      <span class="muted trayhint" title="Atajos: 1–8 layouts · B banner · C limpiar · S silenciar escenario" data-i18n-title="studio.shortcutsHint" data-i18n="studio.sourcesHint">Gestiona las fuentes antes de salir en vivo.</span>
       <span class="grow"></span>
       <details class="modmenu">
-        <summary class="chip" data-icon="users">Producción</summary>
+        <summary class="chip" data-icon="users" data-i18n="studio.production">Producción</summary>
         <div class="modbar">
-          <button class="small" id="muteStage" title="Silencia todo el escenario en el programa (S)">Silenciar escenario</button>
-          <button class="small" id="muteAll" title="Silencia el micrófono de todos los invitados">Silenciar a todos</button>
-          <button class="small" id="askUnmuteAll" title="Pide a todos activar su micrófono">Pedir audio a todos</button>
-          <button class="small" id="camsOff" title="Apaga la cámara de todos los invitados">Apagar cámaras</button>
-          <button class="small" id="askCamsOn" title="Pide a todos encender su cámara">Pedir cámaras a todos</button>
-          <button class="small" id="lowerHands">Bajar manos</button>
-          <button class="small" id="clearStage">Todos al backstage</button>
-          <button class="small" id="allStage">Todos al escenario</button>
+          <button class="small" id="muteStage" title="Silencia todo el escenario en el programa (S)" data-i18n-title="studio.muteStageHint" data-i18n="studio.muteStage">Silenciar escenario</button>
+          <button class="small" id="muteAll" title="Silencia el micrófono de todos los invitados" data-i18n-title="studio.muteAllHint" data-i18n="studio.muteAll">Silenciar a todos</button>
+          <button class="small" id="askUnmuteAll" title="Pide a todos activar su micrófono" data-i18n-title="studio.askUnmuteAllHint" data-i18n="studio.askUnmuteAll">Pedir audio a todos</button>
+          <button class="small" id="camsOff" title="Apaga la cámara de todos los invitados" data-i18n-title="studio.camsOffHint" data-i18n="studio.camsOff">Apagar cámaras</button>
+          <button class="small" id="askCamsOn" title="Pide a todos encender su cámara" data-i18n-title="studio.askCamsOnHint" data-i18n="studio.askCamsOn">Pedir cámaras a todos</button>
+          <button class="small" id="lowerHands" data-i18n="studio.lowerHands">Bajar manos</button>
+          <button class="small" id="clearStage" data-i18n="studio.allToBackstage">Todos al backstage</button>
+          <button class="small" id="allStage" data-i18n="studio.allToStage">Todos al escenario</button>
         </div>
       </details>
     </div>
@@ -86,172 +86,172 @@
 
     <!-- Bottom control bar: round buttons with labels -->
     <footer class="controlbar">
-      <button id="monitor" class="ctl on" data-icon="headphones" title="Escuchar a los invitados en tus audífonos">Monitor</button>
-      <button id="addCam" class="ctl" data-icon="cam" title="Agregar tu cámara">Cámara</button>
-      <button id="addScreen" class="ctl" data-icon="screen" title="Compartir pantalla">Pantalla</button>
-      <button id="addMedia" class="ctl" data-icon="media" title="Video o imagen local">Medio</button>
-      <button id="addVdo" class="ctl" data-icon="cam" title="Conectar una cámara mediante el servicio oficial de VDO.Ninja">VDO.Ninja</button>
+      <button id="monitor" class="ctl on" data-icon="headphones" title="Escuchar a los invitados en tus audífonos" data-i18n-title="studio.monitorHint" data-i18n="studio.monitor">Monitor</button>
+      <button id="addCam" class="ctl" data-icon="cam" title="Agregar tu cámara" data-i18n-title="studio.cameraHint" data-i18n="studio.camera">Cámara</button>
+      <button id="addScreen" class="ctl" data-icon="screen" title="Compartir pantalla" data-i18n-title="studio.screenHint" data-i18n="studio.screen">Pantalla</button>
+      <button id="addMedia" class="ctl" data-icon="media" title="Video o imagen local" data-i18n-title="studio.mediaHint" data-i18n="studio.media">Medio</button>
+      <button id="addVdo" class="ctl" data-icon="cam" title="Conectar una cámara mediante el servicio oficial de VDO.Ninja" data-i18n-title="studio.vdoHint">VDO.Ninja</button>
       <input type="file" id="mediaFile" accept="video/*,image/*" class="hidden">
-      <button id="virtual" class="ctl" data-icon="tv" title="Pantalla virtual: salida limpia del programa en otra ventana (captúrala, ponla a pantalla completa o úsala como cámara virtual)">Pantalla virtual</button>
-      <button id="settings" class="ctl" data-icon="settings" title="Cámara, micrófono y audífonos">Ajustes</button>
-      <button id="invite" class="ctl" data-icon="invite" title="Copiar el link de invitación">Invitar</button>
+      <button id="virtual" class="ctl" data-icon="tv" title="Pantalla virtual: salida limpia del programa en otra ventana (captúrala, ponla a pantalla completa o úsala como cámara virtual)" data-i18n-title="studio.virtualScreenHint" data-i18n="studio.virtualScreen">Pantalla virtual</button>
+      <button id="settings" class="ctl" data-icon="settings" title="Cámara, micrófono y audífonos" data-i18n-title="studio.settingsHint" data-i18n="studio.settings">Ajustes</button>
+      <button id="invite" class="ctl" data-icon="invite" title="Copiar el link de invitación" data-i18n-title="studio.inviteHint" data-i18n="studio.invite">Invitar</button>
     </footer>
   </section>
 
   <!-- Right: panel + vertical icon rail -->
   <aside class="side">
     <div class="panes" id="studioPanes">
-      <div class="pane-toolbar"><span id="activePanelTitle">Comentarios</span><button id="closePanel" class="small ghost" title="Ocultar panel" aria-label="Ocultar panel">×</button></div>
+      <div class="pane-toolbar"><span id="activePanelTitle" data-i18n="studio.comments">Comentarios</span><button id="closePanel" class="small ghost" title="Ocultar panel" data-i18n-title="studio.hidePanel" aria-label="Ocultar panel" data-i18n-aria="studio.hidePanel">×</button></div>
       <div class="tabpane active" data-pane="chat">
-        <div class="panehead">Comentarios</div>
+        <div class="panehead" data-i18n="studio.comments">Comentarios</div>
         <div class="chatlog" id="chatlog"></div>
-        <div class="row composer"><input id="chatInput" placeholder="Escribe un mensaje…" maxlength="500"><button id="chatSend" class="primary">Enviar</button></div>
+        <div class="row composer"><input id="chatInput" placeholder="Escribe un mensaje…" data-i18n-placeholder="studio.chatPlaceholder" maxlength="500"><button id="chatSend" class="primary" data-i18n="studio.send">Enviar</button></div>
       </div>
 
       <div class="tabpane" data-pane="banners">
-        <div class="panehead">Banners</div>
-        <div><label for="bannerText">Nuevo banner</label><textarea id="bannerText" rows="2" maxlength="300" placeholder="¡Suscríbete y activa la campanita!"></textarea></div>
-        <div class="row"><label class="row" style="margin:0"><input type="checkbox" id="bannerTicker"> Ticker deslizante</label><span class="grow"></span><button id="bannerAdd" class="primary">Agregar</button></div>
+        <div class="panehead" data-i18n="studio.banners">Banners</div>
+        <div><label for="bannerText" data-i18n="studio.newBanner">Nuevo banner</label><textarea id="bannerText" rows="2" maxlength="300" placeholder="¡Suscríbete y activa la campanita!" data-i18n-placeholder="studio.bannerPlaceholder"></textarea></div>
+        <div class="row"><label class="row" style="margin:0"><input type="checkbox" id="bannerTicker"> <span data-i18n="studio.ticker">Ticker deslizante</span></label><span class="grow"></span><button id="bannerAdd" class="primary" data-i18n="studio.add">Agregar</button></div>
         <div class="list" id="bannerList"></div>
       </div>
 
       <div class="tabpane" data-pane="brand">
-        <div class="panehead">Marca</div>
-        <div class="row"><div><label for="brandColor">Color</label><input type="color" id="brandColor" value="#7c5cff"></div>
-          <div class="grow"><label for="brandTheme">Tema</label><select id="brandTheme"><option value="bubble">Burbuja</option><option value="minimal">Minimal</option><option value="bold">Bold</option></select></div></div>
-        <div><label for="brandBg">Fondo (color #hex o URL https de imagen)</label><input id="brandBg" placeholder="#0b0b12"></div>
-        <div><label for="brandLogo">Logo (PNG/SVG, máx. 400 KB)</label><input type="file" id="brandLogo" accept="image/*"></div>
-        <div><label for="brandOverlay">Overlay a pantalla completa (PNG transparente, máx. 1.5 MB)</label><input type="file" id="brandOverlay" accept="image/png,image/webp"></div>
-        <label class="row"><input type="checkbox" id="brandNames" checked> Mostrar nombres</label>
-        <div class="row wrap"><button id="brandClearLogo" class="small">Quitar logo</button><button id="brandClearOverlay" class="small">Quitar overlay</button><span class="grow"></span><button class="primary" id="brandSave">Aplicar</button></div>
-        <div><label for="showTitle">Título del programa</label><div class="row"><input id="showTitle" maxlength="120"><button id="titleSave" class="small">Guardar</button></div></div>
-        <label class="row"><input type="checkbox" id="lobbyToggle"> Sala de espera (aprobar invitados)</label>
+        <div class="panehead" data-i18n="studio.brand">Marca</div>
+        <div class="row"><div><label for="brandColor" data-i18n="studio.color">Color</label><input type="color" id="brandColor" value="#7c5cff"></div>
+          <div class="grow"><label for="brandTheme" data-i18n="studio.theme">Tema</label><select id="brandTheme"><option value="bubble" data-i18n="studio.themeBubble">Burbuja</option><option value="minimal" data-i18n="studio.themeMinimal">Minimal</option><option value="bold" data-i18n="studio.themeBold">Bold</option></select></div></div>
+        <div><label for="brandBg" data-i18n="studio.bgLabel">Fondo (color #hex o URL https de imagen)</label><input id="brandBg" placeholder="#0b0b12"></div>
+        <div><label for="brandLogo" data-i18n="studio.logoLabel">Logo (PNG/SVG, máx. 400 KB)</label><input type="file" id="brandLogo" accept="image/*"></div>
+        <div><label for="brandOverlay" data-i18n="studio.overlayLabel">Overlay a pantalla completa (PNG transparente, máx. 1.5 MB)</label><input type="file" id="brandOverlay" accept="image/png,image/webp"></div>
+        <label class="row"><input type="checkbox" id="brandNames" checked> <span data-i18n="studio.showNames">Mostrar nombres</span></label>
+        <div class="row wrap"><button id="brandClearLogo" class="small" data-i18n="studio.removeLogo">Quitar logo</button><button id="brandClearOverlay" class="small" data-i18n="studio.removeOverlay">Quitar overlay</button><span class="grow"></span><button class="primary" id="brandSave" data-i18n="studio.apply">Aplicar</button></div>
+        <div><label for="showTitle" data-i18n="studio.showTitle">Título del programa</label><div class="row"><input id="showTitle" maxlength="120"><button id="titleSave" class="small" data-i18n="studio.save">Guardar</button></div></div>
+        <label class="row"><input type="checkbox" id="lobbyToggle"> <span data-i18n="studio.waitingRoom">Sala de espera (aprobar invitados)</span></label>
 
       </div>
 
       <div class="tabpane" data-pane="dest">
-        <div class="panehead">Destinos</div>
-        <p class="muted" style="margin:0">Transmite a varias plataformas a la vez. Las claves se guardan solo en este navegador.</p>
-        <div><label for="destPreset">Plataforma</label><select id="destPreset">
+        <div class="panehead" data-i18n="studio.destinations">Destinos</div>
+        <p class="muted" style="margin:0" data-i18n="studio.destHelp">Transmite a varias plataformas a la vez. Las claves se guardan solo en este navegador.</p>
+        <div><label for="destPreset" data-i18n="studio.platform">Plataforma</label><select id="destPreset">
           <option value="rtmp://a.rtmp.youtube.com/live2/">YouTube</option>
           <option value="rtmp://live.twitch.tv/app/">Twitch</option>
           <option value="rtmps://live-api-s.facebook.com:443/rtmp/">Facebook</option>
           <option value="rtmps://fa723fc1b171.global-contribute.live-video.net/app/">Kick</option>
-          <option value="rtmps://rtmp.linkedin.com:443/live/">LinkedIn (usa tu URL)</option>
-          <option value="">Personalizado (RTMP/RTMPS/SRT)</option>
+          <option value="rtmps://rtmp.linkedin.com:443/live/" data-i18n="studio.linkedin">LinkedIn (usa tu URL)</option>
+          <option value="" data-i18n="studio.customPlatform">Personalizado (RTMP/RTMPS/SRT)</option>
         </select></div>
-        <div><label for="destURL">URL del servidor</label><input id="destURL"></div>
-        <div><label for="destKey">Clave de transmisión</label><input id="destKey" type="password" autocomplete="off"></div>
-        <button id="destAdd" class="primary">Agregar destino</button>
+        <div><label for="destURL" data-i18n="studio.serverURL">URL del servidor</label><input id="destURL"></div>
+        <div><label for="destKey" data-i18n="studio.streamKey">Clave de transmisión</label><input id="destKey" type="password" autocomplete="off"></div>
+        <button id="destAdd" class="primary" data-i18n="studio.addDestination">Agregar destino</button>
         <div class="list" id="destList"></div>
-        <div class="row"><div class="grow"><label for="vKbps">Bitrate video (kbps)</label><input id="vKbps" type="number" value="4500" min="500" max="20000"></div>
+        <div class="row"><div class="grow"><label for="vKbps" data-i18n="studio.videoBitrate">Bitrate video (kbps)</label><input id="vKbps" type="number" value="4500" min="500" max="20000"></div>
           <div class="grow"><label for="fps">FPS</label><select id="fps"><option>30</option><option>60</option></select></div></div>
         <div class="muted" id="restreamStats" style="font-size:12px"></div>
       </div>
 
       <div class="tabpane" data-pane="scenes">
-        <div class="panehead">Escenas guardadas</div>
-        <div class="row"><input id="sceneName" placeholder="Nombre de la escena" maxlength="40"><button id="sceneSave" class="primary">Guardar actual</button></div>
+        <div class="panehead" data-i18n="studio.savedScenes">Escenas guardadas</div>
+        <div class="row"><input id="sceneName" placeholder="Nombre de la escena" data-i18n-placeholder="studio.sceneName" maxlength="40"><button id="sceneSave" class="primary" data-i18n="studio.saveCurrent">Guardar actual</button></div>
         <div class="list" id="sceneList"></div>
       </div>
 
       <div class="tabpane" data-pane="obs">
         <div class="panehead">OBS</div>
-        <p class="muted" style="margin:0">Pega estos enlaces en OBS → Fuente → <b>Navegador</b> (1920×1080, marca “Controlar audio vía OBS”).</p>
+        <p class="muted" style="margin:0"><span data-i18n="studio.obsPasteBefore">Pega estos enlaces en OBS → Fuente → </span><b data-i18n="studio.obsBrowser">Navegador</b><span data-i18n="studio.obsPasteAfter"> (1920×1080, marca “Controlar audio vía OBS”).</span></p>
         <div class="row wrap obsopts">
-          <label>Resolución de salida <select id="obsQuality"><option value="360">640×360</option><option value="540">960×540</option><option value="720">1280×720</option><option value="1080" selected>1920×1080</option><option value="1440">2560×1440</option><option value="2160">3840×2160</option></select></label>
+          <label><span data-i18n="studio.outputResolution">Resolución de salida</span> <select id="obsQuality"><option value="360">640×360</option><option value="540">960×540</option><option value="720">1280×720</option><option value="1080" selected>1920×1080</option><option value="1440">2560×1440</option><option value="2160">3840×2160</option></select></label>
           <label>FPS <select id="obsFPS"><option>15</option><option>24</option><option>25</option><option selected>30</option><option>50</option><option>60</option></select></label>
-          <label class="row"><input type="checkbox" id="obsCover" checked> Encuadre del estudio (16:9)</label>
-          <label class="row"><input type="checkbox" id="obsMute"> Sin audio</label>
-          <label class="row"><input type="checkbox" id="obsLabel"> Mostrar nombre</label>
-          <label class="row"><input type="checkbox" id="obsTransparent"> Fondo transparente</label>
+          <label class="row"><input type="checkbox" id="obsCover" checked> <span data-i18n="studio.studioFrame">Encuadre del estudio (16:9)</span></label>
+          <label class="row"><input type="checkbox" id="obsMute"> <span data-i18n="studio.noAudio">Sin audio</span></label>
+          <label class="row"><input type="checkbox" id="obsLabel"> <span data-i18n="studio.showName">Mostrar nombre</span></label>
+          <label class="row"><input type="checkbox" id="obsTransparent"> <span data-i18n="studio.transparentBg">Fondo transparente</span></label>
         </div>
-        <p class="muted" id="obsQualityHelp">La resolución de salida ajusta el lienzo de OBS. Para reducir el ancho de banda, cambia «Calidad de envío» en la cámara; se aplica a sus receptores.</p>
+        <p class="muted" id="obsQualityHelp" data-i18n="studio.obsQualityHelp">La resolución de salida ajusta el lienzo de OBS. Para reducir el ancho de banda, cambia «Calidad de envío» en la cámara; se aplica a sus receptores.</p>
         <div id="obsLinks" class="col"></div>
-        <h3>Enviar OBS al estudio (WHIP)</h3>
-        <p class="muted" style="margin:0">OBS 30+: Ajustes → Emisión → Servicio <b>WHIP</b>.</p>
+        <h3 data-i18n="studio.sendObsToStudio">Enviar OBS al estudio (WHIP)</h3>
+        <p class="muted" style="margin:0"><span data-i18n="studio.obsWhipBefore">OBS 30+: Ajustes → Emisión → Servicio </span><b>WHIP</b><span data-i18n="studio.obsWhipAfter">.</span></p>
         <div id="whipLinks" class="col"></div>
       </div>
 
       <div class="tabpane" data-pane="people">
-        <div class="panehead">Personas</div>
-        <details id="inviteOpts" class="camdetails"><summary>Link de invitación con opciones</summary>
+        <div class="panehead" data-i18n="studio.people">Personas</div>
+        <details id="inviteOpts" class="camdetails"><summary data-i18n="studio.inviteLinkOptions">Link de invitación con opciones</summary>
           <div class="col" style="margin-top:8px">
-            <div class="row"><div class="grow"><label for="invQuality">Resolución</label><select id="invQuality"><option value="">Automática (720p)</option><option value="1080">1080p</option><option value="720">720p</option><option value="540">540p</option><option value="360">360p</option></select></div>
-              <div><label for="invBitrate">Bitrate (kbps)</label><input id="invBitrate" type="number" min="0" max="50000" step="100" placeholder="auto"></div></div>
-            <div class="row"><div class="grow"><label for="invCodec">Códec</label><select id="invCodec"><option value="">Automático</option><option value="h264">H.264</option><option value="vp8">VP8</option><option value="vp9">VP9</option><option value="av1">AV1</option></select></div>
-              <div class="grow"><label for="invEffect">Efecto de video</label><select id="invEffect"><option value="">Ninguno</option><option value="blur">Desenfocar fondo</option><option value="bg">Fondo virtual</option></select></div></div>
-            <div class="row wrap"><label class="row"><input type="checkbox" id="invMuted"> Entra silenciado</label><label class="row"><input type="checkbox" id="invVideoMute"> Cámara apagada</label><label class="row"><input type="checkbox" id="invStereo"> Audio estéreo HQ</label><label class="row"><input type="checkbox" id="invAudioOnly"> Solo audio</label></div>
-            <div class="copy"><input id="invURL" readonly aria-label="Link de invitación"><button class="small" id="invCopy">Copiar</button></div>
+            <div class="row"><div class="grow"><label for="invQuality" data-i18n="studio.resolution">Resolución</label><select id="invQuality"><option value="" data-i18n="studio.resolutionAuto">Automática (720p)</option><option value="1080">1080p</option><option value="720">720p</option><option value="540">540p</option><option value="360">360p</option></select></div>
+              <div><label for="invBitrate" data-i18n="studio.bitrateKbps">Bitrate (kbps)</label><input id="invBitrate" type="number" min="0" max="50000" step="100" placeholder="auto"></div></div>
+            <div class="row"><div class="grow"><label for="invCodec" data-i18n="studio.codec">Códec</label><select id="invCodec"><option value="" data-i18n="studio.auto">Automático</option><option value="h264">H.264</option><option value="vp8">VP8</option><option value="vp9">VP9</option><option value="av1">AV1</option></select></div>
+              <div class="grow"><label for="invEffect" data-i18n="studio.videoEffect">Efecto de video</label><select id="invEffect"><option value="" data-i18n="studio.none">Ninguno</option><option value="blur" data-i18n="studio.blurBg">Desenfocar fondo</option><option value="bg" data-i18n="studio.virtualBg">Fondo virtual</option></select></div></div>
+            <div class="row wrap"><label class="row"><input type="checkbox" id="invMuted"> <span data-i18n="studio.joinMuted">Entra silenciado</span></label><label class="row"><input type="checkbox" id="invVideoMute"> <span data-i18n="studio.cameraOff">Cámara apagada</span></label><label class="row"><input type="checkbox" id="invStereo"> <span data-i18n="studio.stereoHq">Audio estéreo HQ</span></label><label class="row"><input type="checkbox" id="invAudioOnly"> <span data-i18n="studio.audioOnly">Solo audio</span></label></div>
+            <div class="copy"><input id="invURL" readonly aria-label="Link de invitación" data-i18n-aria="studio.inviteLink"><button class="small" id="invCopy" data-i18n="studio.copy">Copiar</button></div>
           </div></details>
         <div id="knocks" class="list"></div>
         <div id="people" class="list"></div>
       </div>
     </div>
 
-    <nav class="tabs" id="tabs" aria-label="Paneles">
-      <button id="roomDetails" data-icon="save" aria-haspopup="dialog">Sala</button>
-      <button data-tab="chat" data-icon="chat" class="active">Chat</button>
-      <button data-tab="banners" data-icon="banner">Banners</button>
-      <button data-tab="brand" data-icon="brand">Marca</button>
-      <button data-tab="dest" data-icon="dest">Destinos</button>
-      <button data-tab="scenes" data-icon="layers">Escenas</button>
+    <nav class="tabs" id="tabs" aria-label="Paneles" data-i18n-aria="studio.panels">
+      <button id="roomDetails" data-icon="save" aria-haspopup="dialog" data-i18n="studio.room">Sala</button>
+      <button data-tab="chat" data-icon="chat" class="active" data-i18n="studio.chat">Chat</button>
+      <button data-tab="banners" data-icon="banner" data-i18n="studio.banners">Banners</button>
+      <button data-tab="brand" data-icon="brand" data-i18n="studio.brand">Marca</button>
+      <button data-tab="dest" data-icon="dest" data-i18n="studio.destinations">Destinos</button>
+      <button data-tab="scenes" data-icon="layers" data-i18n="studio.scenes">Escenas</button>
       <button data-tab="obs" data-icon="obs">OBS</button>
-      <button data-tab="people" data-icon="users">Gente</button>
+      <button data-tab="people" data-icon="users" data-i18n="studio.peopleTab">Gente</button>
     </nav>
   </aside>
 </div>
 <dialog id="roomDialog" class="card room-dialog" aria-labelledby="roomDialogTitle">
-  <header class="dialog-heading"><div><span class="section-label">Tu estudio</span><h2 id="roomDialogTitle">Guardar sala persistente</h2></div><button id="closeRoomDialog" class="ghost" aria-label="Cerrar ajustes de sala">×</button></header>
+  <header class="dialog-heading"><div><span class="section-label" data-i18n="studio.yourStudio">Tu estudio</span><h2 id="roomDialogTitle" data-i18n="studio.savePersistentRoom">Guardar sala persistente</h2></div><button id="closeRoomDialog" class="ghost" aria-label="Cerrar ajustes de sala" data-i18n-aria="studio.closeRoomSettings">×</button></header>
   <div id="persistentRoom" class="col">
-    <div class="room-summary"><span id="roomSavedState" class="pill">Sala temporal</span><span class="muted">Mismos participantes · Mismos enlaces OBS</span></div>
-<p class="muted">Solo salas con contraseña. Conserva ajustes, participantes y enlaces de OBS después de cerrar o reiniciar el servidor.</p>
-          <label for="persistDays">Caducidad desde que guardas</label>
-          <select id="persistDays"><option value="30">30 días</option><option value="60">60 días</option><option value="90">90 días</option><option value="365">365 días</option><option value="0">Ilimitado</option></select>
-          <div class="row wrap persist-actions"><button id="persistSave" class="primary" disabled>Guardar sala</button><button id="persistForget" class="small hidden">Quitar persistencia</button></div>
-          <p class="muted" id="persistStatus" role="status">Conectando…</p>
-          <a id="passwordRoomHelp" class="hidden" href="/" target="_blank" rel="noopener">Crear un estudio con contraseña</a>
-          <p class="muted">Los invitados deben regresar con el mismo navegador o con su enlace personal. La contraseña sigue siendo obligatoria. No reactiva cámaras, grabaciones ni transmisiones automáticamente.</p>
+    <div class="room-summary"><span id="roomSavedState" class="pill" data-i18n="studio.temporaryRoom">Sala temporal</span><span class="muted" data-i18n="studio.sameParticipants">Mismos participantes · Mismos enlaces OBS</span></div>
+<p class="muted" data-i18n="studio.persistentHelp">Solo salas con contraseña. Conserva ajustes, participantes y enlaces de OBS después de cerrar o reiniciar el servidor.</p>
+          <label for="persistDays" data-i18n="studio.expiryFromSave">Caducidad desde que guardas</label>
+          <select id="persistDays"><option value="30" data-i18n="studio.days30">30 días</option><option value="60" data-i18n="studio.days60">60 días</option><option value="90" data-i18n="studio.days90">90 días</option><option value="365" data-i18n="studio.days365">365 días</option><option value="0" data-i18n="studio.unlimited">Ilimitado</option></select>
+          <div class="row wrap persist-actions"><button id="persistSave" class="primary" disabled data-i18n="studio.saveRoom">Guardar sala</button><button id="persistForget" class="small hidden" data-i18n="studio.removePersistence">Quitar persistencia</button></div>
+          <p class="muted" id="persistStatus" role="status" data-i18n="studio.connectingStatus">Conectando…</p>
+          <a id="passwordRoomHelp" class="hidden" href="/" target="_blank" rel="noopener" data-i18n="studio.createPasswordStudio">Crear un estudio con contraseña</a>
+          <p class="muted" data-i18n="studio.persistGuestsNote">Los invitados deben regresar con el mismo navegador o con su enlace personal. La contraseña sigue siendo obligatoria. No reactiva cámaras, grabaciones ni transmisiones automáticamente.</p>
           <div id="persistentParticipants" class="col"></div>
 
-    <div class="room-access"><h3>Acceso del anfitrión</h3><p class="muted">Conserva tu enlace privado para volver a administrar la sala.</p><button id="copyHostLink" class="small" data-icon="obs">Copiar enlace del anfitrión</button></div>
+    <div class="room-access"><h3 data-i18n="studio.hostAccess">Acceso del anfitrión</h3><p class="muted" data-i18n="studio.hostLinkNote">Conserva tu enlace privado para volver a administrar la sala.</p><button id="copyHostLink" class="small" data-icon="obs" data-i18n="studio.copyHostLink">Copiar enlace del anfitrión</button></div>
   </div>
 </dialog>
 <dialog id="relayDialog" class="card room-dialog" aria-labelledby="relayDialogTitle">
-  <header class="dialog-heading"><h2 id="relayDialogTitle">Conexión y consumo</h2><button id="closeRelayDialog" class="ghost" aria-label="Cerrar consumo">×</button></header>
+  <header class="dialog-heading"><h2 id="relayDialogTitle" data-i18n="studio.connectionUsage">Conexión y consumo</h2><button id="closeRelayDialog" class="ghost" aria-label="Cerrar consumo" data-i18n-aria="studio.closeUsage">×</button></header>
   <p id="relayUsage" class="muted"></p>
-  <p id="relayChoiceStatus" role="status">Relé local seleccionado</p>
+  <p id="relayChoiceStatus" role="status" data-i18n="studio.localRelaySelected">Relé local seleccionado</p>
   <p id="relayChoiceHelp" class="muted"></p>
   <div id="cloudflareControls" class="hidden">
-    <label for="cloudflareMaster">Contraseña maestra para activar Cloudflare</label>
+    <label for="cloudflareMaster" data-i18n="studio.masterPassword">Contraseña maestra para activar Cloudflare</label>
     <input id="cloudflareMaster" type="password" autocomplete="off" maxlength="72" spellcheck="false">
-    <button id="useCloudflare" class="primary">Activar Cloudflare en esta sala</button>
+    <button id="useCloudflare" class="primary" data-i18n="studio.enableCloudflare">Activar Cloudflare en esta sala</button>
   </div>
-  <button id="useLocalRelay">Usar relé local</button>
-  <p class="muted">Cambiar el relé vuelve a conectar a los participantes de esta sala. Las salas nuevas utilizan el relé local.</p>
-  <label for="bandwidthMode">Uso de ancho de banda de la sala</label>
-  <select id="bandwidthMode"><option value="balanced">Equilibrado · cámaras hasta 720p, 24 fps</option><option value="eco">Ahorro máximo · cámaras hasta 540p, 20 fps</option><option value="quality">Calidad original · sin límites adicionales</option></select>
-  <p class="muted">Se aplica al anfitrión, invitados y cámaras adicionales. Las pantallas compartidas conservan hasta 1080p con menos cuadros por segundo en los perfiles de ahorro. Puedes cambiar de perfil durante la sesión.</p>
-  <p class="muted">El encuadre 16:9 y la resolución elegida para el programa y OBS se mantienen. El detalle de las cámaras depende de la calidad de envío. OBS recibe únicamente las fuentes de su escena.</p>
+  <button id="useLocalRelay" data-i18n="studio.useLocalRelay">Usar relé local</button>
+  <p class="muted" data-i18n="studio.relaySwitchNote">Cambiar el relé vuelve a conectar a los participantes de esta sala. Las salas nuevas utilizan el relé local.</p>
+  <label for="bandwidthMode" data-i18n="studio.bandwidthUsage">Uso de ancho de banda de la sala</label>
+  <select id="bandwidthMode"><option value="balanced" data-i18n="studio.bwBalanced">Equilibrado · cámaras hasta 720p, 24 fps</option><option value="eco" data-i18n="studio.bwEco">Ahorro máximo · cámaras hasta 540p, 20 fps</option><option value="quality" data-i18n="studio.bwQuality">Calidad original · sin límites adicionales</option></select>
+  <p class="muted" data-i18n="studio.bandwidthHelp">Se aplica al anfitrión, invitados y cámaras adicionales. Las pantallas compartidas conservan hasta 1080p con menos cuadros por segundo en los perfiles de ahorro. Puedes cambiar de perfil durante la sesión.</p>
+  <p class="muted" data-i18n="studio.bandwidthNote">El encuadre 16:9 y la resolución elegida para el programa y OBS se mantienen. El detalle de las cámaras depende de la calidad de envío. OBS recibe únicamente las fuentes de su escena.</p>
 </dialog>
 <dialog id="sourceSettings" class="card room-dialog source-settings-dialog" aria-labelledby="sourceSettingsTitle">
-  <header class="dialog-heading"><h2 id="sourceSettingsTitle">Opciones de la cámara</h2><button id="closeSourceSettings" class="ghost" aria-label="Cerrar opciones de la cámara">×</button></header>
+  <header class="dialog-heading"><h2 id="sourceSettingsTitle" data-i18n="studio.cameraOptions">Opciones de la cámara</h2><button id="closeSourceSettings" class="ghost" aria-label="Cerrar opciones de la cámara" data-i18n-aria="studio.closeCameraOptions">×</button></header>
   <div class="source-settings-preview"><video id="sourceSettingsVideo" muted autoplay playsinline></video></div>
   <div id="sourceSettingsActions" class="source-settings-actions"></div>
   <div id="sourceSettingsQuality" class="source-settings-quality"></div>
 </dialog>
 <dialog id="vdoDialog" class="card room-dialog vdo-dialog" aria-labelledby="vdoTitle">
-  <header class="dialog-heading"><h2 id="vdoTitle">Cámara externa · VDO.Ninja</h2><button id="vdoClose" class="ghost" aria-label="Cerrar VDO.Ninja">×</button></header>
-  <p>Conecta mediante la aplicación oficial de <a href="https://vdo.ninja/" target="_blank" rel="noopener noreferrer">VDO.Ninja</a>. Al crear o conectar una cámara se carga su servicio externo, sujeto a sus <a href="https://docs.vdo.ninja/help/privacy-and-security-details/vdo.ninja-terms-of-service" target="_blank" rel="noopener noreferrer">condiciones</a> y <a href="https://docs.vdo.ninja/help/privacy-and-security-details" target="_blank" rel="noopener noreferrer">privacidad</a>.</p>
-  <button id="vdoNew" class="primary">Crear invitación VDO.Ninja</button>
-  <label for="vdoURL">O pega un enlace de visualización de VDO.Ninja</label>
-  <div class="row"><input id="vdoURL" type="url" autocomplete="off" placeholder="https://vdo.ninja/?view=…"><button id="vdoConnect">Conectar vista</button></div>
-  <p class="muted">Estos enlaces dan acceso a la cámara: compártelos solo con personas de confianza. La contraseña de tu sala StreamWebRom se mantiene independiente.</p>
+  <header class="dialog-heading"><h2 id="vdoTitle" data-i18n="studio.externalCamera">Cámara externa · VDO.Ninja</h2><button id="vdoClose" class="ghost" aria-label="Cerrar VDO.Ninja" data-i18n-aria="studio.closeVdo">×</button></header>
+  <p><span data-i18n="studio.vdoIntro">Conecta mediante la aplicación oficial de </span><a href="https://vdo.ninja/" target="_blank" rel="noopener noreferrer">VDO.Ninja</a><span data-i18n="studio.vdoTermsBefore">. Al crear o conectar una cámara se carga su servicio externo, sujeto a sus </span><a href="https://docs.vdo.ninja/help/privacy-and-security-details/vdo.ninja-terms-of-service" target="_blank" rel="noopener noreferrer" data-i18n="studio.vdoTerms">condiciones</a><span data-i18n="studio.vdoAnd"> y </span><a href="https://docs.vdo.ninja/help/privacy-and-security-details" target="_blank" rel="noopener noreferrer" data-i18n="studio.vdoPrivacy">privacidad</a><span data-i18n="studio.vdoPeriod">.</span></p>
+  <button id="vdoNew" class="primary" data-i18n="studio.vdoCreate">Crear invitación VDO.Ninja</button>
+  <label for="vdoURL" data-i18n="studio.vdoPasteLink">O pega un enlace de visualización de VDO.Ninja</label>
+  <div class="row"><input id="vdoURL" type="url" autocomplete="off" placeholder="https://vdo.ninja/?view=…"><button id="vdoConnect" data-i18n="studio.vdoConnect">Conectar vista</button></div>
+  <p class="muted" data-i18n="studio.vdoLinksNote">Estos enlaces dan acceso a la cámara: compártelos solo con personas de confianza. La contraseña de tu sala StreamWebRom se mantiene independiente.</p>
   <div id="vdoPreview" class="vdo-preview hidden"></div>
-  <div class="row"><button id="vdoCopyInvite" disabled>Copiar invitación al panelista</button><button id="vdoOpenView" disabled>Abrir visor</button><button id="vdoCopyOBS" disabled>Copiar enlace OBS</button></div>
-  <p id="vdoCaptureHelp" class="muted">Crea o conecta una cámara para preparar la vista previa.</p>
-  <button id="vdoCapture" class="primary" disabled>Capturar pestaña para el escenario</button>
-  <p class="muted">La vista previa no se incorpora sola al programa. La captura del visor agrega audio y video como una fuente normal, en 16:9, que el anfitrión puede colocar en el escenario. La captura añade procesamiento; el enlace OBS directo evita esa captura adicional.</p>
+  <div class="row"><button id="vdoCopyInvite" disabled data-i18n="studio.vdoCopyInvite">Copiar invitación al panelista</button><button id="vdoOpenView" disabled data-i18n="studio.vdoOpenViewer">Abrir visor</button><button id="vdoCopyOBS" disabled data-i18n="studio.vdoCopyObs">Copiar enlace OBS</button></div>
+  <p id="vdoCaptureHelp" class="muted" data-i18n="studio.vdoCaptureHelpText">Crea o conecta una cámara para preparar la vista previa.</p>
+  <button id="vdoCapture" class="primary" disabled data-i18n="studio.vdoCapture">Capturar pestaña para el escenario</button>
+  <p class="muted" data-i18n="studio.vdoCaptureNote">La vista previa no se incorpora sola al programa. La captura del visor agrega audio y video como una fuente normal, en 16:9, que el anfitrión puede colocar en el escenario. La captura añade procesamiento; el enlace OBS directo evita esa captura adicional.</p>
 </dialog>
 <script type="module" src="/js/studio.js"></script>
 <script type="module" src="/js/pwa.js"></script>

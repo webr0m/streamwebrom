@@ -1,5 +1,7 @@
 // Keep audible media independent of video visibility. No silent keepalive or
 // background timer can override an operating system's suspension policy.
+import { t } from "./i18n.js";
+
 export class RoomAudio {
   constructor(onBlocked = () => {}) {
     this.entries = new Map(); this.onBlocked = onBlocked;
@@ -53,10 +55,10 @@ export function pictureInPicture(button, chooseVideo, report) {
     try {
       if (document.pictureInPictureElement) return await document.exitPictureInPicture();
       const video = chooseVideo();
-      if (!video || video.readyState < 2 || !video.srcObject?.getVideoTracks().length) return report("Espera a recibir vídeo para abrir la ventana flotante.");
+      if (!video || video.readyState < 2 || !video.srcObject?.getVideoTracks().length) return report(t("misc.pipWaitVideo"));
       if (video.requestPictureInPicture) await video.requestPictureInPicture();
       else video.webkitSetPresentationMode("picture-in-picture");
-    } catch { report("Chrome no permitió la ventana flotante. Puedes mantener el audio al cambiar de pestaña; Android puede suspender la cámara."); }
+    } catch { report(t("misc.pipBlocked")); }
   };
   return () => { button.onclick = null; };
 }

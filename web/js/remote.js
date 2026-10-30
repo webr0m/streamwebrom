@@ -2,6 +2,7 @@
 // current encoder settings, live send statistics). Kept small: the server
 // caps reports at 16 KB.
 import { listDevices } from "./devices.js";
+import { t } from "./i18n.js";
 
 // Camera controls the director may change remotely (whitelist).
 export const CAMCTL = ["zoom", "focusDistance", "focusMode", "exposureCompensation", "exposureMode", "exposureTime", "whiteBalanceMode",
@@ -27,8 +28,8 @@ export async function remoteSnapshot(media, prefs, extra = {}) {
   } catch {}
   const vs = raw?.getSettings?.() || {};
   return {
-    cams: cams.slice(0, 12).map((d, i) => ({ id: d.deviceId, label: short(d.label || `Cámara ${i + 1}`) })),
-    mics: mics.slice(0, 12).map((d, i) => ({ id: d.deviceId, label: short(d.label || `Micrófono ${i + 1}`) })),
+    cams: cams.slice(0, 12).map((d, i) => ({ id: d.deviceId, label: short(d.label || t("misc.cameraFallback", { n: i + 1 })) })),
+    mics: mics.slice(0, 12).map((d, i) => ({ id: d.deviceId, label: short(d.label || t("misc.micFallback", { n: i + 1 })) })),
     camera: vs.deviceId || prefs.camera || "", mic: rawA?.getSettings?.().deviceId || prefs.mic || "",
     width: vs.width || 0, height: vs.height || 0, frameRate: Math.round(vs.frameRate || 0),
     quality: prefs.quality, fps: prefs.fps, kbps: extra.videoKbps || 0, gain: prefs.gain ?? 100,

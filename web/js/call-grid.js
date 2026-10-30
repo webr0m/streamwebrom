@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // Fit every video inside the measured space, including after rotation or a
 // participant leaving. No media elements are cloned when a video is enlarged.
 export function fitTiles(count, width, height, gap = 8, aspect = 16 / 9) {
@@ -57,13 +58,13 @@ export function callGrid(grid, reset, reorder = null) {
       tile.classList.toggle("expanded", selected);
       Object.assign(tile.style, { left: `${left + r.x}px`, top: `${top + r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
       const button = tile.querySelector(".tile-focus");
-      if (button) { button.setAttribute("aria-pressed", String(selected)); button.setAttribute("aria-label", `${selected ? "Reducir" : "Ampliar"} video de ${tile.dataset.name}`); }
+      if (button) { button.setAttribute("aria-pressed", String(selected)); button.setAttribute("aria-label", `${selected ? t("misc.collapseVideo", { name: tile.dataset.name }) : t("misc.expandVideo", { name: tile.dataset.name })}`); }
       let order = tile.querySelector(".tile-order");
       if (reorder && !order) {
         order = document.createElement("div"); order.className = "tile-order";
         for (const [direction, label] of [["prev", "←"], ["next", "→"]]) {
           const b = document.createElement("button"); b.type = "button"; b.dataset.move = direction; b.textContent = label;
-          b.setAttribute("aria-label", `${direction === "prev" ? "Adelantar" : "Atrasar"} cámara de ${tile.dataset.name}`); order.append(b);
+          b.setAttribute("aria-label", `${direction === "prev" ? t("misc.cameraForward", { name: tile.dataset.name }) : t("misc.cameraBackward", { name: tile.dataset.name })}`); order.append(b);
         }
         tile.append(order);
       }

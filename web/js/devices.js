@@ -14,12 +14,19 @@
 import { $, el, toast, params } from "./rtc.js";
 import { applyEffect, effectActive, needsCamera, effectsPanel } from "./effects.js";
 import { attachNativeAudio } from "./native-audio.js";
+import { t, onLangChange } from "./i18n.js";
 
 const STORE = "swr.devices";
 
+// Labels carry their translation key in data-i18n, so switching language
+// rewrites them in place (i18n.renderStatic walks [data-i18n] on every change).
+const tx = (key, attrs = {}) => ({ ...attrs, "data-i18n": key, text: t(key) });
+const opt = (value, key) => el("option", tx(key, { value }));
+
+// Quality presets hold keys, not strings: translated when the panel is drawn.
 export const QUALITIES = [
-  ["2160", "4K (2160p)"], ["1440", "1440p"], ["1080", "1080p Full HD"], ["720", "720p HD (recomendado)"],
-  ["540", "540p"], ["480", "480p"], ["360", "360p (conexión lenta)"], ["240", "240p (muy lenta)"],
+  ["2160", "devices.quality2160"], ["1440", "devices.quality1440"], ["1080", "devices.quality1080"], ["720", "devices.quality720"],
+  ["540", "devices.quality540"], ["480", "devices.quality480"], ["360", "devices.quality360"], ["240", "devices.quality240"],
 ];
 export const FPS = ["60", "50", "30", "25", "24", "15", "10"];
 
@@ -121,8 +128,8 @@ function audioConstraint(p, strict) {
 /** getUserMedia that tells the user when the browser is waiting on a permission prompt and never hangs forever. */
 function gum(c) {
   let hint;
-  const wait = setTimeout(() => { hint = true; toast("Esperando permiso de cámara/micrófono: revisa el aviso del navegador (candado en la barra de direcciones).", "err"); }, 4000);
-  const timeout = new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error("el navegador no respondió al pedir permiso"), { name: "TimeoutError" })), 45000));
+  const wait = setTimeout(() => { hint = true; toast(t("devices.waitingPermission"), "err"); }, 4000);
+  const timeout = new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error(t("devices.permissionTimeout")), { name: "TimeoutError" })), 45000));
   return Promise.race([navigator.mediaDevices.getUserMedia(c), timeout]).finally(() => { clearTimeout(wait); void hint; });
 }
 
@@ -138,14 +145,14 @@ export async function openMedia(p) {
   try {
     const fx = await applyEffect(cam || null, p);
     if (fx !== cam) { if (cam) r.stream.removeTrack(cam); r.stream.addTrack(fx); }
-  } catch (e) { console.warn("effect", e); r.warnings.push("No se pudo aplicar el efecto de video; envío la cámara normal."); }
+  } catch (e) { console.warn("effect", e); r.warnings.push(t("devices.effectFailed")); }
   return r;
 }
 
 async function openRaw(p) {
   const warnings = [];
   if (!navigator.mediaDevices?.getUserMedia) {
-    return { stream: new MediaStream(), warnings: ["Este navegador no permite cámara ni micrófono (¿página sin HTTPS?)."] };
+    return { stream: new MediaStream(), warnings: [t("devices.browserNoMedia")] };
   }
   const devs = await listDevices();
   if (p.cameraHint && !p.camera) p.camera = resolveHint(devs.cams, p.cameraHint);
@@ -182,14 +189,15 @@ async function openRaw(p) {
 }
 
 export function explain(e, kind) {
-  const what = kind === "video" ? "la cámara" : kind === "audio" ? "el micrófono" : "cámara/micrófono";
+  const what = t(kind === "video" ? "devices.whatCamera" : kind === "audio" ? "devices.whatMic" : "devices.whatBoth");
+  const vars = { what, What: what[0].toUpperCase() + what.slice(1), error: String(e?.message || e) };
   switch (e?.name) {
-    case "NotAllowedError": return `Permiso denegado para ${what}. Actívalo en el candado de la barra de direcciones.`;
-    case "NotFoundError": return `No se encontró ${what}.`;
-    case "NotReadableError": return `${what[0].toUpperCase() + what.slice(1)} está en uso por otra aplicación (Zoom, Teams, OBS…).`;
-    case "TimeoutError": return `El navegador no respondió al pedir permiso para ${what}.`;
-    case "OverconstrainedError": return `${what[0].toUpperCase() + what.slice(1)} no soporta esa configuración; usando la más cercana.`;
-    default: return `No se pudo abrir ${what}: ${e?.message || e}`;
+    case "NotAllowedError": return t("devices.explainDenied", vars);
+    case "NotFoundError": return t("devices.explainNotFound", vars);
+    case "NotReadableError": return t("devices.explainBusy", vars);
+    case "TimeoutError": return t("devices.explainTimeout", vars);
+    case "OverconstrainedError": return t("devices.explainOverconstrained", vars);
+    default: return t("devices.explainFailed", vars);
   }
 }
 
@@ -220,39 +228,41 @@ export function cameraControls(track) {
   if (!track || !track.getCapabilities) return null;
   let caps; try { caps = track.getCapabilities(); } catch { return null; }
   const set = track.getSettings ? track.getSettings() : {};
+  // Key maps: labels are translated where they are drawn, so no Spanish string
+  // is baked into the DOM.
   const names = {
-    zoom: "Zoom", focusDistance: "Enfoque", exposureCompensation: "Exposición", exposureTime: "Tiempo de exposición",
-    colorTemperature: "Temperatura de color", brightness: "Brillo", contrast: "Contraste", saturation: "Saturación",
-    sharpness: "Nitidez", pan: "Pan", tilt: "Tilt", iso: "ISO",
+    zoom: "devices.camZoom", focusDistance: "devices.camFocus", exposureCompensation: "devices.camExposure", exposureTime: "devices.camExposureTime",
+    colorTemperature: "devices.camColorTemperature", brightness: "devices.camBrightness", contrast: "devices.camContrast", saturation: "devices.camSaturation",
+    sharpness: "devices.camSharpness", pan: "devices.camPan", tilt: "devices.camTilt", iso: "devices.camIso",
   };
-  const modes = { focusMode: "Enfoque", exposureMode: "Exposición", whiteBalanceMode: "Balance de blancos" };
+  const modes = { focusMode: "devices.modeFocus", exposureMode: "devices.modeExposure", whiteBalanceMode: "devices.modeWhiteBalance" };
   const box = el("div", { class: "col camctl" });
   const apply = async (k, v) => {
     try { await track.applyConstraints({ advanced: [{ [k]: v }] }); }
-    catch (e) { toast(`${names[k] || modes[k] || k}: ${e.message}`, "err"); }
+    catch (e) { toast(`${t(names[k] || modes[k] || "") || k}: ${e.message}`, "err"); }
   };
-  for (const [k, label] of Object.entries(modes)) {
+  for (const [k, key] of Object.entries(modes)) {
     if (!Array.isArray(caps[k]) || caps[k].length < 2) continue;
     const s = el("select", { onchange: (e) => apply(k, e.target.value) }, ...caps[k].map((m) => el("option", { value: m, text: m })));
     s.value = set[k] || caps[k][0];
-    box.append(el("div", {}, el("label", { text: label }), s));
+    box.append(el("div", {}, el("label", tx(key)), s));
   }
-  for (const [k, label] of Object.entries(names)) {
+  for (const [k, key] of Object.entries(names)) {
     const c = caps[k];
     if (!c || typeof c.min !== "number" || c.max <= c.min) continue;
     const r = el("input", { type: "range", min: c.min, max: c.max, step: c.step || (c.max - c.min) / 100, value: set[k] ?? c.min });
     r.oninput = () => apply(k, Number(r.value));
-    box.append(el("div", {}, el("label", { text: label }), r));
+    box.append(el("div", {}, el("label", tx(key)), r));
   }
-  for (const [k, label] of [["torch", "Linterna"], ["backgroundBlur", "Desenfocar fondo (efecto del sistema)"], ["faceFraming", "Encuadre automático"], ["eyeGazeCorrection", "Corrección de mirada"]]) {
+  for (const [k, key] of [["torch", "devices.torch"], ["backgroundBlur", "devices.systemBlur"], ["faceFraming", "devices.autoFraming"], ["eyeGazeCorrection", "devices.gazeCorrection"]]) {
     if (!(k in caps)) continue;
     const opts = Array.isArray(caps[k]) ? caps[k] : [true, false];
     if (!opts.includes(true)) continue;
     const cb = el("input", { type: "checkbox", checked: !!set[k], onchange: (e) => apply(k, e.target.checked) });
-    box.append(el("label", { class: "row" }, cb, " " + label));
+    box.append(el("label", { class: "row" }, cb, " ", el("span", tx(key))));
   }
   if (!box.children.length) return null;
-  return el("details", { class: "camdetails" }, el("summary", { text: "🎛️ Ajustes de la cámara" }), box);
+  return el("details", { class: "camdetails" }, el("summary", tx("devices.cameraSettings")), box);
 }
 
 /**
@@ -261,37 +271,42 @@ export function cameraControls(track) {
  */
 export async function renderPanel(root, prefs, onChange, opts = {}) {
   const { cams, mics, speakers } = await listDevices();
-  const label = (d, i, kind) => d.label || `${kind} ${i + 1}`;
-  const sel = (id, items, value) => { const s = el("select", { id }, ...items.map(([v, t]) => el("option", { value: v, text: t }))); s.value = value; if (s.value !== value && items.length) s.selectedIndex = 0; return s; };
-  const cam = sel("dev-cam", [...cams.map((d, i) => [d.deviceId, label(d, i, "Cámara")]), ["none", "🚫 Sin cámara"]], prefs.camera || cams[0]?.deviceId || "none");
-  const mic = sel("dev-mic", [...mics.map((d, i) => [d.deviceId, label(d, i, "Micrófono")]), ["none", "🚫 Sin micrófono"]], prefs.mic || mics[0]?.deviceId || "none");
-  const spk = canPickSpeaker() && speakers.length ? sel("dev-spk", [["", "Predeterminado del sistema"], ...speakers.filter((d) => d.deviceId !== "default").map((d, i) => [d.deviceId, label(d, i, "Salida")])], prefs.speaker || "") : null;
-  const q = sel("dev-q", QUALITIES, String(prefs.quality));
+  // Device names come from the browser/OS; only the fallback names are ours.
+  const label = (d, i, kindKey) => [d.deviceId, d.label || `${t(kindKey)} ${i + 1}`];
+  const sel = (id, items, value) => {
+    const s = el("select", { id }, ...items.map(([v, text, key]) => (key ? opt(v, key) : el("option", { value: v, text }))));
+    s.value = value; if (s.value !== value && items.length) s.selectedIndex = 0; return s;
+  };
+  const keyed = (list) => list.map(([v, key]) => [v, t(key), key]);
+  const cam = sel("dev-cam", [...cams.map((d, i) => label(d, i, "devices.kindCamera")), ["none", null, "devices.noCamera"]], prefs.camera || cams[0]?.deviceId || "none");
+  const mic = sel("dev-mic", [...mics.map((d, i) => label(d, i, "devices.kindMic")), ["none", null, "devices.noMic"]], prefs.mic || mics[0]?.deviceId || "none");
+  const spk = canPickSpeaker() && speakers.length ? sel("dev-spk", [["", null, "devices.defaultOutput"], ...speakers.filter((d) => d.deviceId !== "default").map((d, i) => label(d, i, "devices.kindOutput"))], prefs.speaker || "") : null;
+  const q = sel("dev-q", keyed(QUALITIES), String(prefs.quality));
   const fps = sel("dev-fps", FPS.map((f) => [f, f + " fps"]), String(prefs.fps));
-  const codec = sel("dev-codec", [["", "Automático"], ["h264", "H.264 (mejor para OBS/hardware)"], ["vp8", "VP8 (máxima compatibilidad)"], ["vp9", "VP9 (mejor calidad por bit)"], ["av1", "AV1 (experimental)"]], prefs.codec || "");
-  const chk = (id, text, v) => el("label", { class: "row" }, el("input", { type: "checkbox", id, checked: !!v }), " " + text);
+  const codec = sel("dev-codec", [["", null, "devices.auto"], ["h264", null, "devices.codecH264"], ["vp8", null, "devices.codecVp8"], ["vp9", null, "devices.codecVp9"], ["av1", null, "devices.codecAv1"]], prefs.codec || "");
+  const chk = (id, key, v) => el("label", { class: "row" }, el("input", { type: "checkbox", id, checked: !!v }), " ", el("span", tx(key)));
   const gain = el("input", { type: "range", id: "dev-gain", min: 0, max: 400, step: 5, value: prefs.gain ?? 100 });
   const gainLbl = el("span", { class: "muted", text: (prefs.gain ?? 100) + "%" });
-  const test = spk ? el("button", { class: "small", type: "button", text: "🔊 Probar", onclick: () => testSpeaker(spk.value) }) : null;
+  const test = spk ? el("button", { class: "small", type: "button", onclick: () => testSpeaker(spk.value) }, el("span", tx("devices.speakerTest"))) : null;
 
   root.replaceChildren(
-    el("div", {}, el("label", { for: "dev-cam", text: "📷 Cámara" }), cam),
-    el("div", { class: "row" }, el("div", { class: "grow" }, el("label", { text: "Resolución" }), q), el("div", {}, el("label", { text: "FPS" }), fps)),
-    el("div", { class: "row wrap fliprow" }, el("span", { class: "muted", text: "Voltear la cámara (lo ven todos):" }),
-      chk("dev-fliph", "↔ Horizontal", !!prefs.flipH), chk("dev-flipv", "↕ Vertical", !!prefs.flipV)),
-    el("div", {}, el("label", { for: "dev-mic", text: "🎙️ Micrófono" }), mic),
-    el("div", {}, el("label", { text: "Ganancia del micrófono " }, gainLbl), gain),
-    spk ? el("div", {}, el("label", { for: "dev-spk", text: "🎧 Audífonos / parlantes" }), el("div", { class: "row" }, spk, test)) :
-      el("p", { class: "muted", style: "margin:0;font-size:12px", text: "🎧 La salida de audio se elige en el sistema (este navegador no permite cambiarla)." }),
+    el("div", {}, el("label", tx("devices.camera", { for: "dev-cam" })), cam),
+    el("div", { class: "row" }, el("div", { class: "grow" }, el("label", tx("devices.resolution")), q), el("div", {}, el("label", tx("devices.fps")), fps)),
+    el("div", { class: "row wrap fliprow" }, el("span", { class: "muted" }, el("span", tx("devices.flipHint"))),
+      chk("dev-fliph", "devices.flipH", !!prefs.flipH), chk("dev-flipv", "devices.flipV", !!prefs.flipV)),
+    el("div", {}, el("label", tx("devices.mic", { for: "dev-mic" })), mic),
+    el("div", {}, el("label", {}, el("span", tx("devices.micGain")), " ", gainLbl), gain),
+    spk ? el("div", {}, el("label", tx("devices.speakers", { for: "dev-spk" })), el("div", { class: "row" }, spk, test)) :
+      el("p", { class: "muted", style: "margin:0;font-size:12px" }, el("span", tx("devices.outputSystemOnly"))),
     opts.effects !== false ? effectsPanel(prefs, (what) => { savePrefs(prefs); onChange(prefs, what); }) : null,
-    el("details", {}, el("summary", { text: "Opciones avanzadas de audio y video" }),
+    el("details", {}, el("summary", tx("devices.advanced")),
       el("div", { class: "col", style: "margin-top:8px" },
-        chk("dev-echo", "Cancelación de eco", prefs.echo),
-        chk("dev-denoise", "Supresión de ruido", prefs.denoise),
-        chk("dev-agc", "Control automático de ganancia", prefs.autogain),
-        chk("dev-stereo", "Audio estéreo de alta calidad (música; desactiva eco/ruido)", prefs.stereo),
-        chk("dev-mirror", "Espejar mi vista previa", prefs.mirror),
-        opts.codec !== false ? el("div", {}, el("label", { text: "Códec de video preferido" }), codec) : null)),
+        chk("dev-echo", "devices.echo", prefs.echo),
+        chk("dev-denoise", "devices.noise", prefs.denoise),
+        chk("dev-agc", "devices.agc", prefs.autogain),
+        chk("dev-stereo", "devices.stereo", prefs.stereo),
+        chk("dev-mirror", "devices.mirror", prefs.mirror),
+        opts.codec !== false ? el("div", {}, el("label", tx("devices.codec")), codec) : null)),
   );
 
   const read = () => ({
@@ -341,15 +356,20 @@ export function onDeviceChange(fn) {
 }
 
 /** Modal dialog wrapper around renderPanel. */
-export function settingsDialog(title = "Ajustes de audio y video") {
+export function settingsDialog(title) {
   let dlg = $("#devDialog");
   if (!dlg) {
     dlg = el("dialog", { id: "devDialog", class: "card devdialog" },
-      el("div", { class: "row" }, el("h3", { class: "grow", style: "margin:0", text: title }), el("button", { class: "small", onclick: () => dlg.close(), text: "✕" })),
-      el("label", {}, "Tema visual ", el("select", { "data-theme-picker": "", "aria-label":"Tema visual" }, ...[["light","Día"],["dark","Noche"],["auto","Automático"]].map(([value,text])=>el("option",{value,text})))),
+      el("div", { class: "row" }, el("h3", { class: "grow", style: "margin:0", text: title || t("devices.settingsTitle") }), el("button", { class: "small", onclick: () => dlg.close(), text: "✕" })),
+      el("label", {}, el("span", tx("devices.theme")), " ", el("select", { "data-theme-picker": "", "aria-label": t("devices.theme") }, ...[[ "light", "devices.themeDay" ], [ "dark", "devices.themeNight" ], [ "auto", "devices.auto" ]].map(([value, key]) => opt(value, key)))),
       el("div", { id: "devPanel", class: "col" }), el("div", { id: "devCamCtl" }));
     dlg.querySelector("[data-theme-picker]").value=document.documentElement.dataset.appearance || "auto";
     document.body.append(dlg);
+    // The dialog is cached across opens: retitle it when the language changes.
+    onLangChange(() => {
+      if (!title) dlg.querySelector("h3").textContent = t("devices.settingsTitle");
+      dlg.querySelector("[data-theme-picker]").setAttribute("aria-label", t("devices.theme"));
+    });
   }
   return dlg;
 }
@@ -390,7 +410,7 @@ function protectScreenAudio(stream) {
 
 /** Prefer isolated tab audio; never publish an unfiltered desktop loopback. */
 export async function openScreen(options = {}) {
-  if (!navigator.mediaDevices?.getDisplayMedia) throw Object.assign(new Error("Este dispositivo no permite compartir pantalla."), { name: "NotSupportedError" });
+  if (!navigator.mediaDevices?.getDisplayMedia) throw Object.assign(new Error(t("devices.screenUnsupported")), { name: "NotSupportedError" });
   const video = { frameRate: { ideal: 30, max: 60 }, width: { ideal: 1920 }, height: { ideal: 1080 } };
   const audio=options.audio!==false;
   const surface=["window","monitor","browser"].includes(options.surface)?options.surface:"browser";
@@ -416,9 +436,9 @@ export async function openScreen(options = {}) {
 
 export function screenAudioNotice(stream) {
   const native=nativeScreens.get(stream)?.selection;
-  if(native&&stream.getAudioTracks().length)return native.mode==='tab'?"Pestaña compartida con su audio aislado.":"Contenido compartido con audio aislado; las voces de la sala quedan fuera de la captura.";
-  if (screenAudioBlocked.has(stream)) return "Vídeo compartido. Este navegador no pudo aislar las voces del audio general; usa Captura avanzada en PC para compartir esta aplicación o el sistema con sonido.";
-  return stream.getAudioTracks().length ? "Pantalla compartida con audio de la fuente, sin mezclar el sonido de la sala." : "La pantalla no incluye audio. Para enviarlo sin eco, comparte otra pestaña y marca «Compartir audio de la pestaña».";
+  if(native&&stream.getAudioTracks().length)return t(native.mode==='tab'?"devices.shareTabAudio":"devices.shareIsolatedAudio");
+  if (screenAudioBlocked.has(stream)) return t("devices.shareNoIsolation");
+  return t(stream.getAudioTracks().length ? "devices.shareWithSourceAudio" : "devices.shareNoAudio");
 }
 
 export function resumeCaptureAudio() {

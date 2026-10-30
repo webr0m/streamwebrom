@@ -10,6 +10,10 @@ import { listDevices, loadPrefs, openMedia, renderPanel, cameraControls, applySi
 import { screenAudioNotice, stopScreenCapture } from "./devices.js";
 import { chooseScreen } from "./screen-share.js";
 import { RoomAudio } from "./room-audio.js";
+import { installI18n, t, onLangChange } from "./i18n.js";
+
+// Every UI string in this module lives under the "studiojs" i18n area.
+installI18n();
 
 const prefs = loadPrefs();
 const studioWorkspace = workspace(document.querySelector("#studioRoot"));
@@ -24,7 +28,7 @@ const room = (params.get("room") || "").toLowerCase();
 const savedRooms = readStored("swr.rooms", {});
 const hostKey = hashParams.get("key") || savedRooms[room]?.hostKey;
 if (!room || !hostKey) {
-  alert("Falta la sala o la clave de anfitrión. Crea un estudio desde la portada.");
+  alert(t("studiojs.missingRoom"));
   location.href = "/";
   throw new Error("missing room or host key"); // stop here: the rest needs both
 }
@@ -35,7 +39,10 @@ const stored = writeStored("swr.rooms", savedRooms);
 // the host out of their own studio.
 if (stored) history.replaceState(null, "", `/studio?room=${encodeURIComponent(room)}`);
 
-const LAYOUTS = [["solo", "Solo"], ["split", "Dividido"], ["grid", "Cuadrícula"], ["pip", "PiP"], ["sidebar", "Lateral"], ["spotlight", "Destacado"], ["screen", "Pantalla"], ["news", "Noticiero"]];
+// Layout id plus its i18n key: labels are resolved at render time so a
+// language switch relabels the buttons instead of freezing the old text.
+const LAYOUTS = [["solo", "studiojs.layoutSolo"], ["split", "studiojs.layoutSplit"], ["grid", "studiojs.layoutGrid"], ["pip", "studiojs.layoutPip"], ["sidebar", "studiojs.layoutSidebar"], ["spotlight", "studiojs.layoutSpotlight"], ["screen", "studiojs.layoutScreen"], ["news", "studiojs.layoutNews"]];
+const layoutLabel = (key) => t(key);
 
 let state = {};
 let keys = {};
@@ -51,8 +58,8 @@ $("#bandwidthMode").onchange = () => setState({ bandwidth: $("#bandwidthMode").v
 let relayAccess = {}, changingRelay = false;
 function renderRelayAccess() {
   const cloud = state.connection === "cloudflare";
-  $("#relayChoiceStatus").textContent = cloud ? "Cloudflare seleccionado · con respaldo local y control de cuota" : "Relé local seleccionado";
-  $("#relayChoiceHelp").textContent = !relayAccess.password ? "Cloudflare solo se puede activar en salas creadas con contraseña." : !relayAccess.available ? "El administrador debe configurar Cloudflare y la contraseña maestra en este servidor." : "Solo el anfitrión puede activar Cloudflare, validando la contraseña maestra en el servidor.";
+  $("#relayChoiceStatus").textContent = cloud ? t("studiojs.relayCloudSelected") : t("studiojs.relayLocalSelected");
+  $("#relayChoiceHelp").textContent = !relayAccess.password ? t("studiojs.relayHelpPassword") : !relayAccess.available ? t("studiojs.relayHelpUnavailable") : t("studiojs.relayHelpHostOnly");
   $("#cloudflareControls").classList.toggle("hidden", !relayAccess.password || !relayAccess.available);
   $("#useCloudflare").disabled = changingRelay || cloud;
   $("#useLocalRelay").disabled = changingRelay || !cloud;
@@ -63,7 +70,7 @@ async function changeRelay(provider) {
   changingRelay = true; renderRelayAccess();
   try {
     await sig.request({ type: "relay", value: { provider, ...(provider === "cloudflare" ? { password } : {}) } });
-    toast("Preferencia guardada. Reconectando la sala…");
+    toast(t("studiojs.relayPreferenceSaved"));
   } catch (e) { toast(e.message, "err"); }
   finally { changingRelay = false; renderRelayAccess(); }
 }
@@ -75,8 +82,8 @@ const vdoUI = mountVdo({ root: $("#vdoDialog"), copy, notify: message => toast(m
   const media = await chooseScreen();
   const id = await addLocal(media, "camera", "VDO.Ninja", { stream:"host-vdo-" + crypto.randomUUID().slice(0,20), videoKbps: 1500, fps: 24 });
   if (id) {
-    if (!media.getAudioTracks().length) toast("Se agregó el video. Para recibir audio, vuelve a capturar la pestaña y activa Compartir audio.","err");
-    $("#vdoDialog").close(); toast("Fuente VDO.Ninja agregada al backstage. Puedes pasarla al escenario.");
+    if (!media.getAudioTracks().length) toast(t("studiojs.vdoVideoNoAudio"),"err");
+    $("#vdoDialog").close(); toast(t("studiojs.vdoSourceAdded"));
   }
 } });
 $("#addVdo").onclick = () => $("#vdoDialog").showModal();
@@ -116,18 +123,18 @@ const sceneState = (name) => ({ ...state, ...sceneOf(name) });
 const scenePrev = new Compositor($("#scenePreview"), sources, () => sceneState(editScene));
 function renderSceneBar() {
   const bar = $("#sceneBar");
-  bar.replaceChildren(el("span", { class: "muted scenehint", text: "Editando:" }),
+  bar.replaceChildren(el("span", { class: "muted scenehint", text: t("studiojs.sceneEditing") }),
     ...SCENES.map((n) => {
       const count = sceneOf(n).stage.filter((id) => sources.has(id)).length;
-      return el("button", { class: "scenecard" + (n === "1" ? " program" : "") + (editScene === n ? " active" : ""), title: n === "1" ? "Programa (lo que sale en vivo)" : `Escena ${n} (salida extra para OBS)`,
+      return el("button", { class: "scenecard" + (n === "1" ? " program" : "") + (editScene === n ? " active" : ""), title: n === "1" ? t("studiojs.sceneProgramTitle") : t("studiojs.sceneExtraTitle", { n }),
         onclick: () => { editScene = n; renderSceneBar(); renderState(); scheduleRoomOptions(); } },
-        el("span", { class: "scenename", text: n === "1" ? "Programa" : `Escena ${n}` }),
-        el("span", { class: "scenecount", text: count ? `${count} en escena` : "vacía" }));
+        el("span", { class: "scenename", text: n === "1" ? t("studiojs.sceneProgram") : t("studiojs.sceneName", { n }) }),
+        el("span", { class: "scenecount", text: count ? t("studiojs.sceneCount", { n: count }) : t("studiojs.sceneEmpty") }));
     }),
-    el("button", { class: "small scenelink", title: "Copiar el link de OBS de esta escena", onclick: () => keys.viewKey ? copy(sceneURL(editScene)) : toast("Aún conectando…", "err"), text: "🔗 Link OBS" }));
+    el("button", { class: "small scenelink", title: t("studiojs.copyObsLinkTitle"), onclick: () => keys.viewKey ? copy(sceneURL(editScene)) : toast(t("studiojs.connectingYet"), "err"), text: t("studiojs.obsLink") }));
   const extra = editScene !== "1";
   $("#scenePreviewWrap").classList.toggle("hidden", !extra);
-  $("#scenePreviewLabel").textContent = extra ? `Vista previa de la escena ${editScene} (no es lo que sale en vivo)` : "";
+  $("#scenePreviewLabel").textContent = extra ? t("studiojs.scenePreview", { n: editScene }) : "";
   if (extra) scenePrev.start(); else scenePrev.stop();
 }
 function sceneURL(n, extra = "") {
@@ -136,14 +143,16 @@ function sceneURL(n, extra = "") {
 const mixer = new AudioMixer();
 
 // ---------- connection ----------
-function setStatus(t, cls = "") { const s = $("#status"); s.textContent = t; s.className = "pill " + cls; }
+let statusState = { key: "studio.connecting", cls: "" };
+function paintStatus() { const s = $("#status"); s.textContent = t(statusState.key); s.className = "pill " + statusState.cls; s.removeAttribute("data-i18n"); }
+function setStatus(key, cls = "") { statusState = { key, cls }; paintStatus(); }
 
 let hostGeneration = 0, hostLossTimer;
 sig.on("disconnected", () => {
   hostGeneration++;
   clearTimeout(hostLossTimer);
-  setStatus("actualizando conexión…");
-  hostLossTimer = setTimeout(() => { if (!sig.ready) setStatus("sin conexión", "red"); },10000);
+  setStatus("studiojs.statusUpdating");
+  hostLossTimer = setTimeout(() => { if (!sig.ready) setStatus("studiojs.statusOffline", "red"); },10000);
 });
 sig.on("reconnected", async (m) => {
   const generation = hostGeneration, socket = sig.ws;
@@ -172,11 +181,11 @@ sig.on("reconnected", async (m) => {
       local.set(id, fresh); s.pub = fresh;
     } catch (e) {
       // Keep the actual capture and its stable identity if negotiation fails.
-      if (generation === hostGeneration && socket === sig.ws) toast(`No se pudo restablecer ${s.name}: ${e.message}`, "err");
+      if (generation === hostGeneration && socket === sig.ws) toast(t("studiojs.restoreFailed", { name: s.name, error: e.message }), "err");
     }
   }
   if (generation !== hostGeneration || socket !== sig.ws) return;
-  renderBackstage(); syncAudio(); setStatus("conectado", "green");
+  renderBackstage(); syncAudio(); setStatus("studiojs.statusConnected", "green");
 });
 
 function onWelcome(m) {
@@ -193,23 +202,23 @@ function onWelcome(m) {
 }
 
 sig.connect({ type: "join", room, role: "host", key: hostKey, name: "Anfitrión" })
-  .then((m) => { onWelcome(m); setStatus("conectado", "green"); })
-  .catch((e) => { setStatus("error", "red"); toast("No se pudo entrar: " + e.message, "err"); });
+  .then((m) => { onWelcome(m); setStatus("studiojs.statusConnected", "green"); })
+  .catch((e) => { setStatus("studiojs.statusError", "red"); toast(t("studiojs.joinFailed", { error: e.message }), "err"); });
 
 sig.on("state", (m) => { state = m.state; $("#bandwidthMode").value = state.bandwidth || "balanced"; renderRelayAccess(); renderState(); });
-sig.on("peer-joined", (m) => { peers.set(m.peer.id, m.peer); renderPeople(); toast(`${m.peer.name} entró`); });
+sig.on("peer-joined", (m) => { peers.set(m.peer.id, m.peer); renderPeople(); toast(t("studiojs.peerJoined", { name: m.peer.name })); });
 sig.on("peer-updated", (m) => {
   const wasPending = peers.get(m.peer.id)?.screenRequested;
   peers.set(m.peer.id, m.peer); renderPeople(); renderBackstage();
-  if (m.peer.screenRequested && !wasPending) toast(`${m.peer.name} solicita compartir pantalla`);
+  if (m.peer.screenRequested && !wasPending) toast(t("studiojs.peerRequestScreen", { name: m.peer.name }));
 });
-sig.on("peer-left", (m) => { const p = peers.get(m.peerId); peers.delete(m.peerId); renderPeople(); if (p) toast(`${p.name} salió`); });
+sig.on("peer-left", (m) => { const p = peers.get(m.peerId); peers.delete(m.peerId); renderPeople(); if (p) toast(t("studiojs.peerLeft", { name: p.name })); });
 sig.on("stream-added", (m) => addRemote(m.info.id, m.info.kind, m.info.owner, m.name, m.info.revision));
 sig.on("stream-updated", (m) => { if (staleRevision(m.info.revision, remoteInfo.get(m.info.id)?.revision)) return; removeSource(m.info.id); addRemote(m.info.id, m.info.kind, m.info.owner, m.name, m.info.revision); });
 sig.on("stream-removed", (m) => removeSource(m.stream, m.revision));
 sig.on("chat", (m) => addChat(m.comment));
 sig.on("knock", (m) => addKnock(m));
-sig.on("knock-cancel", (m) => { if (knocks.delete(m.peerId)) { renderKnocks(); if (m.action !== "admitted") toast("Un invitado dejó la sala de espera"); } });
+sig.on("knock-cancel", (m) => { if (knocks.delete(m.peerId)) { renderKnocks(); if (m.action !== "admitted") toast(t("studiojs.guestLeftLobby")); } });
 sig.on("reaction", (m) => flyReaction(m.text));
 sig.on("restream", (m) => { const r = m.state.restream; $("#restreamStats").textContent = r ? (r.stats || "") + (r.lastError ? " · " + r.lastError : "") : ""; });
 sig.on("error", (m) => toast(m.error, "err"));
@@ -276,7 +285,7 @@ function syncMonitor() {
 }
 const localVolumes = readStored("swr.mon", {}, true);
 const localVol = (id) => localVolumes[id] ?? 1;
-$("#monitor").onclick = () => { monitorOn = !monitorOn; try { localStorage.setItem("swr.monitor", monitorOn ? "1" : "0"); } catch {} syncMonitor(); scheduleRoomOptions(); toast(monitorOn ? "Escuchando a los invitados" : "Monitor silenciado"); };
+$("#monitor").onclick = () => { monitorOn = !monitorOn; try { localStorage.setItem("swr.monitor", monitorOn ? "1" : "0"); } catch {} syncMonitor(); scheduleRoomOptions(); toast(monitorOn ? t("studiojs.monitorOnToast") : t("studiojs.monitorOffToast")); };
 
 // ---------- host's own sources ----------
 async function addLocal(media, kind, name, extra = {}, cleanup = null) {
@@ -286,7 +295,7 @@ async function addLocal(media, kind, name, extra = {}, cleanup = null) {
     v.muted = true; v.srcObject = media; v.play().catch(() => {});
     sources.set(pub.id, { video: v, stream: media, name, kind, owner: "me", level: levelMeter(media), local: true, pub, cleanup });
     local.set(pub.id, pub);
-    media.addEventListener('captureerror',e=>{stopLocal(pub.id);toast(e.detail||'La captura se detuvo',"err")},{once:true});
+    media.addEventListener('captureerror',e=>{stopLocal(pub.id);toast(e.detail||t("studiojs.captureStopped"),"err")},{once:true});
     // Camera suspension or a device swap must not unpublish its live microphone.
     if (kind !== "camera") media.getVideoTracks()[0]?.addEventListener("ended", () => stopLocal(pub.id));
     renderBackstage();
@@ -301,7 +310,7 @@ function stopLocal(id) {
   stopScreenCapture(s?.stream);
   s?.cleanup?.();
   local.delete(id); sources.delete(id);
-  if (id === hostCamId) { hostCamId = ""; $("#addCam").textContent = "Cámara"; }
+  if (id === hostCamId) { hostCamId = ""; $("#addCam").textContent = t("studiojs.btnCamera"); }
   setState({ stage: (state.stage || []).filter((x) => x !== id) });
   renderBackstage();
 }
@@ -310,12 +319,12 @@ $("#addCam").onclick = async () => {
   if (hostCamId) { // second press: another camera from this computer
     return pickExtraCamera();
   }
-  const btn = $("#addCam"); btn.disabled = true; btn.textContent = "Abriendo…";
-  const { stream, warnings } = await openMedia(prefs).finally(() => { btn.disabled = false; btn.textContent = "Cámara"; });
+  const btn = $("#addCam"); btn.disabled = true; btn.textContent = t("studiojs.opening");
+  const { stream, warnings } = await openMedia(prefs).finally(() => { btn.disabled = false; btn.textContent = t("studiojs.btnCamera"); });
   warnings.forEach((w) => toast(w, "err"));
-  if (!stream.getTracks().length) return toast(warnings.length ? "No se pudo abrir ninguna cámara ni micrófono." : "No hay cámara ni micrófono conectados.", "err");
+  if (!stream.getTracks().length) return toast(warnings.length ? t("studiojs.openNoDevice") : t("studiojs.noDeviceConnected"), "err");
   const id = await addLocalCam(stream, "Anfitrión");
-  if (id) { hostCamId = id; setState({ stage: [...new Set([...(state.stage || []), id])] }); $("#addCam").textContent = "Otra cámara"; }
+  if (id) { hostCamId = id; setState({ stage: [...new Set([...(state.stage || []), id])] }); $("#addCam").textContent = t("studiojs.anotherCamera"); }
 };
 async function addLocalCam(stream, name) {
   let slot=2; while (local.has("host-camera-"+slot)) slot++;
@@ -328,15 +337,15 @@ async function pickExtraCamera() {
   const { cams } = await listDevices();
   const used = new Set([...sources.values()].filter((s) => s.local).map((s) => s.stream.getVideoTracks()[0]?.getSettings().deviceId));
   const options = cams.filter((c) => !used.has(c.deviceId));
-  if (!options.length) return toast("No hay otra cámara libre en este equipo.", "err");
-  const dlg = el("dialog", { class: "card devdialog" }, el("h3", { text: "Agregar otra cámara" }),
+  if (!options.length) return toast(t("studiojs.noFreeCamera"), "err");
+  const dlg = el("dialog", { class: "card devdialog" }, el("h3", { text: t("studiojs.addAnotherCamera") }),
     ...options.map((c, i) => el("button", { onclick: async () => {
       dlg.close(); dlg.remove();
       const { stream, warnings } = await openMedia({ ...prefs, camera: c.deviceId, mic: "none" });
       warnings.forEach((w) => toast(w, "err"));
-      if (stream.getVideoTracks().length) await addLocalCam(stream, (c.label || `Cámara ${i + 2}`).slice(0, 30));
-    }, text: c.label || `Cámara ${i + 2}` })),
-    el("button", { class: "small", onclick: () => { dlg.close(); dlg.remove(); }, text: "Cancelar" }));
+      if (stream.getVideoTracks().length) await addLocalCam(stream, (c.label || t("studiojs.cameraNumber", { n: i + 2 })).slice(0, 30));
+    }, text: c.label || t("studiojs.cameraNumber", { n: i + 2 }) })),
+    el("button", { class: "small", onclick: () => { dlg.close(); dlg.remove(); }, text: t("studiojs.cancel") }));
   document.body.append(dlg); dlg.showModal();
 }
 
@@ -361,13 +370,13 @@ async function onPrefChange(p, what, quiet = false) {
   s.video.srcObject = s.stream; s.preview && (s.preview.srcObject = s.stream);
   $("#devCamCtl").replaceChildren(cameraControls(s.stream.getVideoTracks()[0]) || "");
   syncAudio();
-  if (!quiet) toast(kind === "video" ? "Cámara cambiada" : "Micrófono cambiado", "ok");
+  if (!quiet) toast(kind === "video" ? t("studiojs.cameraChanged") : t("studiojs.micChanged"), "ok");
 }
 $("#settings").onclick = async () => {
   const dlg = settingsDialog();
   await renderPanel($("#devPanel"), prefs, onPrefChange);
   const s = hostCamId && sources.get(hostCamId);
-  $("#devCamCtl").replaceChildren((s && cameraControls(s.stream.getVideoTracks()[0])) || el("p", { class: "muted", style: "font-size:12px", text: "Los cambios se aplican a tu cámara principal al instante." }));
+  $("#devCamCtl").replaceChildren((s && cameraControls(s.stream.getVideoTracks()[0])) || el("p", { class: "muted", style: "font-size:12px", text: t("studiojs.settingsApplyHint") }));
   dlg.showModal();
 };
 onDeviceChange(() => { if ($("#devDialog")?.open) renderPanel($("#devPanel"), prefs, onPrefChange); });
@@ -375,10 +384,10 @@ $("#addScreen").onclick = async () => {
   try {
     const m = await chooseScreen();
     if(local.has("host-screen"))stopLocal("host-screen");
-    const id = await addLocal(m, "screen", "Pantalla", { stream:"host-screen", stereo: true, audioKbps: 192, codec: prefs.codec });
+    const id = await addLocal(m, "screen", t("studiojs.sourceScreen"), { stream:"host-screen", stereo: true, audioKbps: 192, codec: prefs.codec });
     if (id) toast(screenAudioNotice(m), m.getAudioTracks().length ? "ok" : "");
     if (id) setState({ stage: [...new Set([...(state.stage || []), id])], layout: "screen" });
-  } catch (e) { if (e.name !== "NotAllowedError") toast("Pantalla: " + e.message, "err"); }
+  } catch (e) { if (e.name !== "NotAllowedError") toast(t("studiojs.screenError", { error: e.message }), "err"); }
 };
 $("#addMedia").onclick = () => $("#mediaFile").click();
 $("#mediaFile").onchange = async (e) => {
@@ -402,7 +411,7 @@ $("#mediaFile").onchange = async (e) => {
       media = v.captureStream ? v.captureStream() : v.mozCaptureStream();
       cleanup = () => { v.pause(); v.removeAttribute("src"); v.load(); URL.revokeObjectURL(url); };
     }
-  } catch (x) { URL.revokeObjectURL(url); return toast("No se pudo abrir el archivo: " + x.message, "err"); }
+  } catch (x) { URL.revokeObjectURL(url); return toast(t("studiojs.fileOpenFailed", { error: x.message }), "err"); }
   await addLocal(media, "media", f.name.replace(/\.[^.]+$/, "").slice(0, 40), {}, cleanup);
 };
 
@@ -428,15 +437,15 @@ function renderState() {
   $$("#layouts button").forEach((b) => b.classList.toggle("active", b.dataset.l === sceneOf(editScene).layout));
   renderSceneBar();
   const live = !!state.live;
-  $("#golive").textContent = live ? "Terminar" : "Transmitir";
+  $("#golive").textContent = live ? t("studiojs.btnStopLive") : t("studiojs.btnGoLive");
   $("#golive").classList.toggle("live", live);
   $("#golive").classList.toggle("primary", !live);
   $("#liveBadge").classList.toggle("hidden", !live);
   if (live && !liveSince) liveSince = (state.restream?.since || Date.now() / 1000) * 1000;
   if (!live) liveSince = 0;
   const rec = (state.recording || []).length > 0;
-  $("#recordLabel").textContent = rec ? "Detener grabación" : "Grabar";
-  $("#record").setAttribute("aria-label",rec ? "Detener grabación" : "Grabar");
+  $("#recordLabel").textContent = rec ? t("studiojs.recordStop") : t("studiojs.record");
+  $("#record").setAttribute("aria-label",rec ? t("studiojs.recordStop") : t("studiojs.record"));
   $("#record").classList.toggle("recording", rec);
   const b = state.brand || {};
   $("#brandColor").value = b.color || "#7c5cff";
@@ -444,7 +453,7 @@ function renderState() {
   if (document.activeElement !== $("#brandBg")) $("#brandBg").value = b.background || "";
   $("#brandNames").checked = b.showNames !== false;
   $("#muteStage").classList.toggle("off", !!state.stageMuted);
-  $("#muteStage").textContent = state.stageMuted ? "Activar escenario" : "Silenciar escenario";
+  $("#muteStage").textContent = state.stageMuted ? t("studiojs.stageUnmute") : t("studiojs.stageMute");
   renderBackstage(); renderBanners(); renderScenes(); syncAudio();
 }
 
@@ -461,8 +470,8 @@ function obsURL(id) {
 const toggleMap = (key, id) => setState({ [key]: { ...(state[key] || {}), [id]: !(state[key] || {})[id] } });
 
 function sourceQuality(id, source) {
-  const select = el("select", { "aria-label": `Calidad de envío de ${source.name}`, title: "Calidad codificada de esta cámara para todos sus receptores" },
-    ...QUALITIES.map(([value, text]) => el("option", { value, text })));
+  const select = el("select", { "aria-label": t("studiojs.sendQualityAria", { name: source.name }), title: t("studiojs.sendQualityTitle") },
+    ...QUALITIES.map(([value, key]) => el("option", { value, text: t(key), "data-i18n": key })));
   const measured = source.stream?.getVideoTracks()[0]?.getSettings?.().height;
   select.value = String(source.sendHeight || (QUALITIES.some(([v]) => Number(v) === measured) ? measured : 720));
   select.onchange = async () => {
@@ -471,19 +480,19 @@ function sourceQuality(id, source) {
     try {
       if (source.local) {
         const track = source.stream.getVideoTracks()[0], raw = track?.raw || track;
-        if (!raw?.applyConstraints) throw new Error("Esta fuente no permite cambiar su resolución");
+        if (!raw?.applyConstraints) throw new Error(t("misc.studioCantChangeResolution"));
         await raw.applyConstraints({ width: { ideal: Math.round(height * 16 / 9) }, height: { ideal: height }, frameRate: { ideal: fps } });
         await source.pub.setBitrate(kbps, fps); source.sendHeight = height;
-        toast(`Envío ajustado a ${height}p · ${kbps} kbps; la resolución real depende de la cámara`, "ok");
+        toast(t("studiojs.sendAdjusted", { height, kbps }), "ok");
       } else {
         source.sendHeight = height;
         req(source.owner, "quality", { stream: id, height, fps, kbps });
-        toast(`Solicitando envío ${height}p a ${source.name}`);
+        toast(t("studiojs.requestingSend", { height, name: source.name }));
       }
     } catch (e) { toast(e.message, "err"); }
     finally { select.disabled = false; }
   };
-  return el("label", { class: "source-quality" }, "Calidad de envío ", select);
+  return el("label", { class: "source-quality" }, t("studiojs.sendQuality") + " ", select);
 }
 let sourceSettingsId = "";
 function openSourceSettings(id) {
@@ -507,30 +516,30 @@ function renderSourceSettings() {
   video.style.opacity = hidden || s.camOff ? "0" : "1";
   const button = (text, action, attrs = {}) => el("button", { text, onclick: action, ...attrs });
   const actions = [
-    button(onStage(id) ? "Quitar del escenario" : "Pasar al escenario", () => toggleStage(id)),
-    button(sceneOf(editScene).featured === id ? "Quitar destacado" : "Destacar en esta escena", () => setScene(editScene, { featured: sceneOf(editScene).featured === id ? "" : id })),
-    button(muted ? "Activar audio del programa" : "Silenciar en el programa", () => toggleMap("muted", id)),
-    button(hidden ? "Mostrar video" : "Ocultar video", () => toggleMap("hidden", id), { title: hidden ? "Mostrar video" : "Ocultar video en escenario y backstage (mantiene el audio)" }),
-    button("Copiar enlace OBS", () => keys.viewKey ? copy(obsURL(id)) : toast("Aún conectando…", "err")),
-    button("Renombrar", () => rename(id, s)),
+    button(onStage(id) ? t("studiojs.removeFromStage") : t("studiojs.addToStage"), () => toggleStage(id)),
+    button(sceneOf(editScene).featured === id ? t("studiojs.unsetFeatured") : t("studiojs.setFeatured"), () => setScene(editScene, { featured: sceneOf(editScene).featured === id ? "" : id })),
+    button(muted ? t("studiojs.unmuteProgram") : t("studiojs.muteProgram"), () => toggleMap("muted", id)),
+    button(hidden ? t("studiojs.showVideo") : t("studiojs.hideVideo"), () => toggleMap("hidden", id), { title: hidden ? t("studiojs.showVideo") : t("studiojs.hideVideoTitle") }),
+    button(t("studiojs.copyObsLink"), () => keys.viewKey ? copy(obsURL(id)) : toast(t("studiojs.connectingYet"), "err")),
+    button(t("studiojs.rename"), () => rename(id, s)),
   ];
   if (!s.local) actions.push(
-    button(owner?.mic === false ? "Pedir micrófono" : "Silenciar micrófono", () => sig.send({ type:"request", target:s.owner, action:owner?.mic === false ? "unmute" : "mute" })),
-    button(owner?.cam === false ? "Pedir cámara" : "Apagar cámara", () => sig.send({ type:"request", target:s.owner, action:owner?.cam === false ? "camon" : s.kind === "screen" ? "screenoff" : "camoff" })),
-    button("Control remoto", () => { dlg.close(); if (owner) openRemote(owner.id); }),
-    button("Expulsar participante", () => { if (owner && confirm(`¿Expulsar a ${owner.name}?`)) sig.send({ type:"kick", target:owner.id }); })
+    button(owner?.mic === false ? t("studiojs.askMic") : t("studiojs.muteMic"), () => sig.send({ type:"request", target:s.owner, action:owner?.mic === false ? "unmute" : "mute" })),
+    button(owner?.cam === false ? t("studiojs.askCamera") : t("studiojs.cameraOff"), () => sig.send({ type:"request", target:s.owner, action:owner?.cam === false ? "camon" : s.kind === "screen" ? "screenoff" : "camoff" })),
+    button(t("studiojs.remoteControl"), () => { dlg.close(); if (owner) openRemote(owner.id); }),
+    button(t("studiojs.kickParticipant"), () => { if (owner && confirm(t("studiojs.kickConfirm", { name: owner.name }))) sig.send({ type:"kick", target:owner.id }); })
   );
-  else actions.push(button("Detener esta fuente", () => stopLocal(id)));
+  else actions.push(button(t("studiojs.stopSource"), () => stopLocal(id)));
   $("#sourceSettingsActions").replaceChildren(...actions);
-  const vol = el("input", { type:"range", min:0, max:2, step:.05, value:state.volumes?.[id] ?? 1, "aria-label":"Volumen en el programa" });
+  const vol = el("input", { type:"range", min:0, max:2, step:.05, value:state.volumes?.[id] ?? 1, "aria-label":t("studiojs.programVolumeAria") });
   vol.onchange = () => setState({ volumes:{ ...(state.volumes || {}), [id]:Number(vol.value) } });
-  $("#sourceSettingsQuality").replaceChildren(...(s.kind === "camera" ? [sourceQuality(id,s)] : []), el("label",{},"Volumen del programa",vol));
+  $("#sourceSettingsQuality").replaceChildren(...(s.kind === "camera" ? [sourceQuality(id,s)] : []), el("label",{},t("studiojs.programVolume"),vol));
 }
 function renderBackstage() {
-  $("#sourceCount").textContent=`${sources.size} ${sources.size===1 ? "fuente" : "fuentes"}`;
+  $("#sourceCount").textContent = t("studiojs.sourceCount", { n: sources.size });
   const box = $("#backstage");
   box.replaceChildren();
-  if (!sources.size) box.append(el("div", { class: "empty" }, el("b", { text: "Aún no hay fuentes" }), el("span", { class: "muted", text: "Invita gente o agrega tu cámara o pantalla desde la barra de abajo." })));
+  if (!sources.size) box.append(el("div", { class: "empty" }, el("b", { text: t("studiojs.noSourcesTitle") }), el("span", { class: "muted", text: t("studiojs.noSourcesHint") })));
   for (const [id, s] of sources) {
     const owner = peers.get(s.owner);
     s.camOff = !!(owner && owner.cam === false && s.kind === "camera");
@@ -541,17 +550,17 @@ function renderBackstage() {
     if (s.preview.srcObject !== s.stream) { s.preview.srcObject = s.stream; s.preview.play().catch(() => {}); }
     const progMuted = !!state.muted?.[id], hidden = !!state.hidden?.[id];
     s.preview.onclick = () => openSourceSettings(id);
-    s.preview.tabIndex = 0; s.preview.setAttribute("aria-label", "Ampliar " + s.name);
+    s.preview.tabIndex = 0; s.preview.setAttribute("aria-label", t("studiojs.enlargeAria", { name: s.name }));
     s.preview.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSourceSettings(id); } };
     const tile = el("div", { class: "tile" + (onStage(id) ? " stage" : "") + (progMuted ? " progmuted" : "") + (hidden ? " video-hidden" : ""), "data-id": id, "data-kind": s.kind, "data-peer": s.local ? myId : s.owner },
       s.preview,
-      el("span", { class: "tile-latency", title: "RTT del participante al servidor (ida y vuelta)", text: "RTT —" }),
+      el("span", { class: "tile-latency", title: t("studiojs.rttTitle"), text: t("studiojs.rttPending") }),
       owner?.hand ? el("span", { class: "hand", text: "✋" }) : null,
-      scenesWith(id).length ? el("span", { class: "scenes", title: "Escenas donde aparece", text: scenesWith(id).map((n) => n === "1" ? "P" : n).join(" ") }) : null,
-      el("span", { class: "name", text: ((state.labels && state.labels[id]) || s.name + (s.kind === "screen" ? " · pantalla" : "")) + (owner && owner.mic === false ? " 🔇" : "") }),
+      scenesWith(id).length ? el("span", { class: "scenes", title: t("studiojs.scenesTitle"), text: scenesWith(id).map((n) => n === "1" ? "P" : n).join(" ") }) : null,
+      el("span", { class: "name", text: ((state.labels && state.labels[id]) || s.name + (s.kind === "screen" ? t("studiojs.screenSuffix") : "")) + (owner && owner.mic === false ? " 🔇" : "") }),
       el("div", { class: "source-quick-actions" },
-        el("button", { class: "stagebtn " + (onStage(id) ? "on" : ""), onclick: () => toggleStage(id), text: onStage(id) ? "Quitar" : (editScene === "1" ? "Al escenario" : `A escena ${editScene}`) }),
-        el("button", { class:"source-options", "aria-haspopup":"dialog", onclick:() => openSourceSettings(id), text:"Opciones" })));
+        el("button", { class: "stagebtn " + (onStage(id) ? "on" : ""), onclick: () => toggleStage(id), text: onStage(id) ? t("studiojs.stageRemove") : (editScene === "1" ? t("studiojs.toStage") : t("studiojs.toScene", { n: editScene })) }),
+        el("button", { class:"source-options", "aria-haspopup":"dialog", onclick:() => openSourceSettings(id), text:t("studiojs.options") })));
     box.append(tile);
   }
   telemetry.refresh();
@@ -559,7 +568,7 @@ function renderBackstage() {
 }
 
 function rename(id, s) {
-  const n = prompt("Nombre / título en pantalla", (state.labels && state.labels[id]) || s.name);
+  const n = prompt(t("studiojs.renamePrompt"), (state.labels && state.labels[id]) || s.name);
   if (n == null) return;
   setState({ labels: { ...(state.labels || {}), [id]: n.trim() } });
 }
@@ -568,10 +577,10 @@ const screenDecision = (target, action) => sig.send({ type: "screen-permission",
 function renderScreenRequests() {
   const box = $("#screenRequests"), pending = [...peers.values()].filter(p => p.screenRequested);
   box.classList.toggle("hidden", !pending.length);
-  box.replaceChildren(el("b", { text: "Solicitudes para compartir pantalla" }), ...pending.map(p =>
-    el("div", { class: "item", "data-peer": p.id }, el("span", { class: "grow", text: p.name + " quiere compartir pantalla" }),
-      el("button", { class: "small primary", onclick: () => screenDecision(p.id, "allow"), text: "Autorizar pantalla" }),
-      el("button", { class: "small", onclick: () => screenDecision(p.id, "deny"), text: "Rechazar pantalla" }))));
+  box.replaceChildren(el("b", { text: t("studiojs.screenRequestsTitle") }), ...pending.map(p =>
+    el("div", { class: "item", "data-peer": p.id }, el("span", { class: "grow", text: t("studiojs.screenWants", { name: p.name }) }),
+      el("button", { class: "small primary", onclick: () => screenDecision(p.id, "allow"), text: t("studiojs.allowScreen") }),
+      el("button", { class: "small", onclick: () => screenDecision(p.id, "deny"), text: t("studiojs.denyScreen") }))));
 }
 function renderPeople() {
   renderScreenRequests();
@@ -582,14 +591,14 @@ function renderPeople() {
     box.append(el("div", { class: "item" },
       el("span", { class: "grow", text: `${p.hand ? "✋ " : ""}${p.name}` }),
       el("span", { class: "pill", text: (p.mic ? "🎙️" : "🔇") + (p.cam ? " 📷" : "") }),
-      el("button", { class: "small", onclick: () => sig.send({ type: "request", target: p.id, action: p.mic ? "mute" : "unmute" }), text: p.mic ? "Silenciar" : "Pedir audio" }),
-      el("button", { class: "small", onclick: () => sig.send({ type: "request", target: p.id, action: p.cam ? "camoff" : "camon" }), text: p.cam ? "Apagar cámara" : "Pedir cámara" }),
-      p.screenAllowed ? el("button", { class: "small", onclick: () => screenDecision(p.id, "revoke"), text: "Revocar pantalla" }) : null,
-      p.hand ? el("button", { class: "small", onclick: () => sig.send({ type: "request", target: p.id, action: "lowerhand" }), text: "Bajar mano" }) : null,
-      el("button", { class: "small", onclick: () => openRemote(p.id), text: "🎛️ Control" }),
-      el("button", { class: "small danger", onclick: () => confirm(`¿Expulsar a ${p.name}?`) && sig.send({ type: "kick", target: p.id }), text: "Expulsar" })));
+      el("button", { class: "small", onclick: () => sig.send({ type: "request", target: p.id, action: p.mic ? "mute" : "unmute" }), text: p.mic ? t("studiojs.mute") : t("studiojs.askAudio") }),
+      el("button", { class: "small", onclick: () => sig.send({ type: "request", target: p.id, action: p.cam ? "camoff" : "camon" }), text: p.cam ? t("studiojs.cameraOff") : t("studiojs.askCamera") }),
+      p.screenAllowed ? el("button", { class: "small", onclick: () => screenDecision(p.id, "revoke"), text: t("studiojs.revokeScreen") }) : null,
+      p.hand ? el("button", { class: "small", onclick: () => sig.send({ type: "request", target: p.id, action: "lowerhand" }), text: t("studiojs.lowerHand") }) : null,
+      el("button", { class: "small", onclick: () => openRemote(p.id), text: t("studiojs.btnControl") }),
+      el("button", { class: "small danger", onclick: () => confirm(t("studiojs.kickConfirm", { name: p.name })) && sig.send({ type: "kick", target: p.id }), text: t("studiojs.kick") })));
   }
-  if (!box.children.length) box.append(el("p", { class: "muted", text: "Nadie más todavía." }));
+  if (!box.children.length) box.append(el("p", { class: "muted", text: t("studiojs.nobodyYet") }));
 }
 
 // Guests in the waiting room: shown over the backstage and in the People tab,
@@ -598,52 +607,61 @@ const knocks = new Map(); // peerId -> name
 function addKnock(m) {
   if (knocks.has(m.peerId)) return; // re-sent on reconnect
   knocks.set(m.peerId, m.name);
-  toast(`${m.name} está en la sala de espera`);
+  toast(t("studiojs.inWaitingRoom", { name: m.name }));
   renderKnocks();
 }
 function letIn(id) {
   const name = knocks.get(id);
   knocks.delete(id); renderKnocks();
   sig.send({ type: "admit", target: id });
-  toast(`${name} pasó al backstage`);
+  toast(t("studiojs.movedToBackstage", { name }));
 }
 function letOut(id) { knocks.delete(id); renderKnocks(); sig.send({ type: "deny", target: id }); }
-function letAllIn() { knocks.clear(); renderKnocks(); sig.send({ type: "admit-all" }); toast("Todos pasaron al backstage"); }
+function letAllIn() { knocks.clear(); renderKnocks(); sig.send({ type: "admit-all" }); toast(t("studiojs.allMovedBackstage")); }
 function renderKnocks() {
   const row = (id, name) => el("div", { class: "item knock", "data-peer": id },
     el("span", { class: "grow", text: "🚪 " + name }),
-    el("button", { class: "small primary", onclick: () => letIn(id), text: "Pasar al backstage" }),
-    el("button", { class: "small", onclick: () => letOut(id), text: "Rechazar" }));
+    el("button", { class: "small primary", onclick: () => letIn(id), text: t("studiojs.admitToBackstage") }),
+    el("button", { class: "small", onclick: () => letOut(id), text: t("studiojs.deny") }));
   const list = [...knocks];
   $("#knocks").replaceChildren(...list.map(([id, n]) => row(id, n)));
   const wr = $("#waitroom");
   wr.classList.toggle("hidden", !list.length);
   wr.replaceChildren(
-    el("div", { class: "waithead" }, el("b", { text: `Sala de espera · ${list.length}` }), el("span", { class: "grow" }),
-      list.length > 1 ? el("button", { class: "small primary", onclick: letAllIn, text: "Pasar a todos" }) : null),
+    el("div", { class: "waithead" }, el("b", { text: t("studiojs.waitingRoomCount", { n: list.length }) }), el("span", { class: "grow" }),
+      list.length > 1 ? el("button", { class: "small primary", onclick: letAllIn, text: t("studiojs.admitAll") }) : null),
     ...list.map(([id, n]) => row(id, n)));
 }
 
 // ---------- layouts ----------
-LAYOUTS.forEach(([l, label], i) => $("#layouts").append(el("button", { "data-l": l, title: `${label} (${i + 1})`, "aria-label": label, onclick: () => setScene(editScene, { layout: l }) },
-  el("i", { class: "lp", "aria-hidden": "true" }), el("span", { text: label }))));
+function renderLayoutButtons() {
+  const box = $("#layouts");
+  box.replaceChildren();
+  LAYOUTS.forEach(([l, key], i) => {
+    const label = layoutLabel(key);
+    box.append(el("button", { "data-l": l, title: `${label} (${i + 1})`, "aria-label": label, onclick: () => setScene(editScene, { layout: l }) },
+      el("i", { class: "lp", "aria-hidden": "true" }), el("span", { text: label })));
+  });
+}
+renderLayoutButtons();
 $("#muteStage").onclick = () => setState({ stageMuted: !state.stageMuted });
-$("#muteAll").onclick = () => { sig.send({ type: "request", target: "*", action: "mute" }); toast("Silenciando a todos los invitados"); };
-$("#askUnmuteAll").onclick = () => { sig.send({ type: "request", target: "*", action: "unmute" }); toast("Pedí a todos activar el micrófono"); };
-$("#camsOff").onclick = () => confirm("¿Apagar la cámara de todos los invitados?") && allGuests("camoff");
+$("#muteAll").onclick = () => { sig.send({ type: "request", target: "*", action: "mute" }); toast(t("studiojs.mutingAll")); };
+$("#askUnmuteAll").onclick = () => { sig.send({ type: "request", target: "*", action: "unmute" }); toast(t("studiojs.askedAllUnmute")); };
+$("#camsOff").onclick = () => confirm(t("studiojs.confirmAllCamsOff")) && allGuests("camoff");
 $("#askCamsOn").onclick = () => allGuests("camon");
 
 // Quick "everyone" controls, also reachable from every camera's 👥 menu.
-const ALL_ACTIONS = {
-  mute: ["🔇 Silenciar a todos", "Silenciando a todos los invitados"],
-  unmute: ["🎙️ Pedir audio a todos", "Pedí a todos activar el micrófono"],
-  camoff: ["📷✕ Apagar cámaras de todos", "Apagando las cámaras de todos los invitados"],
-  camon: ["📷 Pedir cámaras a todos", "Pedí a todos encender la cámara"],
-};
+// Built per call: labels must follow the active language.
+const ALL_ACTIONS = () => ({
+  mute: [t("studiojs.allMuteLabel"), t("studiojs.mutingAll")],
+  unmute: [t("studiojs.allUnmuteLabel"), t("studiojs.askedAllUnmute")],
+  camoff: [t("studiojs.allCamOffLabel"), t("studiojs.turningCamsOff")],
+  camon: [t("studiojs.allCamOnLabel"), t("studiojs.askedAllCamOn")],
+});
 function allGuests(action) {
-  if (![...peers.values()].some((p) => p.role !== "host")) return toast("No hay invitados conectados", "err");
+  if (![...peers.values()].some((p) => p.role !== "host")) return toast(t("studiojs.noGuestsConnected"), "err");
   sig.send({ type: "request", target: "*", action });
-  toast(ALL_ACTIONS[action][1]);
+  toast(ALL_ACTIONS()[action][1]);
 }
 let allMenuEl;
 function allMenu(anchor) {
@@ -651,9 +669,9 @@ function allMenu(anchor) {
   const guests = [...peers.values()].filter((p) => p.role !== "host");
   const micsOn = guests.filter((p) => p.mic !== false).length, camsOn = guests.filter((p) => p.cam !== false).length;
   allMenuEl = el("div", { class: "allmenu card", role: "menu" },
-    el("div", { class: "muted", text: `Todos los invitados (${guests.length}) · 🎙️ ${micsOn} · 📷 ${camsOn}` }),
-    ...Object.entries(ALL_ACTIONS).map(([a, [label]]) => el("button", { class: "small", role: "menuitem", onclick: () => { allMenuEl.remove(); allGuests(a); }, text: label })),
-    el("p", { class: "muted", style: "margin:0;font-size:11px", text: "Encender pide permiso al invitado: el navegador no deja activar su cámara o micrófono sin que acepte." }));
+    el("div", { class: "muted", text: t("studiojs.allGuestsSummary", { n: guests.length, mics: micsOn, cams: camsOn }) }),
+    ...Object.entries(ALL_ACTIONS()).map(([a, [label]]) => el("button", { class: "small", role: "menuitem", onclick: () => { allMenuEl.remove(); allGuests(a); }, text: label })),
+    el("p", { class: "muted", style: "margin:0;font-size:11px", text: t("studiojs.allMenuHint") }));
   document.body.append(allMenuEl);
   const r = anchor.getBoundingClientRect();
   allMenuEl.style.left = Math.max(8, Math.min(window.innerWidth - allMenuEl.offsetWidth - 8, r.left)) + "px";
@@ -668,7 +686,7 @@ $("#allStage").onclick = () => setScene(editScene, { stage: [...sources.keys()].
 // second monitor/projector, capture it with OBS "Window capture", or start OBS
 // Virtual Camera from it to use the show as a webcam in Zoom/Meet/Teams.
 $("#virtual").onclick = () => {
-  if (!keys.viewKey) return toast("Aún conectando…", "err");
+  if (!keys.viewKey) return toast(t("studiojs.connectingYet"), "err");
   const url = `${origin()}/view?room=${encodeURIComponent(room)}&scene=1&status=0&virtual=1#key=${encodeURIComponent(keys.viewKey)}`;
   const w = window.open(url, "swr-virtual-" + room, "popup,width=1280,height=720");
   if (!w) copy(url);
@@ -691,7 +709,7 @@ document.addEventListener("keydown", (e) => {
 // ---------- chat ----------
 let unread = 0;
 function addChat(c) {
-  const show = el("button", { class: "small act", title: "Mostrar en pantalla", onclick: () => setState({ comment: state.comment?.id === c.id ? null : c }), text: "📺" });
+  const show = el("button", { class: "small act", title: t("studiojs.showOnScreen"), onclick: () => setState({ comment: state.comment?.id === c.id ? null : c }), text: "📺" });
   appendChat($("#chatlog"), chatMessage(c, { myId, actions: [show] }));
   const chatTab = $('#tabs [data-tab="chat"]');
   if (chatTab && !chatTab.classList.contains("active") && c.peerId !== myId) { unread++; chatTab.dataset.unread = unread > 99 ? "99+" : String(unread); }
@@ -715,14 +733,14 @@ function renderBanners() {
     const active = state.banner?.id === b.id;
     box.append(el("div", { class: "item" },
       el("span", { class: "grow", text: (b.ticker ? "↔ " : "") + b.text }),
-      el("button", { class: "small " + (active ? "on" : ""), onclick: () => setState({ banner: active ? null : b }), text: active ? "Ocultar" : "Mostrar" }),
+      el("button", { class: "small " + (active ? "on" : ""), onclick: () => setState({ banner: active ? null : b }), text: active ? t("studiojs.hide") : t("studiojs.show") }),
       el("button", { class: "small", onclick: () => setState({ banners: state.banners.filter((x) => x.id !== b.id), ...(active ? { banner: null } : {}) }), text: "✕" })));
   }
 }
 
 // ---------- brand ----------
 const readFile = (f, max) => new Promise((res, rej) => {
-  if (f.size > max) return rej(new Error(`archivo muy grande (máx ${Math.round(max / 1024)} KB)`));
+  if (f.size > max) return rej(new Error(t("studiojs.fileTooLarge", { max: Math.round(max / 1024) })));
   const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f);
 });
 let pendingLogo, pendingOverlay;
@@ -736,14 +754,14 @@ $("#brandSave").onclick = () => {
   if (pendingOverlay) b.overlay = pendingOverlay;
   pendingLogo = pendingOverlay = null;
   setState({ brand: b });
-  toast("Marca aplicada", "ok");
+  toast(t("studiojs.brandApplied"), "ok");
 };
 $("#titleSave").onclick = () => setState({ title: $("#showTitle").value.trim() });
 $("#lobbyToggle").onchange = (e) => setState({ lobby: e.target.checked });
 
 // ---------- scenes ----------
 $("#sceneSave").onclick = () => {
-  const name = $("#sceneName").value.trim() || `Escena ${Object.keys(state.scenes || {}).length + 1}`;
+  const name = $("#sceneName").value.trim() || t("studiojs.sceneName", { n: Object.keys(state.scenes || {}).length + 1 });
   setState({ scenes: { ...(state.scenes || {}), [name]: { layout: state.layout, stage: state.stage || [], banner: state.banner || null } } });
   $("#sceneName").value = "";
 };
@@ -753,7 +771,7 @@ function renderScenes() {
   for (const [name, sc] of Object.entries(state.scenes || {})) {
     box.append(el("div", { class: "item" },
       el("span", { class: "grow", text: `${name} · ${sc.layout} · ${sc.stage.length}` }),
-      el("button", { class: "small primary", onclick: () => setState({ layout: sc.layout, stage: sc.stage.filter((id) => sources.has(id)), banner: sc.banner }), text: "Cargar" }),
+      el("button", { class: "small primary", onclick: () => setState({ layout: sc.layout, stage: sc.stage.filter((id) => sources.has(id)), banner: sc.banner }), text: t("studiojs.load") }),
       el("button", { class: "small", onclick: () => { const s = { ...state.scenes }; delete s[name]; setState({ scenes: s }); }, text: "✕" })));
   }
 }
@@ -761,12 +779,12 @@ function renderScenes() {
 // ---------- destinations (kept in localStorage only) ----------
 const destKey = `swr.dest.${room}`;
 let dests = readStored(destKey, readStored("swr.dest", []));
-const saveDests = () => { if (!writeStored(destKey, dests)) toast("No se pudieron guardar los destinos en este navegador", "err"); writeStored("swr.dest", dests); renderDests(); scheduleRoomOptions(); };
+const saveDests = () => { if (!writeStored(destKey, dests)) toast(t("studiojs.destSaveFailed"), "err"); writeStored("swr.dest", dests); renderDests(); scheduleRoomOptions(); };
 $("#destPreset").onchange = (e) => { $("#destURL").value = e.target.value; };
 $("#destURL").value = $("#destPreset").value;
 $("#destAdd").onclick = () => {
   const base = $("#destURL").value.trim(), key = $("#destKey").value.trim();
-  if (!/^(rtmps?|srt):\/\//.test(base)) return toast("La URL debe empezar con rtmp://, rtmps:// o srt://", "err");
+  if (!/^(rtmps?|srt):\/\//.test(base)) return toast(t("studiojs.destUrlInvalid"), "err");
   const url = key ? base.replace(/\/?$/, "/") + key : base;
   dests.push({ name: $("#destPreset").selectedOptions[0].textContent.split(" ")[0], url, enabled: true });
   $("#destKey").value = "";
@@ -781,7 +799,7 @@ function renderDests() {
     el("input", { type: "checkbox", checked: d.enabled, onchange: (e) => { d.enabled = e.target.checked; saveDests(); } }),
     el("span", { class: "grow", text: `${d.name} · ${maskURL(d.url)}` }),
     el("button", { class: "small", onclick: () => { dests.splice(i, 1); saveDests(); }, text: "✕" }))));
-  if (!dests.length) box.append(el("p", { class: "muted", text: "Sin destinos. También puedes capturar el programa en OBS desde la pestaña OBS." }));
+  if (!dests.length) box.append(el("p", { class: "muted", text: t("studiojs.noDests") }));
 }
 renderDests();
 
@@ -790,32 +808,32 @@ async function ensureProgram() {
   if (program) return program;
   const video = $("#program").captureStream(Number($("#fps").value) || 30);
   const media = new MediaStream([...video.getVideoTracks(), mixer.track]);
-  program = await publish(sig, media, { kind: "program", stream: "program", name: "Programa", videoKbps: Number($("#vKbps").value) || 4500, audioKbps: 160, codec: "video/H264", fps: Number($("#fps").value) || 30 });
+  program = await publish(sig, media, { kind: "program", stream: "program", name: t("studiojs.program"), videoKbps: Number($("#vKbps").value) || 4500, audioKbps: 160, codec: "video/H264", fps: Number($("#fps").value) || 30 });
   return program;
 }
 
 $("#golive").onclick = async () => {
   if (state.live) {
-    if (!confirm("¿Terminar la transmisión?")) return;
+    if (!confirm(t("studiojs.endLiveConfirm"))) return;
     sig.send({ type: "endlive" });
     return;
   }
   const active = dests.filter((d) => d.enabled);
-  if (!active.length) { activateTab("dest"); return toast("Agrega al menos un destino", "err"); }
+  if (!active.length) { activateTab("dest"); return toast(t("studiojs.addDestinationFirst"), "err"); }
   $("#golive").disabled = true;
   try {
     await ensureProgram();
     await new Promise((r) => setTimeout(r, 1200));
     await sig.request({ type: "golive", stream: "program", dests: active.map(({ name, url }) => ({ name, url })), settings: { videoKbps: Number($("#vKbps").value) || 4500, fps: Number($("#fps").value) || 30, audioKbps: 160 } });
-    toast("¡Estás en vivo!", "ok");
-  } catch (e) { toast("No se pudo transmitir: " + e.message, "err"); }
+    toast(t("studiojs.nowLive"), "ok");
+  } catch (e) { toast(t("studiojs.liveFailed", { error: e.message }), "err"); }
   $("#golive").disabled = false;
 };
 
 $("#record").onclick = () => {
   const rec = (state.recording || []).length > 0;
   sig.send({ type: "record", action: rec ? "stop" : "start", stream: "*" });
-  toast(rec ? "Grabación detenida; archivos en la carpeta de datos del servidor." : "Grabando cada fuente por separado", "ok");
+  toast(rec ? t("studiojs.recordingStopped") : t("studiojs.recordingStarted"), "ok");
 };
 
 setInterval(() => {
@@ -830,26 +848,26 @@ $("#invite").onclick = () => copy(inviteURL());
 
 function linkRow(label, value) {
   const i = el("input", { readonly: true, value });
-  return el("div", {}, el("label", { text: label }), el("div", { class: "copy" }, i, el("button", { class: "small", onclick: () => copy(value), text: "Copiar" })));
+  return el("div", {}, el("label", { text: label }), el("div", { class: "copy" }, i, el("button", { class: "small", onclick: () => copy(value), text: t("studiojs.copyLabel") })));
 }
 function renderObs() {
   if (!keys.viewKey) return;
   const vk = encodeURIComponent(keys.viewKey), r = encodeURIComponent(room);
   const box = $("#obsLinks");
   box.replaceChildren(
-    linkRow("Programa completo (escena, con banners y marca)", `${origin()}/view?room=${r}&scene=1&${obsSizing()}#key=${vk}`),
-    linkRow("Programa con fondo transparente (para tus propias escenas)", `${origin()}/view?room=${r}&scene=1&transparent=1&${obsSizing()}#key=${vk}`),
-    linkRow("Invitación para invitados (entran directo al backstage)", inviteURL()),
-    linkRow("WHEP del programa (reproductores WHEP / OBS 31+)", `${origin()}/whep/${r}/program`),
-    linkRow("Clave WHEP (Bearer)", keys.viewKey),
+    linkRow(t("studiojs.obsProgramFull"), `${origin()}/view?room=${r}&scene=1&${obsSizing()}#key=${vk}`),
+    linkRow(t("studiojs.obsProgramTransparent"), `${origin()}/view?room=${r}&scene=1&transparent=1&${obsSizing()}#key=${vk}`),
+    linkRow(t("studiojs.obsGuestInvite"), inviteURL()),
+    linkRow(t("studiojs.obsWhep"), `${origin()}/whep/${r}/program`),
+    linkRow(t("studiojs.obsWhepKey"), keys.viewKey),
   );
-  box.append(linkRow("Pantalla virtual (programa limpio, sin textos de estado)", `${origin()}/view?room=${r}&scene=1&status=0&${obsSizing()}#key=${vk}`));
-  for (const n of SCENES.slice(1)) if (sceneOf(n).stage.length) box.append(linkRow(`Escena ${n} (${sceneOf(n).stage.length} en escena)`, sceneURL(n)));
-  box.append(linkRow("Co-director (control total del estudio: compártelo solo con quien produce contigo)", `${origin()}/studio?room=${r}#key=${encodeURIComponent(hostKey)}`));
-  for (const [id, s] of sources) box.append(linkRow(`Cámara: ${(state.labels && state.labels[id]) || s.name}${s.kind === "screen" ? " · pantalla" : ""}`, obsURL(id)));
+  box.append(linkRow(t("studiojs.obsVirtualScreen"), `${origin()}/view?room=${r}&scene=1&status=0&${obsSizing()}#key=${vk}`));
+  for (const n of SCENES.slice(1)) if (sceneOf(n).stage.length) box.append(linkRow(t("studiojs.obsScene", { n, count: sceneOf(n).stage.length }), sceneURL(n)));
+  box.append(linkRow(t("studiojs.obsCoDirector"), `${origin()}/studio?room=${r}#key=${encodeURIComponent(hostKey)}`));
+  for (const [id, s] of sources) box.append(linkRow(t("studiojs.obsCamera", { name: (state.labels && state.labels[id]) || s.name + (s.kind === "screen" ? t("studiojs.screenSuffix") : "") }), obsURL(id)));
   $("#whipLinks").replaceChildren(
-    linkRow("Servidor WHIP", `${origin()}/whip/${r}/obs`),
-    linkRow("Bearer Token", keys.pushKey));
+    linkRow(t("studiojs.obsWhipServer"), `${origin()}/whip/${r}/obs`),
+    linkRow(t("studiojs.obsWhipToken"), keys.pushKey));
 }
 // Refresh while visible, but not while the user is selecting or copying a link.
 setInterval(() => { const p = $('[data-pane="obs"]'); if (p.classList.contains("active") && !p.contains(document.activeElement)) renderObs(); }, 3000);
@@ -857,7 +875,7 @@ setInterval(() => { const p = $('[data-pane="obs"]'); if (p.classList.contains("
 // ---------- tabs & misc ----------
 function activateTab(name) {
   studioWorkspace.openPanel();
-  $("#activePanelTitle").textContent = $(`#tabs [data-tab="${name}"]`)?.textContent || "Producción";
+  $("#activePanelTitle").textContent = $(`#tabs [data-tab="${name}"]`)?.textContent || t("studiojs.panelProduction");
   $$("#tabs button[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   if (name === "chat") { unread = 0; delete $('#tabs [data-tab="chat"]').dataset.unread; const l = $("#chatlog"); l.scrollTop = l.scrollHeight; }
   $$(".tabpane").forEach((p) => p.classList.toggle("active", p.dataset.pane === name));
@@ -887,7 +905,7 @@ const req = (target, action, value) => sig.send({ type: "request", target, actio
 function openRemote(peerId) {
   closeRemote();
   const p = peers.get(peerId);
-  if (!p) return toast("Ese invitado ya no está", "err");
+  if (!p) return toast(t("studiojs.guestGone"), "err");
   const dlg = el("dialog", { class: "card devdialog remotedlg" });
   remote = { peerId, dlg, snap: null };
   dlg.addEventListener("close", closeRemote);
@@ -909,15 +927,15 @@ function closeRemote() {
 sig.on("report", (m) => {
   if (m.action === "quality" && m.value?.stream) {
     const source = sources.get(m.value.stream);
-    if (source) { source.sendHeight = m.value.quality; toast(`Calidad aplicada: ${m.value.width}×${m.value.height}`, "ok"); }
+    if (source) { source.sendHeight = m.value.quality; toast(t("studiojs.qualityAppliedSize", { width: m.value.width, height: m.value.height }), "ok"); }
   }
   if (!remote || m.peerId !== remote.peerId) return;
-  if (m.action === "devices" || m.action === "quality") { remote.snap = m.value; renderRemote(); if (m.action === "quality") toast("Calidad aplicada", "ok"); }
+  if (m.action === "devices" || m.action === "quality") { remote.snap = m.value; renderRemote(); if (m.action === "quality") toast(t("studiojs.qualityApplied"), "ok"); }
   if (m.action === "stats") {
     const s = m.value || {};
-    const lim = { cpu: "limitado por CPU", bandwidth: "limitado por ancho de banda", other: "limitado" }[s.limit] || "";
+    const lim = { cpu: t("studiojs.limitCpu"), bandwidth: t("studiojs.limitBandwidth"), other: t("studiojs.limitOther") }[s.limit] || "";
     const line = s.width ? `${s.width}×${s.height} · ${s.fps} fps · ${s.videoKbps} kbps video · ${s.audioKbps || 0} kbps audio · ${String(s.codec || "").replace("video/", "")}${s.rtt != null ? ` · ${s.rtt} ms` : ""}${s.lost ? ` · ${s.lost} perdidos` : ""}${lim ? " · ⚠️ " + lim : ""}`
-      : (s.connected ? "Sin video enviándose" : "No está publicando");
+      : (s.connected ? t("studiojs.noVideoSending") : t("studiojs.notPublishing"));
     const box = remote.dlg.querySelector(".rstats");
     if (box) box.textContent = line;
   }
@@ -925,14 +943,14 @@ sig.on("report", (m) => {
 
 function renderRemote() {
   const { peerId, dlg, snap } = remote;
-  const p = peers.get(peerId) || { name: "Invitado" };
+  const p = peers.get(peerId) || { name: t("studiojs.guestDefault") };
   const s = snap || {};
-  const sel = (items, value) => { const x = el("select", {}, ...items.map(([v, t]) => el("option", { value: v, text: t }))); x.value = String(value ?? ""); return x; };
+  const sel = (items, value) => { const x = el("select", {}, ...items.map(([v, key]) => el("option", { value: v, text: key.includes(".") ? t(key) : key, "data-i18n": key.includes(".") ? key : "" }))); x.value = String(value ?? ""); return x; };
   const q = sel(QUALITIES, s.quality || "720");
   const fps = sel(FPS.map((f) => [f, f + " fps"]), s.fps || "30");
-  const kbps = el("input", { type: "number", min: 0, max: 50000, step: 100, value: s.kbps || kbpsFor(Number(s.quality || 720)), title: "0 = automático según resolución" });
+  const kbps = el("input", { type: "number", min: 0, max: 50000, step: 100, value: s.kbps || kbpsFor(Number(s.quality || 720)), title: t("studiojs.bitrateAutoTitle") });
   q.onchange = () => { kbps.value = kbpsFor(Number(q.value)); };
-  const presets = [["Baja (360p)", 360, 30, 800], ["Media (720p)", 720, 30, 2500], ["Alta (1080p)", 1080, 30, 6000], ["Máxima (1080p60)", 1080, 60, 9000]]
+  const presets = [[t("studiojs.presetLow"), 360, 30, 800], [t("studiojs.presetMedium"), 720, 30, 2500], [t("studiojs.presetHigh"), 1080, 30, 6000], [t("studiojs.presetMax"), 1080, 60, 9000]]
     .map(([t, h, f, k]) => el("button", { class: "small", onclick: () => { q.value = String(h); fps.value = String(f); kbps.value = k; applyQ(); }, text: t }));
   const applyQ = () => req(peerId, "quality", { height: Number(q.value), fps: Number(fps.value), kbps: Number(kbps.value) });
 
@@ -948,7 +966,7 @@ function renderRemote() {
   const chk = (k, text) => el("label", { class: "row" }, el("input", { type: "checkbox", checked: !!s[k], onchange: (e) => req(peerId, "audio", { [k]: e.target.checked }) }), " " + text);
 
   const camctl = el("div", { class: "col" });
-  const names = { zoom: "Zoom", focusDistance: "Enfoque", exposureCompensation: "Exposición", exposureTime: "Tiempo de exposición", colorTemperature: "Temperatura de color", brightness: "Brillo", contrast: "Contraste", saturation: "Saturación", sharpness: "Nitidez", pan: "Pan", tilt: "Tilt", focusMode: "Modo de enfoque", exposureMode: "Modo de exposición", whiteBalanceMode: "Balance de blancos", torch: "Linterna", backgroundBlur: "Desenfoque del sistema" };
+  const names = { zoom: t("studiojs.camZoom"), focusDistance: t("studiojs.camFocus"), exposureCompensation: t("studiojs.camExposure"), exposureTime: t("studiojs.camExposureTime"), colorTemperature: t("studiojs.camColorTemperature"), brightness: t("studiojs.camBrightness"), contrast: t("studiojs.camContrast"), saturation: t("studiojs.camSaturation"), sharpness: t("studiojs.camSharpness"), pan: t("studiojs.camPan"), tilt: t("studiojs.camTilt"), focusMode: t("studiojs.camFocusMode"), exposureMode: t("studiojs.camExposureMode"), whiteBalanceMode: t("studiojs.camWhiteBalance"), torch: t("studiojs.camTorch"), backgroundBlur: t("studiojs.camBackgroundBlur") };
   for (const [k, c] of Object.entries(s.caps || {})) {
     if (Array.isArray(c)) {
       if (c.every((x) => typeof x === "boolean")) {
@@ -965,37 +983,37 @@ function renderRemote() {
     }
   }
 
-  const msg = el("input", { maxlength: 500, placeholder: "Mensaje privado que verá en pantalla" });
-  const sendMsg = () => { if (msg.value.trim()) { req(peerId, "message", msg.value.trim()); msg.value = ""; toast("Mensaje enviado", "ok"); } };
+  const msg = el("input", { maxlength: 500, placeholder: t("studiojs.privateMessagePlaceholder") });
+  const sendMsg = () => { if (msg.value.trim()) { req(peerId, "message", msg.value.trim()); msg.value = ""; toast(t("studiojs.messageSent"), "ok"); } };
   msg.addEventListener("keydown", (e) => e.key === "Enter" && sendMsg());
 
   dlg.replaceChildren(
     el("div", { class: "row" }, el("h3", { class: "grow", style: "margin:0", text: `🎛️ ${p.name}` }), el("button", { class: "small", onclick: closeRemote, text: "✕" })),
-    el("div", { class: "rstats muted", text: "Leyendo estadísticas…" }),
-    el("h4", { text: "Calidad de lo que envía" }),
+    el("div", { class: "rstats muted", text: t("studiojs.readingStats") }),
+    el("h4", { text: t("studiojs.sendingQuality") }),
     el("div", { class: "row wrap" }, ...presets),
-    el("div", { class: "row" }, el("div", { class: "grow" }, el("label", { text: "Resolución" }), q), el("div", {}, el("label", { text: "FPS" }), fps), el("div", {}, el("label", { text: "Bitrate (kbps)" }), kbps)),
-    el("button", { class: "primary", onclick: applyQ, text: "Aplicar calidad" }),
-    s.width ? el("p", { class: "muted", style: "margin:0;font-size:12px", text: `Cámara entrega ${s.width}×${s.height} a ${s.frameRate} fps${s.effect && s.effect !== "none" ? " · con efecto de video" : ""}` }) : null,
-    el("h4", { text: "Dispositivos" }),
+    el("div", { class: "row" }, el("div", { class: "grow" }, el("label", { text: t("studiojs.resolution") }), q), el("div", {}, el("label", { text: t("studiojs.fps") }), fps), el("div", {}, el("label", { text: t("studiojs.bitrate") }), kbps)),
+    el("button", { class: "primary", onclick: applyQ, text: t("studiojs.applyQuality") }),
+    s.width ? el("p", { class: "muted", style: "margin:0;font-size:12px", text: t("studiojs.cameraDelivers", { width: s.width, height: s.height, fps: s.frameRate }) + (s.effect && s.effect !== "none" ? t("studiojs.withEffectSuffix") : "") }) : null,
+    el("h4", { text: t("studiojs.devices") }),
     snap ? el("div", { class: "col" },
-      el("div", {}, el("label", { text: "📷 Cámara" }), (s.cams || []).length ? cam : el("p", { class: "muted", text: "Sin cámaras" })),
-      el("div", {}, el("label", { text: "🎙️ Micrófono" }), (s.mics || []).length ? mic : el("p", { class: "muted", text: "Sin micrófonos" })),
-      el("div", {}, el("label", { text: "Ganancia " }, gainLbl), gain),
-      el("div", { class: "row wrap" }, chk("echo", "Eco"), chk("denoise", "Ruido"), chk("autogain", "Ganancia auto"), chk("stereo", "Estéreo HQ")),
-      camctl.children.length ? el("details", { class: "camdetails" }, el("summary", { text: "🎛️ Controles de su cámara" }), camctl) : null)
-      : el("p", { class: "muted", text: "Pidiendo la lista de dispositivos…" }),
-    el("h4", { text: "Acciones" }),
-    el("div", { class: "row" }, msg, el("button", { class: "small", onclick: sendMsg, text: "Enviar" })),
+      el("div", {}, el("label", { text: t("studiojs.labelCamera") }), (s.cams || []).length ? cam : el("p", { class: "muted", text: t("studiojs.noCameras") })),
+      el("div", {}, el("label", { text: t("studiojs.labelMic") }), (s.mics || []).length ? mic : el("p", { class: "muted", text: t("studiojs.noMics") })),
+      el("div", {}, el("label", { text: t("studiojs.gain") + " " }, gainLbl), gain),
+      el("div", { class: "row wrap" }, chk("echo", t("studiojs.audioEcho")), chk("denoise", t("studiojs.audioNoise")), chk("autogain", t("studiojs.audioAutoGain")), chk("stereo", t("studiojs.audioStereoHQ"))),
+      camctl.children.length ? el("details", { class: "camdetails" }, el("summary", { text: t("studiojs.cameraControlsTitle") }), camctl) : null)
+      : el("p", { class: "muted", text: t("studiojs.askingDevices") }),
+    el("h4", { text: t("studiojs.actions") }),
+    el("div", { class: "row" }, msg, el("button", { class: "small", onclick: sendMsg, text: t("studiojs.send") })),
     el("div", { class: "row wrap" },
-      el("button", { class: "small", onclick: () => req(peerId, p.mic === false ? "unmute" : "mute"), text: p.mic === false ? "🎙️ Pedir audio" : "🔇 Silenciar mic" }),
-      el("button", { class: "small", onclick: () => req(peerId, p.cam === false ? "camon" : "camoff"), text: p.cam === false ? "📷 Pedir cámara" : "📷 Apagar cámara" }),
-      el("button", { class: "small", onclick: () => req(peerId, "screenon"), text: "🖥️ Pedir pantalla" }),
-      el("button", { class: "small", onclick: () => req(peerId, "deafen"), text: "🙉 Que no escuche" }),
-      el("button", { class: "small", onclick: () => req(peerId, "undeafen"), text: "👂 Que escuche" }),
-      el("button", { class: "small", onclick: () => confirm(`¿Recargar la página de ${p.name}?`) && req(peerId, "reload"), text: "🔄 Recargar" }),
-      el("button", { class: "small", onclick: () => { const to = prompt("ID de la sala de destino (debe existir)"); if (to) req(peerId, "transfer", to.trim().toLowerCase()); }, text: "➡️ Mover a otra sala" }),
-      el("button", { class: "small danger", onclick: () => confirm(`¿Expulsar a ${p.name}?`) && (sig.send({ type: "kick", target: peerId }), closeRemote()), text: "🚫 Expulsar" })),
+      el("button", { class: "small", onclick: () => req(peerId, p.mic === false ? "unmute" : "mute"), text: p.mic === false ? t("studiojs.remoteAskAudio") : t("studiojs.remoteMuteMic") }),
+      el("button", { class: "small", onclick: () => req(peerId, p.cam === false ? "camon" : "camoff"), text: p.cam === false ? t("studiojs.remoteAskCamera") : t("studiojs.remoteCameraOff") }),
+      el("button", { class: "small", onclick: () => req(peerId, "screenon"), text: t("studiojs.remoteAskScreen") }),
+      el("button", { class: "small", onclick: () => req(peerId, "deafen"), text: t("studiojs.remoteDeafen") }),
+      el("button", { class: "small", onclick: () => req(peerId, "undeafen"), text: t("studiojs.remoteUndeafen") }),
+      el("button", { class: "small", onclick: () => confirm(t("studiojs.reloadConfirm", { name: p.name })) && req(peerId, "reload"), text: t("studiojs.remoteReload") }),
+      el("button", { class: "small", onclick: () => { const to = prompt(t("studiojs.transferPrompt")); if (to) req(peerId, "transfer", to.trim().toLowerCase()); }, text: t("studiojs.remoteTransfer") }),
+      el("button", { class: "small danger", onclick: () => confirm(t("studiojs.kickConfirm", { name: p.name })) && (sig.send({ type: "kick", target: peerId }), closeRemote()), text: t("studiojs.remoteKick") })),
   );
 }
 sig.on("peer-left", (m) => { if (remote?.peerId === m.peerId) { closeRemote(); } });
@@ -1036,7 +1054,7 @@ const resumeStudioAudio = async () => {
       const tracks = kind === "audio" ? source.stream.getAudioTracks() : source.stream.getVideoTracks();
       if (tracks.some(t => t.readyState === "ended")) await onPrefChange(prefs, kind, true);
     }
-  } catch (e) { if (!sig.closed) toast(`No se pudo recuperar el dispositivo: ${explain(e)}`, "err"); }
+  } catch (e) { if (!sig.closed) toast(t("studiojs.restoreDeviceFailed", { error: explain(e) }), "err"); }
   finally { restoringHostCapture = false; }
 };
 document.addEventListener("visibilitychange", resumeStudioAudio);
@@ -1054,14 +1072,14 @@ function renderPersistence(info, restore = false) {
   persistence = info;
   $("#persistSave").disabled = !info.available || !info.password;
   $("#passwordRoomHelp").classList.toggle("hidden",info.password || !info.available);
-  $("#roomActionLabel").textContent=info.enabled ? "Sala guardada" : "Guardar sala";
+  $("#roomActionLabel").textContent = info.enabled ? t("studiojs.roomSavedLabel") : t("studiojs.saveRoom");
   $("#openRoomDialog").classList.toggle("is-saved",info.enabled);
-  $("#roomSavedState").textContent=info.enabled ? "Sala persistente" : "Sala temporal";
+  $("#roomSavedState").textContent = info.enabled ? t("studiojs.roomPersistent") : t("studiojs.roomTemporary");
   $("#roomSavedState").classList.toggle("green",info.enabled);
-  $("#persistSave").textContent=info.enabled ? "Guardar y renovar" : "Guardar sala";
-  $("#openRoomDialog").title=info.enabled ? (info.expires ? "Guardada hasta " + new Date(info.expires).toLocaleString() : "Guardada sin caducidad") : "Guardar ajustes, participantes y enlaces de OBS";
+  $("#persistSave").textContent = info.enabled ? t("studiojs.saveAndRenew") : t("studiojs.saveRoom");
+  $("#openRoomDialog").title = info.enabled ? (info.expires ? t("studiojs.titleSavedUntil", { date: new Date(info.expires).toLocaleString() }) : t("studiojs.savedForever")) : t("studiojs.saveRoomHint");
   $("#persistForget").classList.toggle("hidden", !info.enabled);
-  $("#persistStatus").textContent = !info.available ? "El servidor no tiene almacenamiento configurado." : !info.password ? "Esta sala no tiene contraseña. Crea un estudio con contraseña desde la portada para habilitar el guardado." : !info.enabled ? "Esta sala todavía no está guardada." : info.expires ? "Guardada hasta " + new Date(info.expires).toLocaleString() : "Guardada sin caducidad.";
+  $("#persistStatus").textContent = !info.available ? t("studiojs.persistNoStorage") : !info.password ? t("studiojs.persistNoPassword") : !info.enabled ? t("studiojs.persistNotSaved") : info.expires ? t("studiojs.statusSavedUntil", { date: new Date(info.expires).toLocaleString() }) : t("studiojs.statusSavedForever");
   if (restore && info.enabled) {
     $("#persistDays").value = String(info.days);
     const opt=info.options || {};
@@ -1081,10 +1099,10 @@ function renderPersistence(info, restore = false) {
   for (const [pass,name] of Object.entries(info.participants || {})) {
     const fragment=new URLSearchParams({invite:keys.inviteKey,participant:pass});
     const url=`${origin()}/guest?room=${encodeURIComponent(room)}&label=${encodeURIComponent(name)}#${fragment}`;
-    box.append(el("div",{class:"row"},el("span",{class:"grow",text:name}),el("button",{class:"small",text:"Enlace personal",onclick:()=>copy(url)})));
+    box.append(el("div",{class:"row"},el("span",{class:"grow",text:name}),el("button",{class:"small",text:t("studiojs.personalLink"),onclick:()=>copy(url)})));
   }
   for (const [id,source] of Object.entries(info.sources || {})) {
-    box.append(el("div",{class:"row"},el("span",{class:"grow",text:state.labels?.[id] || source.kind || id}),el("button",{class:"small",text:"Link OBS guardado",onclick:()=>copy(obsURL(id))})));
+    box.append(el("div",{class:"row"},el("span",{class:"grow",text:state.labels?.[id] || source.kind || id}),el("button",{class:"small",text:t("studiojs.savedObsLink"),onclick:()=>copy(obsURL(id))})));
   }
 }
 sig.on("persistence",m=>renderPersistence(m.persistence));
@@ -1094,11 +1112,11 @@ async function saveRoomOptions(action="") {
   renderPersistence(result);
 }
 $("#persistSave").onclick=async()=>{
-  const btn=$("#persistSave");btn.disabled=true;btn.textContent="Guardando…";
-  try { await saveRoomOptions(); toast("Sala y ajustes guardados"); } catch(e) { toast(e.message,"err"); }
+  const btn=$("#persistSave");btn.disabled=true;btn.textContent = t("studiojs.saving");
+  try { await saveRoomOptions(); toast(t("studiojs.roomSavedToast")); } catch(e) { toast(e.message,"err"); }
   finally { if (persistence) renderPersistence(persistence); }
 };
-$("#persistForget").onclick=async()=>{ try { await sig.request({type:"forget-room"}); toast("Persistencia desactivada; la sala actual sigue abierta"); } catch(e) { toast(e.message,"err"); } };
+$("#persistForget").onclick=async()=>{ try { await sig.request({type:"forget-room"}); toast(t("studiojs.persistenceDisabled")); } catch(e) { toast(e.message,"err"); } };
 function scheduleRoomOptions() {
   if (!persistence?.enabled) return;
   clearTimeout(optionsSaveTimer);
@@ -1113,3 +1131,21 @@ for (const id of ["openRoomDialog","roomDetails"]) $("#"+id).onclick=()=>{
 };
 $("#closeRoomDialog").onclick=()=>roomDialog.close();
 $("#copyHostLink").onclick=()=>copy(`${origin()}/studio?room=${encodeURIComponent(room)}#key=${encodeURIComponent(hostKey)}`);
+
+// One handler relabels every visible string this module owns: buttons, scene
+// bar, tiles, badges, dialogs and relay messages, without a page reload.
+onLangChange(() => {
+  renderLayoutButtons();
+  renderRelayAccess();
+  renderAll();
+  renderKnocks();
+  renderBanners();
+  renderScenes();
+  renderDests();
+  syncMonitor();
+  $("#addCam").textContent = hostCamId ? t("studiojs.anotherCamera") : t("studiojs.btnCamera");
+  $("#activePanelTitle").textContent = $("#tabs button[data-tab].active")?.textContent || t("studiojs.panelProduction");
+  paintStatus();
+  if (remote) renderRemote();
+  if (persistence) renderPersistence(persistence);
+});

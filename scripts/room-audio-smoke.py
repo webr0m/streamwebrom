@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory(prefix='swr-multiparty-') as folder,sync_playwr
     with wave.open(str(tone),'wb') as w:
         w.setparams((1,2,48000,0,'NONE','not compressed'));w.writeframes(b''.join(struct.pack('<h',int(8000*math.sin(2*math.pi*440*i/48000))) for i in range(144000)))
     browser=pw.chromium.launch(headless=True,executable_path=a.browser,args=flags+['--use-file-for-fake-audio-capture='+str(tone)])
-    ctx=browser.new_context(permissions=['camera','microphone'],service_workers='block',viewport={'width':1440,'height':1000});ctx.add_init_script(INIT)
+    ctx=browser.new_context(locale='es-ES',permissions=['camera','microphone'],service_workers='block',viewport={'width':1440,'height':1000});ctx.add_init_script(INIT)
     keys=ctx.request.post(a.url+'/api/rooms',data={'room':'audio-'+str(time.time_ns()),'password':'InternalTestOnly'}).json()
     errors=[]
     def page():
