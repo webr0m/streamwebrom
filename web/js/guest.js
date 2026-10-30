@@ -367,9 +367,9 @@ async function remoteControl(action, v) {
       return report("devices", await remoteSnapshot(media, prefs, { videoKbps: videoKbps() }));
     }
     case "camctl": {
-      const t = camTrack();
-      if (!t || !CAMCTL.includes(v?.name)) throw new Error(t("misc.guestCamControl"));
-      await t.applyConstraints({ advanced: [{ [v.name]: v.value }] });
+      const track = camTrack();
+      if (!track || !CAMCTL.includes(v?.name)) throw new Error(t("misc.guestCamControl"));
+      await track.applyConstraints({ advanced: [{ [v.name]: v.value }] });
       return;
     }
     case "gain": {
@@ -469,7 +469,7 @@ function addTile(id, stream, name, mine, level, kind = "camera", owner = "") {
     el("button", { class: "tile-focus", type: "button", "aria-label": t("guest.focusAria", { name }), "aria-pressed": "false" }),
     el("span", { class: "name", text: name }), vol);
   $("#grid").append(tile); updateHiddenCameras(); telemetry.refresh();
-  const t = setInterval(() => { if (!tile.isConnected) return clearInterval(t); tile.classList.toggle("speaking", level() > 0.15); }, 150);
+  const speakingTimer = setInterval(() => { if (!tile.isConnected) return clearInterval(speakingTimer); tile.classList.toggle("speaking", level() > 0.15); }, 150);
   return tile;
 }
 
