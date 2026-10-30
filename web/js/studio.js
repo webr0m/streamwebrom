@@ -143,14 +143,16 @@ function sceneURL(n, extra = "") {
 const mixer = new AudioMixer();
 
 // ---------- connection ----------
-function setStatus(t, cls = "") { const s = $("#status"); s.textContent = t; s.className = "pill " + cls; }
+let statusState = { key: "studio.connecting", cls: "" };
+function paintStatus() { const s = $("#status"); s.textContent = t(statusState.key); s.className = "pill " + statusState.cls; s.removeAttribute("data-i18n"); }
+function setStatus(key, cls = "") { statusState = { key, cls }; paintStatus(); }
 
 let hostGeneration = 0, hostLossTimer;
 sig.on("disconnected", () => {
   hostGeneration++;
   clearTimeout(hostLossTimer);
-  setStatus(t("studiojs.statusUpdating"));
-  hostLossTimer = setTimeout(() => { if (!sig.ready) setStatus(t("studiojs.statusOffline"), "red"); },10000);
+  setStatus("studiojs.statusUpdating");
+  hostLossTimer = setTimeout(() => { if (!sig.ready) setStatus("studiojs.statusOffline", "red"); },10000);
 });
 sig.on("reconnected", async (m) => {
   const generation = hostGeneration, socket = sig.ws;
@@ -183,7 +185,7 @@ sig.on("reconnected", async (m) => {
     }
   }
   if (generation !== hostGeneration || socket !== sig.ws) return;
-  renderBackstage(); syncAudio(); setStatus(t("studiojs.statusConnected"), "green");
+  renderBackstage(); syncAudio(); setStatus("studiojs.statusConnected", "green");
 });
 
 function onWelcome(m) {
@@ -200,8 +202,8 @@ function onWelcome(m) {
 }
 
 sig.connect({ type: "join", room, role: "host", key: hostKey, name: "Anfitrión" })
-  .then((m) => { onWelcome(m); setStatus(t("studiojs.statusConnected"), "green"); })
-  .catch((e) => { setStatus(t("studiojs.statusError"), "red"); toast(t("studiojs.joinFailed", { error: e.message }), "err"); });
+  .then((m) => { onWelcome(m); setStatus("studiojs.statusConnected", "green"); })
+  .catch((e) => { setStatus("studiojs.statusError", "red"); toast(t("studiojs.joinFailed", { error: e.message }), "err"); });
 
 sig.on("state", (m) => { state = m.state; $("#bandwidthMode").value = state.bandwidth || "balanced"; renderRelayAccess(); renderState(); });
 sig.on("peer-joined", (m) => { peers.set(m.peer.id, m.peer); renderPeople(); toast(t("studiojs.peerJoined", { name: m.peer.name })); });
@@ -1143,6 +1145,7 @@ onLangChange(() => {
   syncMonitor();
   $("#addCam").textContent = hostCamId ? t("studiojs.anotherCamera") : t("studiojs.btnCamera");
   $("#activePanelTitle").textContent = $("#tabs button[data-tab].active")?.textContent || t("studiojs.panelProduction");
+  paintStatus();
   if (remote) renderRemote();
   if (persistence) renderPersistence(persistence);
 });
