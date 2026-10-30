@@ -2,58 +2,58 @@
 <html lang="es">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Unirse · StreamWebRom</title>
+<title data-i18n="guest.pageTitle">Unirse · StreamWebRom</title>
 <link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#141518"><link rel="apple-touch-icon" href="/img/icon-192.png"><script src="/js/appearance.js"></script><link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
 <section id="pre" class="prejoin">
   <div class="col">
-    <div class="guest-heading"><a class="brand" href="/"><img src="/img/logo.svg" alt="">StreamWebRom</a><select data-theme-picker aria-label="Tema visual"><option value="light">Día</option><option value="dark">Noche</option><option value="auto">Automático</option></select></div>
+    <div class="guest-heading"><a class="brand" href="/"><img src="/img/logo.svg" alt="">StreamWebRom</a><span class="lang-slot" data-lang-slot></span><select data-theme-picker data-i18n-aria="guest.themeAria" aria-label="Tema visual"><option value="light" data-i18n="guest.themeDay">Día</option><option value="dark" data-i18n="guest.themeNight">Noche</option><option value="auto" data-i18n="guest.themeAuto">Automático</option></select></div>
     <div class="preview"><video id="preview" muted playsinline autoplay></video></div>
     <div class="muted" id="devWarn" style="font-size:12px"></div>
     <div class="meter"><i id="meter"></i></div>
   </div>
   <div class="card col">
-    <h2 id="roomTitle">Unirse al programa</h2>
-    <div><label for="name">Tu nombre</label><input id="name" maxlength="40" autocomplete="name"></div>
-    <div id="pwBox" class="hidden"><label for="pw">Contraseña</label><input id="pw" type="password" maxlength="128"></div>
+    <h2 id="roomTitle" data-i18n="guest.joinTitle">Unirse al programa</h2>
+    <div><label for="name" data-i18n="guest.nameLabel">Tu nombre</label><input id="name" maxlength="40" autocomplete="name"></div>
+    <div id="pwBox" class="hidden"><label for="pw" data-i18n="guest.passwordLabel">Contraseña</label><input id="pw" type="password" maxlength="128"></div>
     <div id="devPre" class="col"></div>
     <div id="camCtlPre"></div>
-    <details><summary>Opciones avanzadas de conexión</summary>
-      <label for="networkMode">Conexión</label>
-      <select id="networkMode"><option value="auto">Automática (recomendada)</option><option value="tls">Red móvil: conexión cifrada por 443</option><option value="local">Alternativa: relé del equipo anfitrión</option></select>
+    <details><summary data-i18n="guest.advanced">Opciones avanzadas de conexión</summary>
+      <label for="networkMode" data-i18n="guest.connection">Conexión</label>
+      <select id="networkMode"><option value="auto" data-i18n="guest.netAuto">Automática (recomendada)</option><option value="tls" data-i18n="guest.netTls">Red móvil: conexión cifrada por 443</option><option value="local" data-i18n="guest.netLocal">Alternativa: relé del equipo anfitrión</option></select>
     </details>
-    <button class="primary" id="joinBtn">Entrar</button>
-    <p class="muted" id="hint" style="margin:0;font-size:12px">Tu video solo sale en vivo cuando el anfitrión te sube al escenario.</p>
+    <button class="primary" id="joinBtn" data-i18n="guest.join">Entrar</button>
+    <p class="muted" id="hint" style="margin:0;font-size:12px" data-i18n="guest.hint">Tu video solo sale en vivo cuando el anfitrión te sube al escenario.</p>
   </div>
 </section>
 
-<section id="waiting" class="landing hidden"><div class="card"><h2>Esperando al anfitrión…</h2><p class="muted">Te dejarán entrar en un momento.</p></div></section>
+<section id="waiting" class="landing hidden"><div class="card"><h2 data-i18n="guest.waitingTitle">Esperando al anfitrión…</h2><p class="muted" data-i18n="guest.waitingText">Te dejarán entrar en un momento.</p></div></section>
 
 <section id="call" class="call hidden">
   <div id="connection" class="connection-status hidden" role="status" aria-live="polite">
     <p id="connectionText"></p>
-    <a href="/diagnostics" target="_blank" rel="noopener">Diagnóstico de conexión</a>
+    <a href="/diagnostics" target="_blank" rel="noopener" data-i18n="guest.diagnosticsLink">Diagnóstico de conexión</a>
   </div>
-  <div class="call-grid-tools"><span id="roomPing" title="Ping de señalización entre tu equipo y la sala">Sala —</span><div class="row"><button id="networkToggle" class="small" aria-pressed="true">Latencias</button><button id="reorderGrid" class="small" aria-pressed="false">Reordenar</button><button id="restoreGrid" class="small hidden">Ver todos</button><button id="floatingVideo" class="small hidden">Ventana flotante</button><button id="enableAudio" class="small primary hidden">Activar audio de la sala</button><button id="callFullscreen" class="small" aria-pressed="false">Pantalla completa</button></div></div>
-  <button id="exitFullscreen" class="immersive-exit small hidden">Salir de pantalla completa</button>
-  <div id="screenShareStatus" class="screen-share-status hidden" role="status" aria-live="polite"><span id="screenShareText" class="grow"></span><button id="startScreen" class="small primary hidden">Compartir pantalla</button><button id="cancelScreen" class="small">Cancelar</button></div>
+  <div class="call-grid-tools"><span id="roomPing" data-i18n-title="guest.roomPingTitle" title="Ping de señalización entre tu equipo y la sala" data-i18n="guest.roomLabel">Sala —</span><div class="row"><button id="networkToggle" class="small" aria-pressed="true" data-i18n="guest.latencies">Latencias</button><button id="reorderGrid" class="small" aria-pressed="false" data-i18n="guest.reorder">Reordenar</button><button id="restoreGrid" class="small hidden" data-i18n="guest.viewAll">Ver todos</button><button id="floatingVideo" class="small hidden" data-i18n="guest.pip">Ventana flotante</button><button id="enableAudio" class="small primary hidden" data-i18n="guest.enableAudio">Activar audio de la sala</button><button id="callFullscreen" class="small" aria-pressed="false" data-i18n="guest.fullscreen">Pantalla completa</button></div></div>
+  <button id="exitFullscreen" class="immersive-exit small hidden" data-i18n="guest.exitFullscreen">Salir de pantalla completa</button>
+  <div id="screenShareStatus" class="screen-share-status hidden" role="status" aria-live="polite"><span id="screenShareText" class="grow"></span><button id="startScreen" class="small primary hidden" data-i18n="guest.shareScreen">Compartir pantalla</button><button id="cancelScreen" class="small" data-i18n="guest.cancel">Cancelar</button></div>
   <div class="grid" id="grid"></div>
   <div class="bar">
-    <button class="icon on" id="micBtn" data-icon="mic" title="Micrófono (M)" aria-label="Micrófono"></button>
-    <button class="icon on" id="camBtn" data-icon="cam" title="Cámara (V)" aria-label="Cámara"></button>
-    <button class="icon" id="screenBtn" data-icon="screen" title="Compartir pantalla" aria-label="Compartir pantalla"></button>
-    <button class="icon" id="cam2Btn" data-icon="plus" title="Agregar otra cámara" aria-label="Agregar otra cámara"></button>
-    <button class="icon" id="setBtn" data-icon="settings" title="Cámara, micrófono y audífonos" aria-label="Ajustes"></button>
-    <button class="icon" id="handBtn" data-icon="hand" title="Levantar la mano" aria-label="Levantar la mano"></button>
-    <button class="icon" id="reactBtn" data-icon="smile" title="Reaccionar" aria-label="Reaccionar"></button>
-    <button class="icon" id="chatBtn" data-icon="chat" title="Chat" aria-label="Chat"></button>
+    <button class="icon on" id="micBtn" data-icon="mic" data-i18n-title="guest.micTitle" title="Micrófono (M)" data-i18n-aria="guest.mic" aria-label="Micrófono"></button>
+    <button class="icon on" id="camBtn" data-icon="cam" data-i18n-title="guest.camTitle" title="Cámara (V)" data-i18n-aria="guest.camera" aria-label="Cámara"></button>
+    <button class="icon" id="screenBtn" data-icon="screen" data-i18n-title="guest.shareScreen" title="Compartir pantalla" data-i18n-aria="guest.shareScreen" aria-label="Compartir pantalla"></button>
+    <button class="icon" id="cam2Btn" data-icon="plus" data-i18n-title="guest.addCamera" title="Agregar otra cámara" data-i18n-aria="guest.addCamera" aria-label="Agregar otra cámara"></button>
+    <button class="icon" id="setBtn" data-icon="settings" data-i18n-title="guest.settingsTitle" title="Cámara, micrófono y audífonos" data-i18n-aria="guest.settings" aria-label="Ajustes"></button>
+    <button class="icon" id="handBtn" data-icon="hand" data-i18n-title="guest.raiseHand" title="Levantar la mano" data-i18n-aria="guest.raiseHand" aria-label="Levantar la mano"></button>
+    <button class="icon" id="reactBtn" data-icon="smile" data-i18n-title="guest.react" title="Reaccionar" data-i18n-aria="guest.react" aria-label="Reaccionar"></button>
+    <button class="icon" id="chatBtn" data-icon="chat" data-i18n-title="guest.chat" title="Chat" data-i18n-aria="guest.chat" aria-label="Chat"></button>
     <span class="pill" id="stageState">backstage</span>
-    <button class="danger" id="leaveBtn" data-icon="leave">Salir</button>
+    <button class="danger" id="leaveBtn" data-icon="leave" data-i18n="guest.leave">Salir</button>
   </div>
   <div class="card drawer hidden" id="chat">
     <div class="chatlog" id="chatlog"></div>
-    <div class="row"><input id="chatInput" maxlength="500" placeholder="Mensaje…"><button id="chatSend" class="primary">Enviar</button></div>
+    <div class="row"><input id="chatInput" maxlength="500" data-i18n-placeholder="guest.messagePlaceholder" placeholder="Mensaje…"><button id="chatSend" class="primary" data-i18n="guest.send">Enviar</button></div>
   </div>
   <div class="card hidden" id="reactions" style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);display:flex;gap:6px;padding:8px"></div>
 </section>

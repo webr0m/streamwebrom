@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright, expect
 p=argparse.ArgumentParser();p.add_argument('--url',default='http://localhost:18443');p.add_argument('--browser');p.add_argument('--screenshots');args=p.parse_args()
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required'])
-    ctx=browser.new_context(viewport={'width':1440,'height':900},color_scheme='light',service_workers='block',permissions=['camera','microphone'])
+    ctx=browser.new_context(locale='es-ES',viewport={'width':1440,'height':900},color_scheme='light',service_workers='block',permissions=['camera','microphone'])
     keys=ctx.request.post(args.url+'/api/rooms',data={'room':'interface-'+str(time.time_ns()),'title':'Estudio de prueba','password':'interface-password'}).json()
     page=ctx.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(args.url+'/studio?room='+keys['room']+'#key='+keys['hostKey'])
@@ -69,6 +69,17 @@ with sync_playwright() as pw:
     no_pw=ctx.request.post(args.url+'/api/rooms',data={'room':'temporary-'+str(time.time_ns())}).json()
     home.goto(args.url+'/studio?room='+no_pw['room']+'#key='+no_pw['hostKey']);expect(home.locator('#status')).to_have_text('conectado')
     home.locator('#openRoomDialog').click();expect(home.locator('#persistSave')).to_be_disabled();expect(home.locator('#persistStatus')).to_contain_text('no tiene contraseña')
+    # Localisation: ?lang wins, the picker switches live and the choice sticks.
+    i18n=ctx.new_page();i18n.goto(args.url+'/?lang=ru')
+    expect(i18n.locator('html')).to_have_attribute('lang','ru')
+    cyrillic=[c for c in i18n.locator('body').inner_text() if '\u0400'<=c<='\u04FF']
+    assert len(cyrillic)>=20,('russian copy missing',len(cyrillic))
+    i18n.locator('[data-lang-picker]').first.select_option('en')
+    expect(i18n.locator('html')).to_have_attribute('lang','en')
+    i18n.reload();expect(i18n.locator('html')).to_have_attribute('lang','en')
+    i18n.locator('[data-lang-picker]').first.select_option('es')
+    expect(i18n.locator('html')).to_have_attribute('lang','es')
+    i18n.close()
     assert not errors,errors
-    print(json.dumps({'directSaveMenu':True,'passwordRequirementVisible':True,'savedRoomShownOnHome':True,'themesPersistAndSync':True,'programPixelsUnchanged':True,'panelsCollapseAndRestore':True,'responsiveSizes':tested,'pageErrors':errors}),flush=True)
+    print(json.dumps({'directSaveMenu':True,'passwordRequirementVisible':True,'savedRoomShownOnHome':True,'themesPersistAndSync':True,'programPixelsUnchanged':True,'panelsCollapseAndRestore':True,'localisationSwitchesAndPersists':True,'responsiveSizes':tested,'pageErrors':errors}),flush=True)
     ctx.close();browser.close()

@@ -1,5 +1,7 @@
 // Interoperability with the unmodified official hosted application. No
 // VDO.Ninja code, TURN credentials, or private signalling is redistributed.
+import { t, onLangChange } from "./i18n.js";
+
 export const VDO_ORIGIN = "https://vdo.ninja";
 
 const shortPrefix = value => value.replace(/[^a-z0-9]/g, "").slice(0,5) || "swr";
@@ -12,12 +14,12 @@ export function vdoRoomID(value) {
   // and guest links still select the same room without truncating randomness.
   const legacy = /^([a-z0-9_-]{3,32})-([a-f0-9]{32})$/.exec(value);
   if (legacy) return compactRoom(legacy[1], legacy[2]);
-  if (!/^[a-zA-Z0-9_]{6,30}$/.test(value)) throw new Error("El identificador VDO.Ninja admite de 6 a 30 letras, números o guion bajo. Crea una sala nueva.");
+  if (!/^[a-zA-Z0-9_]{6,30}$/.test(value)) throw new Error(t("misc.vdoBadId"));
   return value;
 }
 
 export function vdoLinks(id, password = "") {
-  if (!/^[a-zA-Z0-9_-]{6,128}$/.test(id) || (password && !/^[a-zA-Z0-9]{1,49}$/.test(password))) throw new Error("Identificador o contraseña VDO.Ninja inválido (contraseña: hasta 49 letras y números)");
+  if (!/^[a-zA-Z0-9_-]{6,128}$/.test(id) || (password && !/^[a-zA-Z0-9]{1,49}$/.test(password))) throw new Error(t("misc.vdoBadIdOrPassword"));
   const link = mode => {
     const u = new URL(VDO_ORIGIN + "/");
     u.searchParams.set(mode, id);
@@ -30,8 +32,8 @@ export function vdoLinks(id, password = "") {
 
 export function parseVdoView(value) {
   let u;
-  try { u = new URL(value); } catch { throw new Error("Pega un enlace de visualización de https://vdo.ninja/"); }
-  if (u.origin !== VDO_ORIGIN || u.pathname !== "/" || u.username || u.password || !u.searchParams.get("view")) throw new Error("Solo se admiten enlaces de visualización del sitio oficial https://vdo.ninja/");
+  try { u = new URL(value); } catch { throw new Error(t("misc.vdoPasteViewLink")); }
+  if (u.origin !== VDO_ORIGIN || u.pathname !== "/" || u.username || u.password || !u.searchParams.get("view")) throw new Error(t("misc.vdoOfficialOnly"));
   // Rebuild using only the documented camera/view options. Never accept
   // arbitrary frame destinations, injected scripts or custom TURN endpoints.
   const secret = new URLSearchParams(u.hash.slice(1));
@@ -45,18 +47,18 @@ export function newVdoLinks() {
 
 export function newVdoRoom(prefix = "", password = "", title = "") {
   const token = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toString(16).padStart(2,"0")).join("");
-  if (password && !/^[a-zA-Z0-9]{1,49}$/.test(password)) throw new Error("VDO.Ninja requiere una contraseña de 1 a 49 letras y números, sin espacios ni acentos.");
-  if (prefix && !/^[a-z0-9_-]{3,32}$/.test(prefix)) throw new Error("El prefijo VDO admite 3 a 32 letras minúsculas, números, guion y guion bajo.");
+  if (password && !/^[a-zA-Z0-9]{1,49}$/.test(password)) throw new Error(t("misc.vdoBadPassword"));
+  if (prefix && !/^[a-z0-9_-]{3,32}$/.test(prefix)) throw new Error(t("misc.vdoBadPrefix"));
   return { room: compactRoom(prefix || "swr",token()), password: password || token(), directorKey: token(), title: title.slice(0,120), created:Date.now() };
 }
 
 export function vdoRoomLinks(config) {
   const { password, directorKey } = config, room = vdoRoomID(config.room);
-  if (!/^[a-zA-Z0-9]{1,49}$/.test(password || "")) throw new Error("Enlace de sala VDO.Ninja incompleto o inválido");
+  if (!/^[a-zA-Z0-9]{1,49}$/.test(password || "")) throw new Error(t("misc.vdoLinkIncomplete"));
   const link = role => {
     const u = new URL(VDO_ORIGIN + "/"), secret = new URLSearchParams({ p:password });
     if (role === "host") {
-      if (!/^[a-f0-9]{32}$/.test(directorKey || "")) throw new Error("Falta la clave del anfitrión VDO.Ninja");
+      if (!/^[a-f0-9]{32}$/.test(directorKey || "")) throw new Error(t("misc.vdoHostKeyMissing"));
       u.searchParams.set("director",room); secret.set("codirector",directorKey);
     } else {
       u.searchParams.set("room",room);
@@ -68,19 +70,24 @@ export function vdoRoomLinks(config) {
 }
 
 export function vdoHostPath(config) {
-  if (!vdoRoomLinks(config).host) throw new Error("Falta la clave del anfitrión VDO.Ninja");
+  if (!vdoRoomLinks(config).host) throw new Error(t("misc.vdoHostKeyMissing"));
   return `/vdo?room=${encodeURIComponent(vdoRoomID(config.room))}#${new URLSearchParams({ p:config.password, directorKey:config.directorKey, title:config.title || "" })}`;
 }
 
 export function mountVdo({ root, onCapture, copy, notify }) {
   const get = id => root.querySelector("#" + id);
-  let frame = null, links = null, captureBusy = false;
+  let frame = null, links = null, captureBusy = false, helpKey = "";
+  const paintHelp = () => {
+    const help = get("vdoCaptureHelp");
+    if (help && helpKey) help.textContent = t(helpKey);
+  };
+  const stopLang = onLangChange(() => { paintHelp(); if (frame) frame.title = t("misc.vdoExternalView"); });
   const clearFrame = () => { frame?.remove(); frame = null; get("vdoPreview").replaceChildren(); get("vdoPreview").classList.add("hidden"); };
   function connect(next) {
     clearFrame(); links = next;
     get("vdoURL").value = links.viewer;
     frame = document.createElement("iframe");
-    frame.title = "Vista externa de VDO.Ninja";
+    frame.title = t("misc.vdoExternalView");
     frame.referrerPolicy = "no-referrer";
     frame.allow = "autoplay; fullscreen; picture-in-picture";
     frame.src = links.viewer;
@@ -88,7 +95,8 @@ export function mountVdo({ root, onCapture, copy, notify }) {
     get("vdoPreview").append(frame); get("vdoPreview").classList.remove("hidden");
     for (const id of ["vdoCopyInvite", "vdoOpenView", "vdoCopyOBS"]) get(id).disabled = false;
     get("vdoCapture").disabled = !navigator.mediaDevices?.getDisplayMedia;
-    get("vdoCaptureHelp").textContent = navigator.mediaDevices?.getDisplayMedia ? "Para llevar esta cámara al escenario, abre el visor y captura su pestaña. Selecciona también «Compartir audio»." : "Este navegador permite la vista previa y el enlace OBS. Para incorporar la cámara al escenario, abre el estudio desde un computador que permita capturar pestañas.";
+    helpKey = navigator.mediaDevices?.getDisplayMedia ? "misc.vdoCaptureHelpTab" : "misc.vdoCaptureHelpPlain";
+    paintHelp();
   }
   get("vdoNew").onclick = () => connect(newVdoLinks());
   get("vdoConnect").onclick = () => { try { connect(parseVdoView(get("vdoURL").value)); } catch(e) { notify(e.message); } };
@@ -103,5 +111,5 @@ export function mountVdo({ root, onCapture, copy, notify }) {
   };
   get("vdoClose").onclick = () => root.close();
   root.addEventListener("close", clearFrame);
-  return { destroy: clearFrame };
+  return { destroy: () => { stopLang(); clearFrame(); } };
 }

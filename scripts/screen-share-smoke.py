@@ -13,7 +13,7 @@ args=parser.parse_args()
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=[
         '--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required'])
-    context=browser.new_context(permissions=['camera','microphone'],service_workers='block')
+    context=browser.new_context(locale='es-ES',permissions=['camera','microphone'],service_workers='block')
     keys=context.request.post(args.url+'/api/rooms',data={'room':'share-'+str(time.time_ns()),'lobby':False}).json()
     errors=[]
     host=context.new_page();host.on('pageerror',lambda e:errors.append(str(e)))

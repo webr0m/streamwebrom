@@ -15,7 +15,7 @@ if not host_key or not room_password:parser.error('Set SWR_TEST_HOST_KEY and SWR
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required'])
     for block_primary in [False, True]:
-        context=browser.new_context(permissions=['camera','microphone'],service_workers='block')
+        context=browser.new_context(locale='es-ES',permissions=['camera','microphone'],service_workers='block')
         host=context.new_page();host.goto(args.url+'/diagnostics')
         cfg=host.evaluate("fetch('/api/config').then(r=>r.json())")
         assert cfg.get('relay',{}).get('provider')=='local' and cfg.get('localIce'), 'Public config must remain local'

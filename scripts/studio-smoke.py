@@ -13,7 +13,7 @@ args=parser.parse_args()
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=[
         '--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required'])
-    context=browser.new_context(permissions=['camera','microphone'],service_workers='block')
+    context=browser.new_context(locale='es-ES',permissions=['camera','microphone'],service_workers='block')
     keys=context.request.post(args.url+'/api/rooms',data={'room':'studio-'+str(time.time_ns()),'lobby':False,'password':'smoke-password'}).json()
     errors=[]
     host=context.new_page();host.on('pageerror',lambda e:errors.append(str(e)))
@@ -21,7 +21,7 @@ with sync_playwright() as pw:
     expect(host.locator('#status')).to_have_text('conectado',timeout=20000)
     host.locator('#addCam').click()
     expect(host.locator('#backstage .tile')).to_have_count(1,timeout=20000)
-    mobile=browser.new_context(permissions=['camera','microphone'],service_workers='block',has_touch=True,is_mobile=True,viewport={'width':851,'height':393})
+    mobile=browser.new_context(locale='es-ES',permissions=['camera','microphone'],service_workers='block',has_touch=True,is_mobile=True,viewport={'width':851,'height':393})
     guest=mobile.new_page();guest.on('pageerror',lambda e:errors.append(str(e)))
     guest.add_init_script("window.__battery={level:.63,charging:true};navigator.getBattery=async()=>__battery")
     guest.goto(args.url+'/guest?room='+keys['room']+'&label=Panelista&password=smoke-password&autostart=1#invite='+keys['inviteKey'])
