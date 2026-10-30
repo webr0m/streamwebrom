@@ -76,6 +76,8 @@ with sync_playwright() as pw:
     assert len(cyrillic)>=20,('russian copy missing',len(cyrillic))
     i18n.locator('[data-lang-picker]').first.select_option('en')
     expect(i18n.locator('html')).to_have_attribute('lang','en')
+    # An explicit ?lang outranks the saved choice, so drop it before reloading.
+    i18n.goto(args.url+'/');expect(i18n.locator('html')).to_have_attribute('lang','en')
     i18n.reload();expect(i18n.locator('html')).to_have_attribute('lang','en')
     i18n.locator('[data-lang-picker]').first.select_option('es')
     expect(i18n.locator('html')).to_have_attribute('lang','es')
