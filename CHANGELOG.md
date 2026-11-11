@@ -1,5 +1,9 @@
 # Cambios
 
+## v1.12.1 — Emisión a Telegram
+
+- Telegram está disponible en Destinos. Inicia una transmisión con una aplicación externa en tu canal, copia la URL y la clave de Telegram al estudio y pulsa «Emitir». El programa del estudio se envía por RTMP o RTMPS y la audiencia lo recibe en el canal.
+
 ## v1.12.0 — Captura avanzada con audio aislado
 
 - Cliente Windows x64 con la misma interfaz: ventanas con audio de aplicación, pantalla con audio del sistema sin el árbol de voces de la sala y pestañas de contenido con audio propio.

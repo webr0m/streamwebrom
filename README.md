@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.12.0:** Captura avanzada de ventanas, pestañas y sistema con audio aislado en Windows x64, conservando la interfaz del estudio. Selector web de fuentes y sonido, con protección frente al retorno de voces. [Captura avanzada](docs/CAPTURA-AVANZADA.md), [audio y segundo plano](docs/AUDIO-Y-SEGUNDO-PLANO.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.12.1:** Telegram como destino de emisión RTMP/RTMPS desde el estudio. Captura avanzada de ventanas, pestañas y sistema con audio aislado en Windows x64, conservando la interfaz del estudio. Selector web de fuentes y sonido, con protección frente al retorno de voces. [Captura avanzada](docs/CAPTURA-AVANZADA.md), [audio y segundo plano](docs/AUDIO-Y-SEGUNDO-PLANO.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 
