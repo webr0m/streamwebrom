@@ -4342,50 +4342,184 @@ git commit -m "feat(ui): add toast queue and per-domain error reporting"
 
 **Files:**
 - Create: `scripts/overflow-smoke.py`, `docs/OVERFLOW-GATE.md`
-- Modify: `.github/workflows/ci.yml` (job `browser`, paso nuevo tras `interface-smoke`), `Makefile` (target `overflow`)
+- Modify: `ui/src/styles/layout.css` (la corrección de causa raíz del Step 1), `ui/tests/shell.test.jsx`
+  (un ancla de texto CSS, en prosa: ver Step 2), `.github/workflows/ci.yml` (job `browser`, paso nuevo
+  tras el de `interface-smoke`, línea 111; job `test`, paso de la doc junto al `node --test` de la
+  línea 46), `Makefile` (target `overflow` y su entrada en `.PHONY`)
 
 **Interfaces:**
-- Consumes: `/studio?ui=next` con `nextStudioFixture` (Tasks 4–11) y un servidor Go en marcha.
-- Produces: `python scripts/overflow-smoke.py --url http://localhost:18443 [--browser RUTA]` con código de
-  salida 0 si no hay desbordamiento y 1 con la lista de selectores culpables. Viewports cubiertos:
-  `1440x900`, `1120x800`, `820x900`, `390x640`.
+- Consumes: `/studio?ui=next` con `nextStudioFixture` (Tasks 4-11), un servidor Go con el `web/`
+  recién construido, y un Chromium real.
+- Produces: `python scripts/overflow-smoke.py [--url http://localhost:18443] [--browser RUTA]` con
+  código 0 si no hay desbordamiento y 1 con la lista de culpables. Viewports: `1440x900`, `1120x800`,
+  `820x900`, `390x640`.
 
-- [ ] **Step 1: Escribir el smoke que falla**
+**Pre-vuelo medido** (2026-11-20, Chrome del sistema conducido por Playwright 1.64.0 contra el
+binario de este worktree sirviendo `js/studio-BPvmb7Zy.js`). Esta tarea existía para encontrar
+defectos de maqueta que jsdom no puede ver; los encontró antes de existir el gate, y cambia el
+alcance: no es solo escribir la puerta, es arreglar lo que la puerta denuncia.
+
+| Ancho | Antes (sin esperar el montaje: `.studio-root` = 0) | Antes, tras el montaje | Con la regla del Step 1 |
+|---|---|---|---|
+| 1440x900 | — | `top` 9px, `rail` 17px, `stage` 0x0, `dock` 9px; 9 elementos desbordando | `top` 57, `rail` 753, `stage` 626, `tray` 120, `dock` 57; 0 desbordes; doc 900/900 |
+| 1120x800 | — | igual que 1440 | 0 desbordes; doc 800/800 |
+| 820x900 | — | documento 1662px (scroll vertical) | 0 desbordes; doc 900/900 |
+| 390x640 | — | documento 2814px | 0 desbordes; doc 640/640 |
+
+La causa es una sola: `web/css/app.css:108` declara `.studio { display: grid; ... }` con
+`grid-template-areas: "top top top" "scenes main side"`, y el div donde monta React **lleva esa
+clase** (`web/studio.html:12`: `<div class="studio" id="studioRoot">`). El shell React era un ítem
+más de la rejilla heredada, alojado en la celda `top` de 68px. Añadido: `app.css:284` le pone
+`height: auto; min-height: 100%` por debajo de 1001px, que es lo que dejaba crecer el documento en
+móvil incluso con la rejilla anulada.
+
+- [ ] **Step 1: Quitar la causa raíz, solo en modo next**
+
+La Enmienda A1 congela el Studio legacy, así que `app.css` no se toca: el desmontaje se hace desde
+la hoja propia de React, que solo carga el modo next, anclada al `data-ui-mode` que `mountNext()` ya
+pone en el contenedor. El bloque es el fichero COMPLETO resultante (se añaden la regla y su comentario
+al final de lo que ya embarcó Task 9):
+
+```css
+/* ui/src/styles/layout.css */
+/* Balanced density: rail 216px, stage absorbs the rest, panel 340px. */
+.swr-shell {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr) 340px;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "top  top   top"
+    "rail stage panel"
+    "rail tray  panel"
+    "dock dock  dock";
+  gap: var(--swr-sp-2);
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 0;
+  padding: var(--swr-sp-2);
+  background: radial-gradient(120% 120% at 12% 0%, var(--swr-bg-raise), var(--swr-bg-deep) 62%);
+  color: var(--swr-text);
+  font-family: var(--swr-font-ui);
+  font-size: var(--swr-text-sm);
+  overflow: hidden;
+}
+.swr-shell > * { min-width: 0; min-height: 0; }
+[data-region="top"] { grid-area: top; }
+[data-region="rail"] { grid-area: rail; }
+[data-region="stage"] { grid-area: stage; }
+[data-region="tray"] { grid-area: tray; }
+[data-region="dock"] { grid-area: dock; }
+[data-region="panel"] { grid-area: panel; background: var(--swr-bg-glass); backdrop-filter: blur(var(--swr-blur)); border: 1px solid var(--swr-line); border-radius: var(--swr-r-md); }
+
+.scenes-collapsed .swr-shell { grid-template-columns: 48px minmax(0, 1fr) 340px; }
+.panel-collapsed .swr-shell { grid-template-columns: 216px minmax(0, 1fr) 52px; }
+.scenes-collapsed.panel-collapsed .swr-shell { grid-template-columns: 48px minmax(0, 1fr) 52px; }
+
+@media (max-width: 1120px) {
+  .swr-shell,
+  .scenes-collapsed .swr-shell { grid-template-columns: 168px minmax(0, 1fr) 300px; }
+}
+
+@media (max-width: 820px) {
+  .swr-shell,
+  .scenes-collapsed .swr-shell,
+  .panel-collapsed .swr-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "top" "rail" "stage" "tray" "dock";
+    overflow: auto;
+  }
+  [data-region="panel"] { position: fixed; inset: auto 0 0 0; max-block-size: 62vh; z-index: var(--swr-z-panel); border-radius: var(--swr-r-md) var(--swr-r-md) 0 0; }
+  .panel-collapsed [data-region="panel"] { display: none; }
+}
+
+/* El contenedor de montaje conserva la clase legacy `.studio` (`web/studio.html:12`), y
+   `web/css/app.css` le da rejilla de 3 columnas (108), `height: auto` bajo 1001px (284) y
+   `100dvh` sobre ese ancho (534). Sin desmontar eso, el shell entero se alojaba en la celda `top`
+   de 68px: a 1440 las regiones medían 9-17px y nueve elementos desbordaban; a 820 y 390 el
+   documento crecía a 1662 y 2814px. Se re-pina SOLO el modo next — el legacy sigue leyendo
+   app.css intacto, que es la Enmienda A1 — y se ancla al `data-ui-mode` que ya pone `mountNext()`. */
+#studioRoot[data-ui-mode="next"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "root";
+  height: 100dvh;
+  min-height: 0;
+}
+```
+
+El bloque es el fichero completo que hay que embarcar: `parity-check.mjs` lo compara byte a byte con
+`ui/src/styles/layout.css`, así que la regla va al final, con su comentario, y lo demás se queda tal
+cual lo dejó Task 9.
+
+- [ ] **Step 2: Anclar la corrección en vitest**
+
+El gate la comprueba en Chromium, pero `make test` no lo tiene: borrar la regla del Step 1 tiene que
+poner rojo un test de la suite normal. `ui/tests/shell.test.jsx` ya lee CSS desde disco con
+`resolve(dirname(fileURLToPath(import.meta.url)), ...)`, así que se le añade un caso siguiendo ese
+mismo estilo —añadir, no reescribir el fichero—:
+
+```jsx
+test("the next shell outranks the legacy studio grid", () => {
+  const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "..", "src/styles/layout.css"), "utf8");
+  const rule = css.match(/#studioRoot\[data-ui-mode="next"\] \{([^}]*)\}/);
+  expect(rule, "el modo next tiene que desmontar la rejilla legacy de #studioRoot").not.toBeNull();
+  expect(rule[1]).toMatch(/display: grid/);
+  expect(rule[1]).toMatch(/grid-template-areas: "root"/);
+  expect(rule[1]).toMatch(/height: 100dvh/);
+  expect(rule[1]).toMatch(/min-height: 0/);
+});
+```
+
+Este bloque NO lleva comentario de ruta en la línea 1 a propósito: `parity-check.mjs` solo recolecta
+los bloques cuya primera línea nombra un fichero, y la ancla vive en un fichero que este plan no
+reproduce entero (R37). El test se escribe en rojo primero: quitar la regla de `layout.css`, ver el
+fallo, devolverla.
+
+- [ ] **Step 3: Escribir el smoke**
 
 ```python
+# scripts/overflow-smoke.py
 """Blocking overflow gate: the Studio must never clip, scroll or leave a nameless control."""
 import argparse
 import json
+import sys
 import time
 from playwright.sync_api import sync_playwright
+
+# Un terminal de Windows es cp1252 y la copia del estudio trae glifos («▢», «▲»): imprimir la lista
+# de culpables con el canal sin reconfigurar revienta con UnicodeEncodeError, y el gate se caía
+# justo cuando más servía. Medido el 2026-11-20 al ejecutar la versión original de este plan.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 VIEWPORTS = [(1440, 900), (1120, 800), (820, 900), (390, 640)]
 PROBE = """
 () => {
+  const path = (n) => n.id ? '#' + n.id : n.tagName.toLowerCase() + '.' + String(n.className || '').split(' ')[0];
   const clipped = [];
   for (const node of document.querySelectorAll('.studio-root *')) {
-    if (node.scrollWidth - node.clientWidth > 1 && getComputedStyle(node).overflow !== 'visible') continue;
-    if (node.scrollWidth - node.clientWidth > 1) {
-      const path = node.id ? '#' + node.id : node.tagName.toLowerCase() + '.' + (node.className || '').split(' ')[0];
-      clipped.push({ path, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth, text: (node.textContent || '').trim().slice(0, 48) });
+    if (getComputedStyle(node).overflow !== 'visible') continue;
+    if (node.scrollWidth - node.clientWidth > 1 || node.scrollHeight - node.clientHeight > 1) {
+      clipped.push({ path: path(node), box: [node.scrollWidth, node.clientWidth, node.scrollHeight, node.clientHeight], text: (node.textContent || '').trim().slice(0, 48) });
     }
   }
   const emptyButtons = [...document.querySelectorAll('.studio-root button')]
     .filter(b => !(b.textContent || '').trim() && !b.getAttribute('aria-label') && !b.title && !(b.querySelector('[data-icon]') || {}).textContent)
     .map(b => b.outerHTML.slice(0, 80));
-  const primary = document.querySelector('.studio-root [data-status]');
-  const primaryLabel = [...document.querySelectorAll('.studio-root button')].map(b => (b.textContent || '').trim()).find(x => x.length > 3) || '';
+  const primary = document.querySelector('.studio-root [data-action="live"]');
+  const label = primary ? (primary.textContent || '').trim() : '';
   return {
     clipped,
     emptyButtons,
     documentScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 || document.documentElement.scrollHeight > document.documentElement.clientHeight + 1,
-    primary: { visible: Boolean(primary), labelLength: primaryLabel.length },
+    primary: primary ? { visible: primary.getClientRects().length > 0, labelLength: label.length, clipped: primary.scrollWidth - primary.clientWidth > 1 } : null,
   };
 }
 """
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--url", required=True)
+parser.add_argument("--url", default="http://localhost:18443")
 parser.add_argument("--browser")
 parser.add_argument("--room")
 args = parser.parse_args()
@@ -4395,26 +4529,31 @@ with sync_playwright() as pw:
     context = browser.new_context(locale="es-ES", viewport={"width": 1440, "height": 900}, color_scheme="dark", service_workers="block", ignore_https_errors=True)
     room = args.room or f"overflow-{time.time_ns()}"
     keys = context.request.post(args.url + "/api/rooms", data={"room": room, "title": "Puerta de desbordamiento", "password": "overflow-password"}).json()
-    page = ctx = context.new_page()
+    page = context.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    page.goto(args.url + "/studio?ui=next&room=" + room + "#key=" + keys["hostKey"])
+    page.goto(f"{args.url}/studio?ui=next&room={room}#key={keys['hostKey']}")
+    # El shell llega por import dinámico: medido, sin esperar, `document.querySelectorAll('.studio-root')`
+    # devuelve 0 y el gate daría verde sobre una página vacía.
     page.wait_for_selector("[data-region='top']")
     failures = []
     for width, height in VIEWPORTS:
         page.set_viewport_size({"width": width, "height": height})
         page.wait_for_timeout(350)
         report = page.evaluate(PROBE)
+        size = f"{width}x{height}"
         if errors:
-            failures.append(f"{width}x{height}: page errors {errors}")
+            failures.append(f"{size}: page errors {errors}")
         if report["documentScroll"]:
-            failures.append(f"{width}x{height}: the document itself scrolls")
+            failures.append(f"{size}: the document itself scrolls")
         if report["clipped"]:
-            failures.append(f"{width}x{height}: clipped {json.dumps(report['clipped'][:6], ensure_ascii=False)}")
+            failures.append(f"{size}: clipped {json.dumps(report['clipped'][:6], ensure_ascii=False)}")
         if report["emptyButtons"]:
-            failures.append(f"{width}x{height}: nameless controls {report['emptyButtons']}")
-        if not report["primary"]["visible"] or report["primary"]["labelLength"] < 4:
-            failures.append(f"{width}x{height}: the primary action lost its label ({report['primary']})")
+            failures.append(f"{size}: nameless controls {json.dumps(report['emptyButtons'], ensure_ascii=False)}")
+        if not report["primary"]:
+            failures.append(f"{size}: the primary action [data-action=live] is gone")
+        elif not report["primary"]["visible"] or report["primary"]["labelLength"] < 4 or report["primary"]["clipped"]:
+            failures.append(f"{size}: the primary action lost its label or clipped ({json.dumps(report['primary'])})")
     browser.close()
 
 if failures:
@@ -4425,40 +4564,76 @@ if failures:
 print("overflow gate ok")
 ```
 
-- [ ] **Step 2: Ejecutarlo y ver el estado real**
+Diferencias con el borrador inicial de esta tarea, cada una medida:
 
-Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go build -o /tmp/streamwebrom ./cmd/streamwebrom && /tmp/streamwebrom -addr 127.0.0.1:18443 -stun= -data /tmp/swr-overflow & sleep 2; python scripts/overflow-smoke.py --url http://localhost:18443"`
-Expected: `overflow gate ok`. Si falla, la lista imprimida dice el selector exacto: corregir el CSS del
-componente culpable (reglas de la spec §8: `min-width: 0`, elipsis con nombre, `flex: 0 0 auto` en la
-primaria) y repetir hasta verde. Este paso **no** se marca como completo sin la salida `ok`.
+1. La acción primaria se busca por `[data-action="live"]` (`ui/src/components/Topbar.jsx:43`), no por
+   `[data-status]`. `CommandButton` pone `data-status` con default `"idle"`, así que el selector del
+   borrador encontraba el PRIMER `CommandButton` del DOM (el de grabar: 9 coincidencias medidas) y el
+   gate no miraba nunca la acción primaria. Medido sobre la primaria real: texto `▲Transmitir`,
+   `clipped: false`.
+2. Se añade el corte vertical al criterio de desbordamiento (`scrollHeight`/`clientHeight`). El
+   borrador solo miraba ancho; la causa raíz del Step 1 se manifestaba justo en alto (`top` 57px de
+   contenido en 9px de celda), y un gate horizontal lo habría dado por bueno.
+3. `sys.stdout.reconfigure(...)`: sin él, el gate no informa, revienta.
+4. El fallo de la primaria distingue «no existe» de «existe pero se quedó sin etiqueta», que el
+   borrador mezclaba.
 
-- [ ] **Step 3: Documentar la puerta**
+- [ ] **Step 4: Ejecutarlo y ver el estado real**
 
-```markdown
-# Puerta anti-desbordamiento del Studio
-
-`scripts/overflow-smoke.py` abre `/studio?ui=next` en 1440, 1120, 820 y 390 px de ancho y falla si:
-
-- algún elemento del shell tiene `scrollWidth` mayor que su `clientWidth` sin recorte intencional;
-- el documento entero crea scroll horizontal o vertical;
-- queda algún botón sin texto, sin `aria-label`, sin `title` y sin glifo visible;
-- la acción primaria (`Transmitir`) desaparece o se queda sin etiqueta legible.
-
-Se ejecuta en el job `browser` de CI y es bloqueante. Localmente:
+Ruta del owner (Windows conduciendo Chrome instalado, servidor Go en WSL) — verificada el 2026-11-20
+y de descarga cero:
 
 ```bash
-make ui
-go run ./cmd/streamwebrom -addr 127.0.0.1:18443 -stun= -data /tmp/swr-overflow &
-make overflow
+node scripts/build-ui.mjs
+wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && go build -o /tmp/swr-gate ./cmd/streamwebrom && (nohup /tmp/swr-gate -addr 127.0.0.1:18455 -stun= -data /tmp/swr-overflow >/tmp/swr-overflow.log 2>&1 & sleep 2; curl -fsS http://localhost:18455/api/health; curl -fsS http://localhost:18455/studio | grep -o 'studio-[A-Za-z0-9_-]*\.js')"
+.superpowers/venv-win/Scripts/python.exe scripts/overflow-smoke.py --url http://localhost:18455 --browser "C:/Program Files/Google/Chrome/Application/chrome.exe"
 ```
-```
 
-(archivo `docs/OVERFLOW-GATE.md`; el bloque de comandos anterior va entre fences anidados, escribirlos
-como tres líneas normales para no romper el markdown del doc).
+Expect: `overflow gate ok`, con el bundle servido siendo el de esta ronda (`studio-<hash>.js` igual
+al de `web/studio.html`).
 
-- [ ] **Step 4: Hacerla bloqueante**
+Expect además, y es el motivo de este paso: **con el Step 1 sin aplicar, el gate da 1 y la lista
+imprime los nueve culpables de 1440 y el scroll de 820/390**. Se ejecuta primero rojo, luego verde;
+un `ok` sin haber visto el rojo no prueba nada.
 
-`Makefile`:
+Mediciones que hay que respetar al montar el servidor:
+
+- `18443` puede estar ocupado por una instancia vieja (medido: `/tmp/streamwebrom -data /tmp/swr-ui`
+  con 25041s de vida, sirviendo un `web/` embebido de horas antes). Un verde sobre ese servidor es
+  falso. Comprobar `uptime` en `/api/health` y el hash que realmente sirve `/studio`, o usar un
+  puerto propio como arriba.
+- WSL no tiene `playwright`, y `playwright==1.64.0` pide `chromium-1248` mientras la caché del owner
+  guarda `chromium-1255`: la ruta WSL exigiría bajar un navegador (~170 MB). La ruta de arriba usa el
+  Chrome ya instalado, que es la convención `SWR_TEST_CHROME` que CI lleva usando tiempo
+  (`.github/workflows/ci.yml:100-104`). Los dos venv de prueba viven bajo `.superpowers/`, que está
+  excluido del repo; no son material de commit.
+- El `stderr` de un venv de Windows puede imprimir `Could not find platform independent libraries`;
+  no es del gate. La salida propia del script sigue teniendo que ser limpia.
+
+- [ ] **Step 5: Documentar la puerta**
+
+Crear `docs/OVERFLOW-GATE.md` con: qué abre y a qué anchos; los cuatro criterios (desbordes
+horizontales **y verticales** en elementos sin recorte intencional, scroll del documento en ambos
+ejes —que la spec sí prohíbe en móvil, líneas 12 y 25—, botones sin nombre, y la primaria
+`[data-action="live"]` visible, con etiqueta y sin corte); que es bloqueante en el job `browser` de
+CI; la ruta local de Step 4; y las dos cosas que el gate **no** cubre, medidas hoy:
+
+- El despegue del aviso sobre el dock. En modo next ninguna acción del fixture lanza un error
+  (`ui/src/bridge/actions.js:27` registra los handlers precisamente para que `command()` no tire),
+  así que no hay forma legítima de que el usuario vea un aviso y el gate no puede afirmarlo. Los
+  números medidos: el dock mide 57px (escritorio) y 56px a 390; la capa de avisos despeja el dock
+  23px a 1440, pero la regla `@media (max-width: 820px)` la deja a 64px del borde inferior, que a
+  820x900 cae 1px dentro del dock y a 390x640 lo toca exacto. Va a la revisión final de rama con
+  estos números, no a un test que no puede disparar el aviso.
+- El modo legacy: lo vigila `scripts/interface-smoke.py`.
+
+El doc se escribe a mano, no como bloque del plan: lleva fences anidados y `parity-check.mjs` no
+recolecta bloques `markdown`. La prueba de paridad para el doc es que lo que afirma sea cierto en el
+mismo navegador.
+
+- [ ] **Step 6: Hacerla bloqueante**
+
+`Makefile`: añadir el target y su nombre a la lista `.PHONY` que ya encabeza el fichero.
 
 ```make
 overflow:
@@ -4466,15 +4641,14 @@ overflow:
 ```
 
 `.github/workflows/ci.yml`, en el job `browser`, inmediatamente después de
-`- run: python scripts/interface-smoke.py --url http://localhost:18443`:
+`- run: python scripts/interface-smoke.py --url http://localhost:18443` (línea 111):
 
 ```yaml
       - name: overflow gate (the studio must never clip)
         run: python scripts/overflow-smoke.py --url http://localhost:18443
 ```
 
-y en la matriz de pasos del job `test`, junto al paso de `node --test`, para que el doc de la puerta no
-se quede obsoleto:
+y en el job `test`, junto al paso `node --test` (línea 46), para que el doc no se quede obsoleto:
 
 ```yaml
       - name: overflow gate documentation exists
@@ -4482,13 +4656,17 @@ se quede obsoleto:
         run: test -s docs/OVERFLOW-GATE.md
 ```
 
-- [ ] **Step 5: Verificar y commit**
+- [ ] **Step 7: Verificar y commit**
 
 Run: `npm -C ui test && node --test tests/*.test.mjs`
-Expected: todo en verde (la puerta no cubre el modo legacy: ese camino lo vigila `interface-smoke.py`).
+Expected: todo en verde, uno más que antes (el ancla del Step 2). La puerta no cubre el modo legacy.
+
+Comprobar con `parity-check.mjs` que `ui/src/styles/layout.css` y `scripts/overflow-smoke.py` salen
+IDENTICAL; `ui/tests/shell.test.jsx`, `docs/OVERFLOW-GATE.md`, `Makefile` y `ci.yml` no son rutas
+paralizables por el tool (bloques sin comentario de ruta) y se revisan leyendo el diff.
 
 ```bash
-git add scripts/overflow-smoke.py docs/OVERFLOW-GATE.md Makefile .github/workflows/ci.yml
+git add ui/src/styles/layout.css ui/tests/shell.test.jsx scripts/overflow-smoke.py docs/OVERFLOW-GATE.md Makefile .github/workflows/ci.yml
 git commit -m "test(ui): block layout overflow and nameless controls in the studio shell"
 ```
 
