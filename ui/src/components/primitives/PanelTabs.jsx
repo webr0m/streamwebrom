@@ -9,6 +9,10 @@ export function PanelTabs({ tabs, active, onSelect, collapsed = false, ariaLabel
     const next = (index + delta + tabs.length) % tabs.length;
     refs.current.get(tabs[next].id)?.focus();
   };
+  const jump = (event, index, edge) => {
+    event.preventDefault();
+    move(index, edge === "start" ? -index : tabs.length - 1 - index);
+  };
   return (
     <div role="tablist" aria-label={ariaLabel} className={cx(styles.tabs, collapsed && styles.collapsed, className)}>
       {tabs.map((tab, index) => (
@@ -19,12 +23,17 @@ export function PanelTabs({ tabs, active, onSelect, collapsed = false, ariaLabel
           id={`tab-${tab.id}`}
           aria-selected={String(tab.id === active)}
           aria-label={tab.badge ? `${tab.label} (${tab.badge})` : tab.label}
+          // Roving tabindex (APG): Tab entra una vez en la tablist y las flechas recorren.
+          tabIndex={tab.id === active ? 0 : -1}
           ref={(node) => { if (node) refs.current.set(tab.id, node); else refs.current.delete(tab.id); }}
           className={styles.tab}
           onClick={() => onSelect(tab.id)}
           onKeyDown={(event) => {
-            if (event.key === "ArrowRight") { event.preventDefault(); move(index, 1); }
-            if (event.key === "ArrowLeft") { event.preventDefault(); move(index, -1); }
+            const step = (delta) => { event.preventDefault(); move(index, delta); };
+            if (event.key === "ArrowRight") step(1);
+            else if (event.key === "ArrowLeft") step(-1);
+            else if (event.key === "Home") jump(event, index, "start");
+            else if (event.key === "End") jump(event, index, "end");
           }}
         >
           {tab.icon ? <span data-icon aria-hidden="true">{tab.icon}</span> : null}

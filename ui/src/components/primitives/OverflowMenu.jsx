@@ -6,9 +6,24 @@ import styles from "./OverflowMenu.module.css";
 export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", className = "", ...rest }) {
   const [open, setOpen] = useState(false);
   const root = useRef(null);
+  const menu = useRef(null);
   const trigger = useRef(null);
+  // Un role="menu" sin navegación de teclado es solo un menú de ratón: las flechas y
+  // Home/End mueven el foco entre los menuitem, igual que la tablist de arriba.
+  const onKeyDown = (event) => {
+    const nodes = [...(menu.current?.querySelectorAll("[role=menuitem]") ?? [])];
+    const at = Math.max(0, nodes.indexOf(document.activeElement));
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      nodes[(at + (event.key === "ArrowDown" ? 1 : -1) + nodes.length) % nodes.length]?.focus();
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      (event.key === "Home" ? nodes[0] : nodes[nodes.length - 1])?.focus();
+    }
+  };
   useEffect(() => {
     if (!open) return;
+    menu.current?.querySelector("[role=menuitem]")?.focus();
     const onPointer = (event) => { if (!root.current?.contains(event.target)) setOpen(false); };
     const onKey = (event) => {
       if (event.key === "Escape") { setOpen(false); trigger.current?.focus(); }
@@ -21,7 +36,7 @@ export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", cla
     };
   }, [open]);
   return (
-    <span ref={root} className={`${styles.slot} ${className}`}>
+    <span ref={root} className={cx(styles.slot, className)}>
       <button
         type="button"
         ref={trigger}
@@ -36,13 +51,13 @@ export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", cla
         <span data-icon aria-hidden="true">{icon}</span>
       </button>
       {open ? (
-        <span role="menu" className={styles.menu}>
+        <span ref={menu} role="menu" className={styles.menu} onKeyDown={onKeyDown}>
           {items.map((item) => (
             <button
               key={item.id}
               type="button"
               role="menuitem"
-              className={item.danger ? `${styles.item} ${styles.danger}` : styles.item}
+              className={cx(styles.item, item.danger && styles.danger)}
               onClick={() => { setOpen(false); item.onClick?.(); }}
             >
               {item.icon ? <span data-icon aria-hidden="true">{item.icon}</span> : null}

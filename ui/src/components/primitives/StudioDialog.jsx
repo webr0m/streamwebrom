@@ -1,11 +1,11 @@
 // ui/src/components/primitives/StudioDialog.jsx
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import styles from "./StudioDialog.module.css";
 
 export function StudioDialog({ title, onClose, children, footer = null }) {
   const ref = useRef(null);
   const shown = useRef(false);
-  const titleId = useRef(`dialog-${Math.random().toString(36).slice(2, 8)}`).current;
+  const titleId = useId();
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
