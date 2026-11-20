@@ -3293,7 +3293,15 @@ dos ramas idénticas: el revisor lo señala con razón como defecto, y la rama v
 - [ ] **Step 5: Verificar**
 
 Run: `npm -C ui test -- tests/shell.test.jsx tests/topbar.test.jsx && npm -C ui test && node scripts/build-ui.mjs`
-Expected: 9 tests PASS (4 en `shell.test.jsx`, 5 en `topbar.test.jsx`) y `npm -C ui test` 63 PASS en 11 ficheros (54 hasta la Task 8 + 9 nuevos), con el build emitiendo los mismos cinco nombres de chunk y `web/studio.html` con md5 `015873072aa5f065c0837478f0a6a593` (ningún fichero nuevo es alcanzable desde `main.jsx` hasta que se añade el import de `layout.css`, y ese import no cambia el HTML).
+Expected: 9 tests PASS (4 en `shell.test.jsx`, 5 en `topbar.test.jsx`) y `npm -C ui test` 63 PASS en 11 ficheros (54 hasta la Task 8 + 9 nuevos).
+Sobre el build, hay que esperarse lo contrario que en las tareas anteriores: hasta ahora nada nuevo era
+alcanzable desde la entrada, así que los cinco nombres con hash se conservaban. En esta tarea
+`mount-next.jsx` importa el shell, el shell importa Topbar y `layout.css`, y por tanto **cambian**
+los hashes de `js/mount-next-*.js`, `js/studio-*.js` y `css/studio-*.css`. Anota los nombres nuevos
+en el informe: son la referencia de la Task 10. Lo que NO puede cambiar es `web/studio.html`
+(md5 `015873072aa5f065c0837478f0a6a593`: la plantilla no se toca) y nada de `web/` puede acabarse en
+el commit — `web/js/*-<hash>.js`, `web/css/*-<hash>.css` y `web/js/sw-assets.json` están ignorados a
+propósito.
 
 Run: `node --test tests/*.test.mjs`
 Expected: 83 PASS. Aquí se comprueban las ocho claves nuevas: `tests/ui-i18n*.test.mjs` y el gate de artefactos exigen que todo idioma tenga las mismas claves y que ningún `.jsx` declare textos propios.
