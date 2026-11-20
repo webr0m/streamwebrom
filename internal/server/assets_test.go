@@ -230,6 +230,29 @@ func TestShippedServiceWorkerKeepsTheInjectionContract(t *testing.T) {
 	}
 }
 
+func embedded() fs.FS {
+	sub, err := fs.Sub(web.Files, ".")
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}
+
+func TestStudioHtmlLinksTheVersionedReactShellAndKeepsLegacyIdle(t *testing.T) {
+	legacy, err := fs.ReadFile(embedded(), "studio.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{`id="program"`, `id="scenesRail"`, `id="backstage"`, `id="studioPanes"`} {
+		if !strings.Contains(string(legacy), marker) {
+			t.Fatalf("studio.html must keep the %s container for the legacy mode", marker)
+		}
+	}
+	if strings.Contains(string(legacy), `src="/js/studio.js"`) {
+		t.Fatal("the page must not load the legacy studio module eagerly: the boot switch owns it")
+	}
+}
+
 // Keep a failure readable: the served worker is one long line per constant.
 func firstLines(s string) string {
 	return strings.Join(strings.SplitN(s, "\n", 9)[:8], "\n")

@@ -1,7 +1,17 @@
-// ui/src/main.jsx
 import "./styles/tokens.css";
 import "./styles/motion.css";
+import { uiMode, storedMode, assetBase } from "./mode.js";
 
-// Placeholder entry: Task 4 replaces it with the mode switch. It must stay
-// importable so the build pipeline itself is testable before any UI exists.
-export const UI_BUILD = "next";
+const mode = uiMode(new URLSearchParams(location.search), storedMode());
+// El service worker se registra en las dos modalidades y con el prefijo de
+// contenido: el modo legacy sin red necesita su precache igual que el shell.
+await import(`${assetBase(import.meta.url)}/js/pwa.js`);
+if (mode === "legacy") {
+  const { bootLegacy } = await import("./boot-legacy.js");
+  await bootLegacy();
+} else {
+  const { mountNext } = await import("./mount-next.jsx");
+  await mountNext();
+}
+
+export { mode };

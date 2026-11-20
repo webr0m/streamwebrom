@@ -16,7 +16,7 @@ export default defineConfig({
     manifest: true,
     sourcemap: false,
     rollupOptions: {
-      input: { studio: "src/main.jsx" },
+      input: { studio: "studio.html" },
       output: {
         entryFileNames: "js/[name]-[hash].js",
         chunkFileNames: "js/[name]-[hash].js",
