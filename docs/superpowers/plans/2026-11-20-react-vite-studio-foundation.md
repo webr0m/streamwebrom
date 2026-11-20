@@ -2266,11 +2266,13 @@ git commit -m "feat(ui): add tabs, switch, overflow menu, field and dialog primi
 
 ```js
 // ui/src/i18n.js — MODIFICAR la única línea de re-export (el fichero ya existe).
-// The dictionaries stay in the repo's own module: React must not own a second
-// copy of the strings, so this file only re-exports the engine's translator.
+//
+// The strings stay in web/js/i18n.js: React must not own a second copy, so this
+// file re-exports the engine. tests/ui-artifacts.test.mjs asserts each name
+// below is really exported by the engine and that nothing here declares its own
+// dictionary, so a wrong addition fails the node suite.
 // `lang` joins the list because a React store needs to read the current language
-// without copying it; tests/ui-artifacts.test.mjs checks every name re-exported
-// here really exists in web/js/i18n.js, so a wrong addition fails the node suite.
+// without copying it.
 export { t, installI18n, onLangChange, setLang, lang, LANGS, LANG_LABELS } from "../../web/js/i18n.js";
 ```
 
@@ -2414,7 +2416,7 @@ test("useStageHeight ignores a node it never observed and clears a detached one"
   // React only re-runs the effect when the ref object identity changes, so the
   // hook keeps working on the node the observer was installed for: an entry for
   // any other node is dropped rather than styled onto the mounted stage.
-  const { rerender } = renderHook(({ r }) => useStageHeight(r), { initialProps: { r: ref } });
+  const { rerender, result } = renderHook(({ r }) => useStageHeight(r), { initialProps: { r: ref } });
   expect(observers).toHaveLength(1);
   expect(observers[0].target).toBe(before);
   ref.current = after;
@@ -2758,6 +2760,7 @@ export function throttle(fn, { hz = 10, now = () => Date.now(), later = (callbac
 import { cx } from "./cx.js";
 import styles from "./LevelMeter.module.css";
 
+// `value` is linear 0..1; a caller holding decibels (Task 10) maps them first.
 export function LevelMeter({ value = 0, label, reduced = false, className = "" }) {
   const percent = Math.round(Math.min(1, Math.max(0, Number(value) || 0)) * 100);
   return (
