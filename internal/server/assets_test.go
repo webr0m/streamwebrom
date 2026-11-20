@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -49,6 +50,86 @@ func TestMissingAssetListDoesNotBreakTheShell(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "= [];") {
 		t.Fatalf("missing sw-assets.json must degrade to an empty list, got %s", w.Body.String())
 	}
+}
+
+// A Vite-manifest regression writes something that is not an array of paths —
+// `{}`, a BOM, a comment. Spliced into `const SHELL_ASSETS = …;` raw, that makes
+// SHELL_ASSETS.map throw at worker top level (web/sw.js:10), so the service
+// worker never registers and offline breaks for every user. Anything unusable
+// must degrade to the empty list instead, and say so in the server log.
+func TestMalformedAssetListDegradesToAnEmptyShell(t *testing.T) {
+	for _, content := range []string{`{}`, "\xef\xbb\xbf[\"js/studio-abc.js\"]", "[\"js/a.js\"] // generated", `["js/a.js",42]`, `[`, ``} {
+		label := content
+		if label == "" {
+			label = "<empty>"
+		}
+		files := fstest.MapFS{
+			"js/sw-assets.json": {Data: []byte(content)},
+			"sw.js":             {Data: []byte(`const SHELL_ASSETS = __SWR_SHELL__;`)},
+		}
+		mu := &sync.Mutex{}
+		var lines []string
+		s := New(config.Default(), nil, files, slog.New(slog.NewTextHandler(testWriter{mu, &lines}, nil)))
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sw.js", nil))
+		body := w.Body.String()
+		if strings.Contains(body, "__SWR_SHELL__") || !strings.Contains(body, "= [];") {
+			t.Errorf("content %q must degrade to `= [];`, got %s", label, body)
+			continue
+		}
+		// What reaches the worker must stay a JSON array of quoted paths, or the
+		// .map on web/sw.js:10 throws again.
+		var injected []string
+		literal := strings.TrimSuffix(strings.TrimPrefix(body, "const SHELL_ASSETS = "), ";")
+		if err := json.Unmarshal([]byte(literal), &injected); err != nil {
+			t.Errorf("content %q injected %q, which is not a JSON array of paths: %v", label, literal, err)
+		} else if len(injected) != 0 {
+			t.Errorf("content %q leaked %v into the precache list", label, injected)
+		}
+		mu.Lock()
+		reported := len(lines) > 0
+		mu.Unlock()
+		if !reported {
+			t.Errorf("content %q degraded silently: the incident must reach the server log", label)
+		}
+	}
+}
+
+// Degradation must be all-or-nothing per source: a valid manifest still injects
+// every path verbatim, with no whitespace left over and no incident logged.
+func TestValidAssetListIsReMarshalledWithoutLosses(t *testing.T) {
+	files := fstest.MapFS{
+		"js/sw-assets.json": {Data: []byte("\n  [\"css/studio-abc.css\", \"js/studio-abc.js\"]  \n")},
+		"sw.js":             {Data: []byte(`const SHELL_ASSETS = __SWR_SHELL__;`)},
+	}
+	mu := &sync.Mutex{}
+	var lines []string
+	s := New(config.Default(), nil, files, slog.New(slog.NewTextHandler(testWriter{mu, &lines}, nil)))
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sw.js", nil))
+	const want = `["css/studio-abc.css","js/studio-abc.js"]`
+	if got := w.Body.String(); !strings.Contains(got, want) {
+		t.Fatalf("a valid list must inject exactly %q, got %s", want, got)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(lines) != 0 {
+		t.Errorf("a valid list must not be logged as an incident: %v", lines)
+	}
+}
+
+// Concurrency-safe sink so the log assertions above can read what the server
+// reported without racing the handler.
+type testWriter struct {
+	mu    *sync.Mutex
+	lines *[]string
+}
+
+func (w testWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	*w.lines = append(*w.lines, string(p))
+	return len(p), nil
 }
 
 func TestShellUpdateBypassesCachedModuleGraph(t *testing.T) {

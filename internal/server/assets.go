@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"path"
@@ -37,13 +39,34 @@ func shellPrefix(files fs.FS) string {
 }
 
 // The Vite build publishes the hashed bundle list; the offline shell must
-// precache exactly those URLs, never a hand-maintained one.
-func shellAssets(files fs.FS) []byte {
-	data, err := fs.ReadFile(files, "js/sw-assets.json")
-	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+// precache exactly those URLs, never a hand-maintained one. The file is raw
+// output of a build tool, so it is only trusted once it parses as []string and
+// is re-marshalled from there: splicing bytes that are not an array of paths
+// makes SHELL_ASSETS.map throw at worker top level (web/sw.js), which aborts
+// registration and breaks offline for every user. Anything unusable degrades to
+// the empty list — the classic shell still precaches — and says so in the log.
+func (s *Server) shellAssets() []byte {
+	data, err := fs.ReadFile(s.static, "js/sw-assets.json")
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			s.log.Warn("shell asset list unreadable, precaching none", "err", err)
+		}
 		return []byte("[]")
 	}
-	return bytes.TrimSpace(data)
+	var assets []string
+	if err := json.Unmarshal(bytes.TrimSpace(data), &assets); err != nil || len(assets) == 0 {
+		if err == nil {
+			err = errors.New("empty asset list")
+		}
+		s.log.Warn("shell asset list invalid, precaching none", "err", err)
+		return []byte("[]")
+	}
+	out, err := json.Marshal(assets)
+	if err != nil {
+		s.log.Warn("shell asset list unencodable, precaching none", "err", err)
+		return []byte("[]")
+	}
+	return out
 }
 
 func noShellCache(w http.ResponseWriter) {
@@ -65,7 +88,7 @@ func (s *Server) serveShell(w http.ResponseWriter, r *http.Request, name string,
 	case ".js":
 		if name == "sw.js" {
 			data = bytes.ReplaceAll(data, []byte("__SWR_ASSET_PREFIX__"), []byte(s.assetPrefix))
-			data = bytes.ReplaceAll(data, []byte("__SWR_SHELL__"), shellAssets(s.static))
+			data = bytes.ReplaceAll(data, []byte("__SWR_SHELL__"), s.shellAssets())
 		}
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	case ".css":
