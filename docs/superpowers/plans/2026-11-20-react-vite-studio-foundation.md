@@ -95,7 +95,7 @@ scripts/
   overflow-smoke.py                # puerta anti-desbordamiento (Playwright, 4 viewports)
 web/
   studio.html                      # generado por Vite (antes: a mano)
-  js/i18n/{es,en,ru}/studio.js     # +8 claves nuevas (Task 9 Step 3)
+  js/i18n/{es,en,ru}/studio.js     # +9 claves nuevas (Task 9 Step 3)
   js/studio-<hash>.js  css/studio-<hash>.css   # bundles
   js/sw-assets.json                # lista de assets versionados consumida por sw.js
 internal/server/assets.go          # inyección de __SWR_SHELL__
@@ -2832,7 +2832,7 @@ git commit -m "feat(ui): add bridge hooks, local workspace store and audio meter
 
 **Files:**
 - Create: `ui/src/styles/layout.css`, `ui/src/components/StudioShell.jsx`, `ui/src/components/StudioShell.module.css`, `ui/src/components/Topbar.jsx`, `ui/src/components/Topbar.module.css`, `ui/src/components/ToastLayer.jsx` (stub vacío que la Task 11 reemplaza entero)
-- Modify: `ui/src/main.jsx` (importa `styles/layout.css`), `ui/src/mount-next.jsx` (la Task 4 lo deja como marcador; aquí llama `installI18n()`, crea el motor de juguete con su bridge y monta `<StudioRoot bridge={…}/>`), `web/js/i18n/es/studio.js`, `web/js/i18n/en/studio.js`, `web/js/i18n/ru/studio.js` (las ocho claves de Step 3)
+- Modify: `ui/src/mount-next.jsx` (la Task 4 lo deja como marcador; aquí carga `styles/layout.css`, llama `installI18n()`, crea el motor de juguete con su bridge y monta `<StudioRoot bridge={…}/>`), `web/js/i18n/es/studio.js`, `web/js/i18n/en/studio.js`, `web/js/i18n/ru/studio.js` (las claves de Step 3). `ui/src/main.jsx` se queda igual: `layout.css` no se importa ahí porque el entry compartido lo pagarían los visitantes del modo legacy
 - Test: `ui/tests/shell.test.jsx`, `ui/tests/topbar.test.jsx`
 
 **Interfaces:**
@@ -2842,7 +2842,8 @@ git commit -m "feat(ui): add bridge hooks, local workspace store and audio meter
   `createStudioBridge` (Task 5), cuyo `bridge.command(action, payload)` devuelve una promesa.
 - Produces:
   - `StudioRoot({ bridge })` — export nombrado que `mount-next.jsx` importa (no `main.jsx`: ése solo
-    decide el modo y carga `styles/layout.css`). Reparte `{ snapshot, command, workspace }` y los dos
+    decide el modo; el CSS del grid lo carga `mount-next.jsx`, que es el chunk que solo `?ui=next`
+    descarga). Reparte `{ snapshot, command, workspace }` y los dos
     toggles a las regiones y aplica las clases `scenes-collapsed` / `panel-collapsed` en el nodo
     `.studio-root` (mismos nombres que el CSS legacy de `web/js/workspace.js`).
   - `<Topbar snapshot command workspace onToggleScenes onTogglePanel />` — `role="banner"` con dos
@@ -2902,6 +2903,28 @@ test("the panel toggle mirrors the legacy class contract", async () => {
   const { container } = setup();
   await userEvent.click(screen.getByRole("button", { name: /panel/i }));
   expect(container.querySelector(".studio-root")).toHaveClass("panel-collapsed");
+});
+
+// Los dos botones de la barra prometen `aria-controls="scenesRail"` y
+// `aria-controls="studioPanes"`, y el modo legacy tiene esos ids en el HTML de
+// `web/studio.html`. Un `id` que solo viva en una rama del colapso deja el
+// `aria-controls` huérfano sin romper ningún test visual, así que se fija aquí
+// en los dos estados y dentro de la región que lo lleva — no basta con que el
+// documento tenga el nodo.
+test("both panel states keep the ids the topbar points at", async () => {
+  const { container } = setup();
+  for (const panelOpen of [true, false]) {
+    if (container.querySelector(".panel-collapsed")) {
+      await userEvent.click(screen.getByRole("button", { name: /panel/i }));
+    }
+    for (const [id, region] of [["scenesRail", "rail"], ["studioPanes", "panel"]]) {
+      const node = document.querySelector(`#${id}`);
+      expect(node).toBeInTheDocument();
+      expect(node).toHaveAttribute("data-region", region);
+      expect(container.querySelector(`[data-region="${region}"]`)).toBe(node);
+    }
+    await userEvent.click(screen.getByRole("button", { name: /panel/i }));
+  }
 });
 
 // jsdom no aplica `layout.css` sobre los nodos, así que el grid no es observable
@@ -2976,11 +2999,20 @@ test("the room title clips instead of overflowing", () => {
   const snapshot = { ...base, room: { ...base.room, title: "Sala con un nombre exageradamente largo de demostración" } };
   render(<Topbar snapshot={snapshot} command={() => {}} workspace={base.workspace} onToggleScenes={() => {}} onTogglePanel={() => {}} />);
   const title = screen.getByText(snapshot.room.title);
-  // jsdom no maquetan, así que `useOverflow` mide 0 píxeles y `clipped` es
+  // jsdom no maqueta, así que `useOverflow` mide 0 píxeles y `clipped` es
   // false: lo que se puede fijar aquí es que el título pasa por TruncatedText
   // (el atributo existe y vale "false") y que lleva el tooltip puesto.
   expect(title).toHaveAttribute("data-truncated", "false");
   expect(title).toHaveAttribute("title", snapshot.room.title);
+});
+
+// La píldora del relay no puede ser texto sin traducir: la convención del repo
+// mete la unidad dentro de la clave (`studio.relayBitrate` con `{rate}`), así
+// que un `24 Mbps` pelado pasaría este ancla y seguiría ilegible en inglés.
+test("the relay pill carries the translated bitrate", () => {
+  const snapshot = { ...base, broadcast: { ...base.broadcast, relay: { ...base.broadcast.relay, active: true } } };
+  render(<Topbar snapshot={snapshot} command={() => {}} workspace={base.workspace} onToggleScenes={() => {}} onTogglePanel={() => {}} />);
+  expect(screen.getByText("Relevo · 2.4 Mbps")).toBeInTheDocument();
 });
 
 // La parte cortable del título tampoco es observable en jsdom: se ancla desde
@@ -3006,7 +3038,8 @@ Expected: FAIL —«Failed to resolve import "../src/components/StudioShell.jsx"
 
 - [ ] **Step 3: Añadir las claves de idioma y escribir el grid y el shell**
 
-Ocho claves nuevas, una línea plana por clave al final del objeto de `web/js/i18n/es/studio.js`,
+Ocho claves nuevas más la del bitrate del relay (`studio.relayBitrate`, nueve en total), una línea
+plana por clave al final del objeto de `web/js/i18n/es/studio.js`,
 `en/studio.js` y `ru/studio.js`, en el mismo orden en los tres idiomas. Las usan Topbar (esta tarea),
 SourceTray (Task 10) y ToastLayer (Task 11). El gate ya existe hoy y corre en `node --test`:
 `tests/i18n.test.mjs:15` exige que es, en y ru tengan exactamente las mismas claves, así que
@@ -3022,6 +3055,7 @@ olvidar un idioma pone rojo el suite node en el mismo momento en que se añade l
 | `studio.qualityFullHd` | `"Calidad Full HD"` | `"Full HD quality"` | `"Качество Full HD"` |
 | `studio.notifications` | `"Avisos del estudio"` | `"Studio notices"` | `"Уведомления студии"` |
 | `studio.closeNotification` | `"Cerrar aviso"` | `"Close notice"` | `"Закрыть уведомление"` |
+| `studio.relayBitrate` | `"Relevo · {rate} Mbps"` | `"Relay · {rate} Mbps"` | `"Ретранслятор · {rate} Мбит/с"` |
 
 Ejemplo de la primera línea, con el formato del fichero:
 
@@ -3123,7 +3157,7 @@ export function StudioRoot({ bridge }) {
           </section>
         )}
       </div>
-      <ToastLayer bridge={bridge} />
+      <ToastLayer />
     </div>
   );
 }
@@ -3133,10 +3167,14 @@ export function StudioRoot({ bridge }) {
  (`ui/src/components/Topbar.jsx`) ya prometen, los mismos que `ui/studio.html` usa en el modo
  legacy, y `mount-next.jsx` borra los antiguos con `replaceChildren()` al montar. Un
  `aria-controls` huérfano es exactamente el fallo que la puerta de accesibilidad de la Task 12
- tiene que poder señalar.
+ tiene que poder señalar. Como el `id` vive en dos ramas distintas, `ui/tests/shell.test.jsx` lo fija
+ en los dos estados del panel y dentro de la región que lo lleva: sin esa ancla, renombrar el id en
+ una rama rompe el contrato sin romper ningún test visual.
 
 `ToastLayer` se crea en la Task 11; para que esta tarea compile, crear ahora su versión mínima que
-`ToastLayer.jsx` reemplazará intacta:
+`ToastLayer.jsx` reemplazará intacta. El stub no recibe props, así que `StudioShell.jsx` lo llama
+como `<ToastLayer />`: pasarle un `bridge` que ignora sería prometer una API que todavía no existe —
+la prop real llega con la Task 11 y su componente real.
 
 ```jsx
 // ui/src/components/ToastLayer.jsx
@@ -3169,6 +3207,7 @@ monte de verdad el shell sobre el motor de juguete:
 // ui/src/mount-next.jsx
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "./styles/layout.css";
 import { installI18n } from "./i18n.js";
 import { createStudioBridge } from "./bridge/studio-bridge.js";
 import { createFixtureEngine } from "./bridge/fixture-engine.js";
@@ -3214,6 +3253,7 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
   const { room, production, broadcast } = snapshot;
   const status = statusOf(room);
   const live = production.live;
+  const rate = Math.round(broadcast.relay.bitrate / 100) / 10;
   const error = (domain) => (snapshot.errors?.[domain] ? String(snapshot.errors[domain]) : "");
   return (
     <header className={styles.bar} role="banner">
@@ -3226,7 +3266,7 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
         <StatusPill tone={status.tone} label={status.label} />
         {live ? <StatusPill tone="live" dot label={t("studio.liveBadge")} /> : null}
         {production.recording ? <StatusPill tone="err" label={t("studio.record")} /> : null}
-        {broadcast.relay?.active ? <StatusPill tone="idle" label={`${Math.round(broadcast.relay.bitrate / 100) / 10} Mbps`} /> : null}
+        {broadcast.relay?.active ? <StatusPill tone="idle" label={t("studio.relayBitrate", { rate })} /> : null}
       </div>
       <div className={styles.actions}>
         <CommandButton
@@ -3294,10 +3334,14 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
 }
 ```
 
-`ui/src/main.jsx` añade `import "./styles/layout.css";` junto a los otros dos estilos (es el único
-sitio donde se importa: los tests de esta tarea anclan `layout.css` desde el disco, no desde el
-DOM). El `installI18n()` de `mount-next.jsx` ya está en el bloque de arriba — el Step 3 reescribe
-el fichero entero, así que no hay segunda edición que aplicar.
+`ui/src/main.jsx` NO importa `styles/layout.css`: ése es el entry compartido por los dos modos y
+Vite lo pliega en `css/studio-*.css`, así que cualquier cosa que ahí se importe la descarga también
+el visitante del modo legacy. El import va en `ui/src/mount-next.jsx` —bloque de arriba, junto a los
+otros imports sin efectos visibles—, que solo carga `?ui=next` y cuyo chunk recibe el CSS. Los dos
+imports de `tokens.css` y `motion.css` en `main.jsx` se quedan tal cual: el modo legacy sí necesita
+sus tokens y sus keyframes. Los tests de esta tarea anclan `layout.css` desde el disco, no desde el
+DOM, así que mover el import no les afecta. El `installI18n()` de `mount-next.jsx` ya está en el
+bloque de arriba — el Step 3 reescribe el fichero entero, así que no hay segunda edición que aplicar.
 
 La acción Transmitir se escribe con `label={t("studio.goLive")}`, sin ternario: el texto del botón
 es el mismo en los dos estados porque el Studio de hoy también lo deja igual
@@ -3306,21 +3350,31 @@ cambia es el estado accesible —`aria-pressed` sale del `status` de `CommandBut
 `studio.liveBadge`. Un `live ? t("studio.goLive") : t("studio.goLive")` sería un ternario con las
 dos ramas idénticas: el revisor lo señala con razón como defecto, y la rama verdadera no existe.
 
+La píldora del relay se traduce igual que el resto de la barra: `t("studio.relayBitrate", { rate })`
+con `const rate = Math.round(broadcast.relay.bitrate / 100) / 10;`. La unidad vive dentro de la clave,
+no pegada al número — es la convención del repo (`studiojs.sendAdjusted`, `guest.hostAdjustedVideo`) y
+lo que permite a `ru` escribir «Мбит/с». Un `${…} Mbps` literal sería texto sin traducir para el
+visitante inglés y ruso, y `ui/tests/topbar.test.jsx` lo rechaza.
+
 - [ ] **Step 5: Verificar**
 
 Run: `npm -C ui test -- tests/shell.test.jsx tests/topbar.test.jsx && npm -C ui test && node scripts/build-ui.mjs`
-Expected: 9 tests PASS (4 en `shell.test.jsx`, 5 en `topbar.test.jsx`) y `npm -C ui test` 63 PASS en 11 ficheros (54 hasta la Task 8 + 9 nuevos).
+Expected: 11 tests PASS (5 en `shell.test.jsx`, 6 en `topbar.test.jsx`) y `npm -C ui test` 65 PASS en 11 ficheros (54 hasta la Task 8 + 11 nuevos).
 Sobre el build, hay que esperarse lo contrario que en las tareas anteriores: hasta ahora nada nuevo era
 alcanzable desde la entrada, así que los cinco nombres con hash se conservaban. En esta tarea
 `mount-next.jsx` importa el shell, el shell importa Topbar y `layout.css`, y por tanto **cambian**
 los hashes de `js/mount-next-*.js`, `js/studio-*.js` y `css/studio-*.css`. Anota los nombres nuevos
-en el informe: son la referencia de la Task 10. Lo que NO puede cambiar es `web/studio.html`
-(md5 `015873072aa5f065c0837478f0a6a593`: la plantilla no se toca) y nada de `web/` puede acabarse en
+en el informe: son la referencia de la Task 10. Lo que NO puede cambiar es la plantilla `ui/studio.html`
+y nada de `web/` puede acabarse en
 el commit — `web/js/*-<hash>.js`, `web/css/*-<hash>.css` y `web/js/sw-assets.json` están ignorados a
-propósito.
+propósito. La excepción es `web/studio.html`: lo escribe Vite sobre la ruta de la plantilla, está
+controlado porque Go lo incrusta y lo sirve, y cada tarea que cambia los hashes lo renueva en su
+commit. Como `layout.css` ahora sale del entry compartido y entra en el chunk de `mount-next`,
+`css/studio-*.css` se reduce y `css/mount-next-*.css` crece, y los dos nombres con hash cambian otra
+vez.
 
 Run: `node --test tests/*.test.mjs`
-Expected: 83 PASS. Aquí se comprueban las ocho claves nuevas: `tests/ui-i18n*.test.mjs` y el gate de artefactos exigen que todo idioma tenga las mismas claves y que ningún `.jsx` declare textos propios.
+Expected: 83 PASS. Aquí se comprueban las claves nuevas: `tests/ui-i18n*.test.mjs` y el gate de artefactos exigen que todo idioma tenga las mismas claves y que ningún `.jsx` declare textos propios.
 
 Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && go test -count=1 ./internal/server/"`
 Expected: `ok` — el HTML generado sigue conteniendo los contenedores legacy. El `cd` va a la **worktree**, no al repositorio principal: en `/mnt/d/Descargas/streamwebrom` no existe ninguna de las tareas de este plan y el test diría `ok` sobre el árbol equivocado.
@@ -4305,7 +4359,7 @@ git commit -m "docs(ui): cover the next-mode switch and pin the shell's strings 
    (anti-desbordamiento) → Tasks 6, 7, 9, 10 y la puerta de la Task 12. §9 (pruebas) → Tasks 1–8, 12, 13;
    las capas «motor real» y «humos del Studio en modo next» corresponden al plan 2 por la enmienda A1.
    §10 etapas 1–2 de 7 quedan cubiertas; etapas 3–7 → planes 2 y 3.
-2. **Placeholders.** Ninguno: cada paso lleva su código o su comando exacto. Las ocho claves de i18n
+2. **Placeholders.** Ninguno: cada paso lleva su código o su comando exacto. Las nueve claves de i18n
    que el shell necesita y no existen en el repo se añaden explícitamente en Task 9 Step 3, con su
    texto en los tres idiomas; `tests/ui-i18n.test.mjs` (Task 13) es el control que lo vigila.
 3. **Consistencia de tipos.** `createStudioBridge({ engine })`, `bridge.subscribe/getSnapshot/command/
