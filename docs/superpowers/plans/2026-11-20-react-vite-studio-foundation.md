@@ -3869,7 +3869,10 @@ que es lo que declara el contrato: sin ellos, `StudioBridge.command()` lanza
 lo traga, así que Monitor, VDO, Ajustes e Invitar se quedarían en botones mudos sin ningún fallo a
 la vista.
 
-Montar las regiones en `StudioShell.jsx` sustituyendo los `Slot` vacíos:
+Montar las regiones en `StudioShell.jsx` sustituyendo los `Slot` vacíos. El bloque es un delta sobre
+la lista que Task 9 dejó en `ui/src/components/StudioShell.jsx` (esa lista es el estado al cerrar
+Task 9, no el fichero de hoy): hacen falta además los cinco `import` de las regiones nuevas, junto
+a los de `Topbar` y `ToastLayer` que ya estaban.
 
 ```jsx
         <Slot region="rail" id="scenesRail">
@@ -3917,6 +3920,22 @@ fallaba ningún test pero sí pintaba la interfaz:
 - El `hint` de Ajustes e Invitar repetía la clave de la etiqueta. El legacy pone
   `studio.settingsHint` / `studio.inviteHint` en `data-i18n-title` (ui/studio.html:96-97); con la
   clave duplicada el tooltip perdía su texto.
+
+Ninguna de esas dos correcciones estaba anclada: revertirla dejaba los 74 tests en verde porque `t()`
+devuelve la clave en vez de fallar. La ronda de revisión cerró el hueco de dos formas, y su fuente
+vive en los ficheros del repo, no en un bloque de este plan:
+
+- `tests/i18n.test.mjs`, «every key used by the React sources exists»: el mismo escáner que ya
+  cubría `web/js/*.js` camina `ui/src` (quita los comentarios primero, si no, la prosa que nombra la
+  clave inexistente de arriba sería un falso positivo) y exige que cada clave `studio.*` /
+  `studiojs.*` citada exista en el diccionario.
+- «the mounted regions render no echoed i18n key» en `ui/tests/regions.test.jsx`, que mira también
+  `aria-label` y `title` porque ahí cae el eco de una clave de grupo, no en un nodo de texto.
+
+Y el literal `"VDO"` del dock, protegido por un marcador `i18n-lint-ignore` que ningún programa del
+repo lee, pasó a `t("studio.vdo")` con la marca escrita tal cual en las tres lenguas
+(`web/js/i18n/{es,en,ru}/studio.js`). Task 13 sí escribirá un lint que entienda ese marcador; mientras
+no exista, una clave real es la única garantía honesta.
 
 - [ ] **Step 5: Verificar y commit**
 
