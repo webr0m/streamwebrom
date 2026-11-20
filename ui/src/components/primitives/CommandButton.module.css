@@ -31,7 +31,7 @@
   color: var(--swr-on-brand);
   font-weight: 650;
 }
-.live { border-color: var(--swr-live); color: var(--swr-live); }
+/* No .live rule here: "on air" is StatusPill's tone, not a CommandButton status. */
 /* Below the tablet line a collapsible action keeps only its glyph. */
 @media (max-width: 1100px) {
   .collapsible .label { display: none; }

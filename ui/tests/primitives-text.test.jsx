@@ -21,17 +21,25 @@ test("StatusPill announces its tone and never overflows the box", () => {
   render(<StatusPill tone="live" label="En directo" dot />);
   const pill = screen.getByRole("status");
   expect(pill).toHaveTextContent("En directo");
-  expect(pill.className).toContain("live");
+  expect(pill).toHaveClass("live");
+  expect(pill.querySelector(".dot")).toBeInTheDocument();
 });
 
 test("IconButton cannot exist without an accessible name", () => {
   expect(() => render(<IconButton icon="⚙" onClick={() => {}} />)).toThrow(/accessible name/);
+  render(<IconButton icon="⚙" label="Ajustes" size="md" onClick={() => {}} className="extra" />);
+  const button = screen.getByRole("button", { name: "Ajustes" });
+  expect(button).toHaveClass("md");
+  // A missing tone/size class must never reach the DOM as the literal word.
+  expect(button.className).not.toContain("undefined");
 });
 
 test("CommandButton walks idle → pending → error and keeps its icon", async () => {
   const onClick = () => {};
   const { rerender } = render(<CommandButton status="idle" icon="▲" label="Transmitir" onClick={onClick} />);
-  expect(screen.getByRole("button", { name: "Transmitir" })).toHaveAttribute("aria-pressed", "false");
+  const idle = screen.getByRole("button", { name: "Transmitir" });
+  expect(idle).toHaveAttribute("aria-pressed", "false");
+  expect(idle.className).not.toContain("undefined");
 
   rerender(<CommandButton status="pending" icon="▲" label="Transmitir" onClick={onClick} />);
   expect(screen.getByRole("button", { name: "Transmitir" })).toBeDisabled();
@@ -40,6 +48,9 @@ test("CommandButton walks idle → pending → error and keeps its icon", async 
   rerender(<CommandButton status="error" icon="▲" label="Transmitir" onClick={onClick} error="no fue" collapsible />);
   const button = screen.getByRole("button", { name: "Transmitir" });
   expect(button).toHaveAttribute("data-status", "error");
+  // Below 1100px the label is display:none; aria-label is the only name left.
+  expect(button).toHaveAttribute("aria-label", "Transmitir");
+  expect(button).not.toHaveAttribute("aria-disabled");
   expect(button.querySelector("[data-icon]").textContent).toBe("▲");
   await userEvent.click(button);
   expect(screen.getByText("no fue")).toBeInTheDocument();
@@ -47,5 +58,7 @@ test("CommandButton walks idle → pending → error and keeps its icon", async 
 
 test("the primary command reserves its own width", () => {
   render(<CommandButton status="active" icon="▲" label="Transmitir" onClick={() => {}} primary />);
-  expect(screen.getByRole("button", { name: "Transmitir" })).toHaveClass("primary");
+  const button = screen.getByRole("button", { name: "Transmitir" });
+  expect(button).toHaveClass("primary");
+  expect(button).toHaveAttribute("aria-pressed", "true");
 });
