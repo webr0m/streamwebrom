@@ -1668,17 +1668,21 @@ git commit -m "feat(ui): add overflow-safe text and command primitives"
 **Interfaces:**
 - Consumes: `IconButton` (Task 6) y tokens (Task 3).
 - Produces:
-  - `<Switch label checked onChange disabled?>` — `role="switch"` + `aria-checked`.
+  - `<Switch label checked onChange disabled?>` — `role="switch"` + `aria-checked`, y al pulsar llama
+    `onChange(!checked)`.
   - `<PanelTabs tabs={[{id,label,badge?}]} active onSelect>` — `role="tablist"`, cada tab `role="tab"`
-    con `aria-selected`, navegación por flechas, etiqueta oculta al colapsar a icono cuando `icon` existe.
+    con `aria-selected`, `tabIndex` roving (solo el activo es alcanzable con Tab), flechas + `Home`/`End`,
+    etiqueta oculta al colapsar a icono cuando `icon` existe.
   - `<OverflowMenu label items={[{id,label,onClick,danger?}]}>` — botón `⋯` accesible, cierra con Escape
-    y con clic fuera, `aria-expanded`.
+    (devolviendo el foco al trigger) y con clic fuera, `aria-expanded`; al abrir lleva el foco al primer
+    ítem y `ArrowUp`/`ArrowDown`/`Home`/`End` recorren los `menuitem`.
   - `<Field label inputId error help>{un único elemento de control}</Field>` — etiqueta ligada por `htmlFor`;
-    el control recibe `id={inputId}` y `aria-describedby` por `cloneElement`, así conserva sus props;
-    el error se publica con `role="status"` y es la descripción cuando existe.
+    el control recibe `id={inputId}` y `aria-describedby` por `cloneElement`, así conserva sus props; `Field`
+    es dueño del `id` del control y lo sobrescribe de forma deliberada. El error se publica con
+    `role="status"`; cuando hay error y ayuda, las dos llegan a `aria-describedby` y las dos se muestran.
   - `<StudioDialog title onClose children footer?>` — `<dialog>` nativo con `showModal()` en el mount
     (con fallback `node.open = true` porque jsdom no implementa `showModal`), cierre por Escape que llama
-    `onClose` una sola vez, foco inicial en el primer control, `aria-labelledby`.
+    `onClose` una sola vez, foco inicial en el primer control, `aria-labelledby` con `useId()`.
 
 - [ ] **Step 1: Escribir el test que falla**
 
@@ -1690,6 +1694,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { Switch } from "../src/components/primitives/Switch.jsx";
 import { PanelTabs } from "../src/components/primitives/PanelTabs.jsx";
 import { OverflowMenu } from "../src/components/primitives/OverflowMenu.jsx";
@@ -1704,21 +1709,39 @@ const TABS = [
   { id: "dest", label: "Destinos", icon: "📡" },
 ];
 
-test("Switch is a real switch with its label as the name", () => {
-  render(<Switch label="Ocultar escena" checked onChange={() => {}} />);
+test("Switch is a real switch: its label names it and its click reports the next state", async () => {
+  const onChange = vi.fn();
+  const { rerender } = render(<Switch label="Ocultar escena" checked onChange={onChange} />);
   const node = screen.getByRole("switch", { name: "Ocultar escena" });
   expect(node).toHaveAttribute("aria-checked", "true");
+  await userEvent.click(node);
+  expect(onChange).toHaveBeenCalledWith(false);
+
+  rerender(<Switch label="Ocultar escena" checked={false} onChange={onChange} />);
+  expect(screen.getByRole("switch", { name: "Ocultar escena" })).toHaveAttribute("aria-checked", "false");
+
+  const blocked = vi.fn();
+  render(<Switch label="Sin permisos" checked={false} onChange={blocked} disabled />);
+  await userEvent.click(screen.getByRole("switch", { name: "Sin permisos" }));
+  expect(blocked).not.toHaveBeenCalled();
 });
 
-test("PanelTabs exposes selection and arrow navigation", () => {
-  const onSelect = () => {};
+test("PanelTabs exposes selection, a roving tabindex and arrow navigation", async () => {
+  const onSelect = vi.fn();
   render(<PanelTabs tabs={TABS} active="people" onSelect={onSelect} />);
   const tabs = screen.getAllByRole("tab");
   expect(tabs).toHaveLength(3);
   expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+  // Solo el tab activo es alcanzable con Tab: el resto se recorre con las flechas.
+  expect(tabs[1]).toHaveAttribute("tabindex", "0");
+  expect(tabs[0]).toHaveAttribute("tabindex", "-1");
   expect(tabs[1]).toHaveTextContent("3");
   fireEvent.keyDown(tabs[1], { key: "ArrowRight" });
   expect(tabs[2]).toHaveFocus();
+  fireEvent.keyDown(tabs[2], { key: "Home" });
+  expect(tabs[0]).toHaveFocus();
+  await userEvent.click(tabs[0]);
+  expect(onSelect).toHaveBeenCalledWith("chat");
 });
 
 test("PanelTabs keeps an accessible name when the label collapses", () => {
@@ -1727,34 +1750,52 @@ test("PanelTabs keeps an accessible name when the label collapses", () => {
 });
 
 test("OverflowMenu groups the actions that no longer fit", async () => {
-  const onClick = () => {};
+  const onClick = vi.fn();
   render(<OverflowMenu label="Más acciones" items={[{ id: "kick", label: "Expulsar", onClick, danger: true }]} />);
   const trigger = screen.getByRole("button", { name: "Más acciones" });
   expect(trigger).toHaveAttribute("aria-expanded", "false");
   await userEvent.click(trigger);
   expect(trigger).toHaveAttribute("aria-expanded", "true");
   const item = screen.getByRole("menuitem", { name: "Expulsar" });
+  expect(item).toHaveFocus();
   await userEvent.click(item);
+  expect(onClick).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole("menuitem")).toBeNull();
 });
 
-test("OverflowMenu closes on Escape", async () => {
-  render(<OverflowMenu label="Más" items={[{ id: "a", label: "Uno", onClick: () => {} }]} />);
-  await userEvent.click(screen.getByRole("button", { name: "Más" }));
+test("OverflowMenu walks its items and hands focus back on Escape", async () => {
+  const items = [
+    { id: "a", label: "Uno", onClick: () => {} },
+    { id: "b", label: "Dos", onClick: () => {} },
+  ];
+  render(<OverflowMenu label="Más" items={items} />);
+  const trigger = screen.getByRole("button", { name: "Más" });
+  await userEvent.click(trigger);
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: "Uno" }), { key: "ArrowDown" });
+  expect(screen.getByRole("menuitem", { name: "Dos" })).toHaveFocus();
+  fireEvent.keyDown(screen.getByRole("menuitem", { name: "Dos" }), { key: "ArrowDown" });
+  expect(screen.getByRole("menuitem", { name: "Uno" })).toHaveFocus();
   fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
   expect(screen.queryByRole("menu")).toBeNull();
+  expect(trigger).toHaveFocus();
 });
 
-test("Field wires label, error and help to the control", () => {
+test("Field wires label, error and help to the control it owns", () => {
   render(
     <div>
       <Field label="URL del destino" inputId="destURL" error="URL no permitida" help="rtmp, rtmps o srt">
-        <input id="destURL" />
+        <input id="otro" placeholder="rtmp://" />
       </Field>
     </div>,
   );
-  expect(screen.getByLabelText("URL del destino")).toHaveAttribute("aria-describedby");
+  const control = screen.getByLabelText("URL del destino");
+  // Field es dueño del id: el del child se sobrescribe para que htmlFor coincida,
+  // pero el resto de sus props llega intacto.
+  expect(control).toHaveAttribute("id", "destURL");
+  expect(control).toHaveAttribute("placeholder", "rtmp://");
+  expect(control).toHaveAttribute("aria-describedby", "destURL-error destURL-help");
   expect(screen.getByRole("status")).toHaveTextContent("URL no permitida");
+  expect(screen.getByText("rtmp, rtmps o srt")).toBeInTheDocument();
 });
 
 test("StudioDialog opens modally, is labelled and closes on Escape", async () => {
@@ -1765,18 +1806,43 @@ test("StudioDialog opens modally, is labelled and closes on Escape", async () =>
     </StudioDialog>,
   );
   const dialog = screen.getByRole("dialog");
-  expect(dialog).toHaveAttribute("aria-labelledby");
+  expect(document.getElementById(dialog.getAttribute("aria-labelledby"))).toHaveTextContent("Ajustes de fuente");
   fireEvent.keyDown(dialog, { key: "Escape" });
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
+// El plan manda llamar a StudioDialog con `onClose={() => setCosa(null)}`: cada render del
+// padre cambia la identidad del callback, y ese efecto es el que suscribe la Escape.
+test("StudioDialog keeps answering Escape after the parent re-renders", () => {
+  const calls = [];
+  function Host() {
+    const [n, setN] = useState(0);
+    return (
+      <>
+        <button type="button" onClick={() => setN(n + 1)}>redibujar {n}</button>
+        <StudioDialog title="Ajustes de fuente" onClose={() => calls.push(1)}>
+          <button type="button">Guardar</button>
+        </StudioDialog>
+      </>
+    );
+  }
+  render(<Host />);
+  const dialog = screen.getByRole("dialog");
+  fireEvent.click(screen.getByRole("button", { name: /redibujar/ }));
+  fireEvent.click(screen.getByRole("button", { name: /redibujar/ }));
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  expect(calls).toHaveLength(1);
+});
+
 // Mismo ancla que la Task 6 (R22): con classNameStrategy "non-scoped" el test renderizado
 // no puede ver una regla borrada, así que el contrato componente↔hoja de estilo se fija aquí.
-// \b y no ` \{` porque .collapsed solo aparece como `.collapsed .label`, dentro del @media.
+// El lookahead (?![\w-]) en lugar de ` \{` porque .collapsed solo aparece como
+// `.collapsed .label`, y porque `.item` no debe validarse contra un hipotético `.itemish`.
 test("each container stylesheet declares the classes its component asks for", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const css = (name) => readFileSync(resolve(here, "..", "src", "components", "primitives", name), "utf8");
-  const declared = (name, cls) => expect(css(name), `${name} .${cls}`).toMatch(new RegExp(`^\\s*\\.${cls}\\b`, "m"));
+  const declared = (name, cls) => expect(css(name), `${name} .${cls}`).toMatch(new RegExp(`^\\s*\\.${cls}(?![\\w-])`, "m"));
 
   for (const cls of ["switch", "on", "knob"]) declared("Switch.module.css", cls);
   for (const cls of ["tabs", "tab", "label", "badge", "collapsed"]) declared("PanelTabs.module.css", cls);
@@ -1863,6 +1929,10 @@ export function PanelTabs({ tabs, active, onSelect, collapsed = false, ariaLabel
     const next = (index + delta + tabs.length) % tabs.length;
     refs.current.get(tabs[next].id)?.focus();
   };
+  const jump = (event, index, edge) => {
+    event.preventDefault();
+    move(index, edge === "start" ? -index : tabs.length - 1 - index);
+  };
   return (
     <div role="tablist" aria-label={ariaLabel} className={cx(styles.tabs, collapsed && styles.collapsed, className)}>
       {tabs.map((tab, index) => (
@@ -1873,12 +1943,17 @@ export function PanelTabs({ tabs, active, onSelect, collapsed = false, ariaLabel
           id={`tab-${tab.id}`}
           aria-selected={String(tab.id === active)}
           aria-label={tab.badge ? `${tab.label} (${tab.badge})` : tab.label}
+          // Roving tabindex (APG): Tab entra una vez en la tablist y las flechas recorren.
+          tabIndex={tab.id === active ? 0 : -1}
           ref={(node) => { if (node) refs.current.set(tab.id, node); else refs.current.delete(tab.id); }}
           className={styles.tab}
           onClick={() => onSelect(tab.id)}
           onKeyDown={(event) => {
-            if (event.key === "ArrowRight") { event.preventDefault(); move(index, 1); }
-            if (event.key === "ArrowLeft") { event.preventDefault(); move(index, -1); }
+            const step = (delta) => { event.preventDefault(); move(index, delta); };
+            if (event.key === "ArrowRight") step(1);
+            else if (event.key === "ArrowLeft") step(-1);
+            else if (event.key === "Home") jump(event, index, "start");
+            else if (event.key === "End") jump(event, index, "end");
           }}
         >
           {tab.icon ? <span data-icon aria-hidden="true">{tab.icon}</span> : null}
@@ -1937,9 +2012,24 @@ import styles from "./OverflowMenu.module.css";
 export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", className = "", ...rest }) {
   const [open, setOpen] = useState(false);
   const root = useRef(null);
+  const menu = useRef(null);
   const trigger = useRef(null);
+  // Un role="menu" sin navegación de teclado es solo un menú de ratón: las flechas y
+  // Home/End mueven el foco entre los menuitem, igual que la tablist de arriba.
+  const onKeyDown = (event) => {
+    const nodes = [...(menu.current?.querySelectorAll("[role=menuitem]") ?? [])];
+    const at = Math.max(0, nodes.indexOf(document.activeElement));
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      nodes[(at + (event.key === "ArrowDown" ? 1 : -1) + nodes.length) % nodes.length]?.focus();
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      (event.key === "Home" ? nodes[0] : nodes[nodes.length - 1])?.focus();
+    }
+  };
   useEffect(() => {
     if (!open) return;
+    menu.current?.querySelector("[role=menuitem]")?.focus();
     const onPointer = (event) => { if (!root.current?.contains(event.target)) setOpen(false); };
     const onKey = (event) => {
       if (event.key === "Escape") { setOpen(false); trigger.current?.focus(); }
@@ -1952,7 +2042,7 @@ export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", cla
     };
   }, [open]);
   return (
-    <span ref={root} className={`${styles.slot} ${className}`}>
+    <span ref={root} className={cx(styles.slot, className)}>
       <button
         type="button"
         ref={trigger}
@@ -1967,13 +2057,13 @@ export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", cla
         <span data-icon aria-hidden="true">{icon}</span>
       </button>
       {open ? (
-        <span role="menu" className={styles.menu}>
+        <span ref={menu} role="menu" className={styles.menu} onKeyDown={onKeyDown}>
           {items.map((item) => (
             <button
               key={item.id}
               type="button"
               role="menuitem"
-              className={item.danger ? `${styles.item} ${styles.danger}` : styles.item}
+              className={cx(styles.item, item.danger && styles.danger)}
               onClick={() => { setOpen(false); item.onClick?.(); }}
             >
               {item.icon ? <span data-icon aria-hidden="true">{item.icon}</span> : null}
@@ -2039,25 +2129,24 @@ export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", cla
 ```jsx
 // ui/src/components/primitives/Field.jsx
 import { cloneElement } from "react";
+import { cx } from "./cx.js";
 import styles from "./Field.module.css";
 
-// The control stays the caller's element, so its props must survive: cloneElement is
-// how the id and the describedby reach it without rewriting the child by hand.
+// Field es dueño del id del control: lo reescribe para que el htmlFor coincida, y pasa
+// error y ayuda por aria-describedby sin tocar el resto de las props del child.
 export function Field({ label, inputId, error = "", help = "", children, className = "" }) {
   const errorId = `${inputId}-error`;
   const helpId = `${inputId}-help`;
-  const describedBy = [error ? errorId : "", !error && help ? helpId : ""].filter(Boolean).join(" ");
+  const describedBy = [error ? errorId : "", help ? helpId : ""].filter(Boolean).join(" ");
   const control = describedBy
     ? cloneElement(children, { ...children.props, id: inputId, "aria-describedby": describedBy })
     : children;
   return (
-    <div className={`${styles.field} ${className}`}>
+    <div className={cx(styles.field, className)}>
       <label className={styles.label} htmlFor={inputId}>{label}</label>
       <div className={styles.control}>{control}</div>
       {error ? <span id={errorId} role="status" className={styles.error}>{error}</span> : null}
-      {!error && help ? (
-        <span id={helpId} className={styles.help}>{help}</span>
-      ) : null}
+      {help ? <span id={helpId} className={styles.help}>{help}</span> : null}
     </div>
   );
 }
@@ -2074,13 +2163,13 @@ export function Field({ label, inputId, error = "", help = "", children, classNa
 
 ```jsx
 // ui/src/components/primitives/StudioDialog.jsx
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import styles from "./StudioDialog.module.css";
 
 export function StudioDialog({ title, onClose, children, footer = null }) {
   const ref = useRef(null);
   const shown = useRef(false);
-  const titleId = useRef(`dialog-${Math.random().toString(36).slice(2, 8)}`).current;
+  const titleId = useId();
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
@@ -2137,8 +2226,8 @@ export function StudioDialog({ title, onClose, children, footer = null }) {
 - [ ] **Step 4: Verificar**
 
 Run: `npm -C ui test -- tests/primitives-container.test.jsx && npm -C ui test && node scripts/build-ui.mjs`
-Expected: 8 tests PASS en el fichero nuevo; el suite completo en verde — tras la Task 6 había 26, así que
-se esperan 34, no los 19 que este plan prometía antes de que las primitivas llegaran (mismo defecto de
+Expected: 9 tests PASS en el fichero nuevo; el suite completo en verde — tras la Task 6 había 26, así que
+se esperan 35, no los 19 que este plan prometía antes de que las primitivas llegaran (mismo defecto de
 aritmética que la Task 5: se reporta el número medido, no se añade relleno). El build sigue escribiendo
 solo `js/` y `css/` con los mismos nombres de chunk, y `ui/tests/tokens.test.jsx` sigue verde: si un
 `var(--swr-*)` de estos `.module.css` está mal escrito, es ese test el que lo detecta porque exige
