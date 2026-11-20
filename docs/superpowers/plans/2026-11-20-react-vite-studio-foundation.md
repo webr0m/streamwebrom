@@ -263,32 +263,56 @@ export const UI_BUILD = "next";
 // Builds the React Studio shell into web/js and web/css, then publishes the
 // versioned asset list the service worker reads through Go's __SWR_SHELL__.
 import { execFileSync } from "node:child_process";
-import { readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ui = resolve(root, "ui");
 const web = resolve(root, "web");
 
-if (!existsSync(resolve(ui, "node_modules"))) {
-  execFileSync("npm", ["ci", "--prefix", ui, "--no-audit", "--no-fund"], { cwd: root, stdio: "inherit" });
+// Exported for tests/ui-artifacts.test.mjs, which asserts the sw-assets.json
+// contract against fixture manifests without running vite or npm.
+export function collectSwAssets(manifest) {
+  const files = new Set();
+  for (const entry of Object.values(manifest)) {
+    // Vite reports imported stylesheets in `css` and copied static files in
+    // `assets`; both are hashed artifacts the service worker has to precache.
+    for (const file of [entry.file, ...(Object.values(entry.assets ?? {})), ...(entry.css ?? [])]) {
+      if (/^(?:js|css)\//.test(file)) files.add(file);
+    }
+  }
+  if (!files.size) throw new Error("vite emitted no js/ or css/ asset: check ui/vite.config.js output names");
+  // Paths stay relative to web/ (no leading slash) and sorted: Task 2 feeds this
+  // exact list to the service worker's precache.
+  return [...files].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
-execFileSync("npm", ["run", "build", "--prefix", ui], { cwd: root, stdio: "inherit" });
 
-const manifest = JSON.parse(await readFile(resolve(web, ".vite/manifest.json"), "utf8"));
-const files = new Set();
-for (const entry of Object.values(manifest)) {
-  for (const file of [entry.file, ...(Object.values(entry.assets ?? {}))]) {
-    if (/^(?:js|css)\//.test(file)) files.add(file);
+// Una sola forma vale en Windows, en el interop de WSL y en las imágenes Alpine
+// y Debian de node: `shell: true` (Node no puede arrancar el shim de npm directo)
+// y `cwd: ui` (`--prefix` no mueve el cwd del script desde npm 11).
+const npmArgs = { ci: ["ci", "--no-audit", "--no-fund"], build: ["run", "build"] };
+
+function runNpm(args) {
+  try {
+    execFileSync("npm", args, { cwd: ui, stdio: "inherit", shell: true });
+  } catch (cause) {
+    throw new Error(`npm ${args.join(" ")} failed: rerun node scripts/build-ui.mjs`, { cause });
   }
 }
-if (!files.size) throw new Error("vite emitted no js/ or css/ asset: check ui/vite.config.js output names");
-const list = [...files].sort();
-await writeFile(resolve(web, "js/sw-assets.json"), JSON.stringify(list) + "\n", "utf8");
-await rm(resolve(web, ".vite"), { recursive: true, force: true });
-console.log(`swr ui build → ${list.join(", ")}`);
+
+// El fichero es a la vez el entry point del pipeline y un módulo importable por
+// los tests, así que el build solo corre cuando se ejecuta directamente.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  if (!existsSync(resolve(ui, "node_modules"))) runNpm(npmArgs.ci);
+  runNpm(npmArgs.build);
+  const manifest = JSON.parse(await readFile(resolve(web, ".vite/manifest.json"), "utf8"));
+  const list = collectSwAssets(manifest);
+  await writeFile(resolve(web, "js/sw-assets.json"), JSON.stringify(list) + "\n", "utf8");
+  await rm(resolve(web, ".vite"), { recursive: true, force: true });
+  console.log(`swr ui build → ${list.join(", ")}`);
+}
 ```
 
 - [ ] **Step 5: Conectar el pipeline con Go, CI y Docker**

@@ -34,7 +34,7 @@ jobs:
         run: node scripts/build-ui.mjs
       - name: ui bundle tests
         if: runner.os == 'Linux'
-        run: npm --prefix ui test
+        run: npm -C ui test
       - name: check JS syntax
         if: runner.os == 'Linux'
         run: for f in web/js/*.js; do cp $f /tmp/$(basename $f).mjs; node --check /tmp/$(basename $f).mjs; done
