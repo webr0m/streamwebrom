@@ -319,12 +319,18 @@ all: ui
 
 ```dockerfile
 FROM node:24-alpine AS ui
+# Repo-shaped layout: scripts/build-ui.mjs derives the repo root from its own
+# location, so web/ must be a sibling of scripts/, not a subdirectory of ui/.
 WORKDIR /src
-COPY package*.json ui/package*.json ./
-RUN npm ci --prefix ui --no-audit --no-fund
-COPY ui ui
-COPY web web
-COPY scripts scripts
+COPY ui/package.json ui/package-lock.json ./ui/
+# npm ci reads package.json/package-lock.json from the current directory, so the
+# install runs inside ui/ (same cwd form scripts/build-ui.mjs uses).
+WORKDIR /src/ui
+RUN npm ci --no-audit --no-fund
+WORKDIR /src
+COPY ui ./ui
+COPY web ./web
+COPY scripts ./scripts
 RUN node scripts/build-ui.mjs
 
 FROM golang:1.27-alpine AS build
@@ -346,7 +352,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}"
         run: node scripts/build-ui.mjs
       - name: ui bundle tests
         if: runner.os == 'Linux'
-        run: npm --prefix ui test
+        run: npm -C ui test
 ```
 
 y en el job `browser`, antes de `go build -o /tmp/streamwebrom ./cmd/streamwebrom`:
@@ -373,7 +379,7 @@ ejecutado el build de la UI.
 
 - [ ] **Step 6: Verificar build y tests**
 
-Run: `node scripts/build-ui.mjs && node --test tests/ui-artifacts.test.mjs && npm --prefix ui test --silent`
+Run: `node scripts/build-ui.mjs && node --test tests/ui-artifacts.test.mjs && npm -C ui test --silent`
 Expected: `swr ui build → css/studio-….css, js/studio-….js`, `pass 2`, y Vitest sin tests todavía (exit 0 con «No test files found, exiting with code 1» → añadir `--passWithNoTests` al script `test` de `ui/package.json` y repetir hasta `pass 0`).
 
 Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go build ./... && go test -count=1 ./..."`
@@ -517,7 +523,8 @@ git commit -m "feat(server): precache the Vite bundle list in the offline shell"
 - Consumes: los artefactos de la Task 1.
 - Produces: la familia de variables `--swr-*` que todo CSS Module puede usar. Names exactos:
   color `--swr-bg-deep --swr-bg-raise --swr-bg-panel --swr-bg-glass --swr-line --swr-line-strong
-  --swr-text --swr-text-dim --swr-text-faint --swr-brand --swr-brand-soft --swr-ok --swr-warn
+  --swr-text --swr-text-dim --swr-text-faint --swr-brand --swr-brand-soft --swr-brand-deep
+  --swr-on-brand --swr-ok --swr-warn
   --swr-err --swr-live`; tipografía `--swr-font-ui --swr-font-mono --swr-text-2xs --swr-text-xs
   --swr-text-sm --swr-text-md --swr-text-lg --swr-text-xl`; espaciado `--swr-sp-1 … --swr-sp-6`;
   radio `--swr-r-sm --swr-r-md --swr-r-pill`; sombra `--swr-shadow-1 --swr-shadow-2`; glass
@@ -530,7 +537,12 @@ git commit -m "feat(server): precache the Vite bundle list in the offline shell"
 // ui/tests/tokens.test.jsx
 import { test, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Vitest arranca con cwd = ui/, así que las rutas se derivan del propio test.
+const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src");
+const tokensPath = join(srcDir, "styles", "tokens.css");
 
 function cssFiles(dir) {
   return readdirSync(dir).flatMap((name) => {
@@ -540,29 +552,51 @@ function cssFiles(dir) {
   });
 }
 
-const sources = cssFiles("ui/src").map((file) => [file, readFileSync(file, "utf8")]);
+const sources = cssFiles(srcDir).map((file) => [file, readFileSync(file, "utf8")]);
 const declared = new Set(
-  (readFileSync("ui/src/styles/tokens.css", "utf8").match(/--swr-[a-z0-9-]+(?=\s*:)/g) || []),
+  (readFileSync(tokensPath, "utf8").match(/--swr-[a-z0-9-]+(?=\s*:)/g) || []),
 );
+
+// Los 46 nombres son el contrato que consumen las Tasks 6-11. Se copian a mano a
+// propósito: derivarlos de tokens.css dejaría el test sin ninguna afirmación.
+const CONTRACT = [
+  "--swr-bg-deep", "--swr-bg-raise", "--swr-bg-panel", "--swr-bg-glass", "--swr-line",
+  "--swr-line-strong", "--swr-text", "--swr-text-dim", "--swr-text-faint", "--swr-brand",
+  "--swr-brand-soft", "--swr-brand-deep", "--swr-on-brand", "--swr-ok", "--swr-warn",
+  "--swr-err", "--swr-live", "--swr-font-ui", "--swr-font-mono", "--swr-text-2xs",
+  "--swr-text-xs", "--swr-text-sm", "--swr-text-md", "--swr-text-lg", "--swr-text-xl",
+  "--swr-sp-1", "--swr-sp-2", "--swr-sp-3", "--swr-sp-4", "--swr-sp-5", "--swr-sp-6",
+  "--swr-r-sm", "--swr-r-md", "--swr-r-pill", "--swr-shadow-1", "--swr-shadow-2",
+  "--swr-blur", "--swr-fast", "--swr-base", "--swr-slow", "--swr-ease",
+  "--swr-z-stage", "--swr-z-panel", "--swr-z-dock", "--swr-z-dialog", "--swr-z-toast",
+];
 
 test("every --swr variable used is declared in tokens.css", () => {
   const used = new Set();
-  for (const [, css] of sources) for (const m of css.matchAll(/var\((--swr-[a-z0-9-]+)/g)) used.add(m[1]);
+  for (const [, css] of sources) for (const m of css.matchAll(/var\(\s*(--swr-[a-z0-9-]+)/g)) used.add(m[1]);
   expect([...used].filter((name) => !declared.has(name))).toEqual([]);
-  expect(used.size).toBeGreaterThan(25);
+  expect(used.size).toBeGreaterThan(0);
+  expect(declared.size).toBe(CONTRACT.length);
+  expect([...declared].filter((name) => !CONTRACT.includes(name))).toEqual([]);
+});
+
+test("the token contract is fully declared", () => {
+  expect(CONTRACT.filter((name) => !declared.has(name))).toEqual([]);
 });
 
 test("the palette matches the approved Control Room Pro direction", () => {
-  const tokens = readFileSync("ui/src/styles/tokens.css", "utf8");
+  const tokens = readFileSync(tokensPath, "utf8");
   expect(tokens).toMatch(/--swr-bg-deep:\s*#05070d/);
   expect(tokens).toMatch(/--swr-bg-raise:\s*#0b1020/);
   expect(tokens).toMatch(/--swr-brand:\s*#7c5cff/);
 });
 
 test("motion durations stay inside the broadcast band", () => {
-  const tokens = readFileSync("ui/src/styles/tokens.css", "utf8");
-  const ms = [...tokens.matchAll(/--swr-(?:fast|base|slow):\s*(\d+)ms/g)].map((m) => Number(m[1]));
+  const tokens = readFileSync(tokensPath, "utf8");
+  const root = tokens.split("@media")[0];
+  const ms = [...root.matchAll(/--swr-(?:fast|base|slow):\s*(\d+)ms/g)].map((m) => Number(m[1]));
   expect(ms).toEqual([120, 160, 220]);
+  expect(tokens).toMatch(/prefers-reduced-motion: reduce[\s\S]*--swr-fast: 0ms[\s\S]*--swr-base: 0ms[\s\S]*--swr-slow: 0ms/);
 });
 
 test("no CSS module hardcodes a hex colour", () => {
@@ -575,8 +609,9 @@ test("no CSS module hardcodes a hex colour", () => {
 
 - [ ] **Step 2: Verificar que falla**
 
-Run: `npm --prefix ui test -- tests/tokens.test.jsx`
-Expected: FAIL —«ENOENT: no such file or directory, open 'ui/src/styles/tokens.css'».
+Run: `npm -C ui test -- tests/tokens.test.jsx`
+Expected: FAIL —«ENOENT: no such file or directory, open '…ui/src/styles/tokens.css'» (ruta absoluta
+derivada del propio test, no relativa al cwd).
 
 - [ ] **Step 3: Escribir los tokens**
 
@@ -595,6 +630,8 @@ Expected: FAIL —«ENOENT: no such file or directory, open 'ui/src/styles/token
   --swr-text-faint: #6f7a94;
   --swr-brand: #7c5cff;
   --swr-brand-soft: rgba(124, 92, 255, 0.18);
+  --swr-brand-deep: #4f2fd6;
+  --swr-on-brand: #ffffff;
   --swr-ok: #34d399;
   --swr-warn: #fbbf24;
   --swr-err: #fb7185;
@@ -667,8 +704,8 @@ import "./styles/motion.css";
 
 - [ ] **Step 4: Verificar**
 
-Run: `npm --prefix ui test -- tests/tokens.test.jsx && node scripts/build-ui.mjs`
-Expected: 4 tests PASS y build sin errores (el test «no CSS module hardcodes a hex colour» está en verde
+Run: `npm -C ui test -- tests/tokens.test.jsx && node scripts/build-ui.mjs`
+Expected: 5 tests PASS y build sin errores (el test «no CSS module hardcodes a hex colour» está en verde
 porque todavía no hay módulos CSS de componente).
 
 - [ ] **Step 5: Commit**
@@ -754,7 +791,7 @@ con `import "github.com/webr0m/streamwebrom/web"` en la cabecera del test.
 
 - [ ] **Step 2: Verificar que fallan**
 
-Run: `npm --prefix ui test -- tests/mode.test.jsx`
+Run: `npm -C ui test -- tests/mode.test.jsx`
 Expected: FAIL —«Failed to resolve import "../src/mode.js"».
 
 Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 -run TestStudioHtml ./internal/server/"`
@@ -852,7 +889,7 @@ export async function mountNext(StudioRoot) {
 
 - [ ] **Step 4: Verificar**
 
-Run: `node scripts/build-ui.mjs && npm --prefix ui test -- tests/mode.test.jsx`
+Run: `node scripts/build-ui.mjs && npm -C ui test -- tests/mode.test.jsx`
 Expected: build escribe `web/studio.html` y `js/studio-<hash>.js`; 3 tests PASS.
 
 Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
@@ -1043,7 +1080,7 @@ test("scene commands delegate to the engine, not to the DOM", async () => {
 
 - [ ] **Step 3: Verificar que fallan**
 
-Run: `npm --prefix ui test -- tests/bridge.test.jsx ui/tests/actions.test.jsx`
+Run: `npm -C ui test -- tests/bridge.test.jsx ui/tests/actions.test.jsx`
 Expected: FAIL —«Failed to resolve import "../src/bridge/snapshot.js"».
 
 - [ ] **Step 4: Implementar las cuatro capas**
@@ -1192,7 +1229,7 @@ export function createFixtureEngine(initial = nextStudioFixture) {
 
 - [ ] **Step 5: Verificar y commit**
 
-Run: `npm --prefix ui test -- tests/bridge.test.jsx ui/tests/actions.test.jsx`
+Run: `npm -C ui test -- tests/bridge.test.jsx ui/tests/actions.test.jsx`
 Expected: 8 tests PASS.
 
 ```bash
@@ -1274,7 +1311,7 @@ test("the primary command reserves its own width", () => {
 
 - [ ] **Step 2: Verificar que falla**
 
-Run: `npm --prefix ui test -- tests/primitives-text.test.jsx`
+Run: `npm -C ui test -- tests/primitives-text.test.jsx`
 Expected: FAIL —«Failed to resolve import "../src/components/primitives/TruncatedText.jsx"».
 
 - [ ] **Step 3: Implementar las primitivas**
@@ -1477,8 +1514,8 @@ export function CommandButton({
   flex: 0 0 auto;
   max-width: none;
   border-color: var(--swr-brand);
-  background: linear-gradient(180deg, var(--swr-brand), #4f2fd6);
-  color: #fff;
+  background: linear-gradient(180deg, var(--swr-brand), var(--swr-brand-deep));
+  color: var(--swr-on-brand);
   font-weight: 650;
 }
 .live { border-color: var(--swr-live); color: var(--swr-live); }
@@ -1491,7 +1528,7 @@ export function CommandButton({
 
 - [ ] **Step 4: Verificar**
 
-Run: `npm --prefix ui test -- tests/primitives-text.test.jsx && node scripts/build-ui.mjs`
+Run: `npm -C ui test -- tests/primitives-text.test.jsx && node scripts/build-ui.mjs`
 Expected: 5 tests PASS; el build sigue escribiendo solo `js/` y `css/`; el test de tokens de la Task 3
 sigue en verde (ningún `.module.css` usa hex fuera de `tokens.css` — el `rgba(255,59,82,.45)` de
 `StatusPill` es la única excepción permitida porque `--swr-live` no admite alpha; si el test de tokens
@@ -1615,7 +1652,7 @@ test("StudioDialog opens modally, is labelled and closes on Escape", async () =>
 
 - [ ] **Step 2: Verificar que falla**
 
-Run: `npm --prefix ui test -- tests/primitives-container.test.jsx`
+Run: `npm -C ui test -- tests/primitives-container.test.jsx`
 Expected: FAIL —«Failed to resolve import "../src/components/primitives/Switch.jsx"».
 
 - [ ] **Step 3: Implementar**
@@ -1738,7 +1775,7 @@ export function PanelTabs({ tabs, active, onSelect, collapsed = false, ariaLabel
 .tab[aria-selected="true"] { color: var(--swr-text); background: var(--swr-brand-soft); border-color: var(--swr-line-strong); }
 .tab:focus-visible { outline: 2px solid var(--swr-brand); outline-offset: 1px; }
 .label { overflow: hidden; text-overflow: ellipsis; }
-.badge { flex: 0 0 auto; min-width: 16px; padding: 0 4px; border-radius: var(--swr-r-pill); background: var(--swr-brand); color: #fff; font-size: var(--swr-text-2xs); text-align: center; }
+.badge { flex: 0 0 auto; min-width: 16px; padding: 0 4px; border-radius: var(--swr-r-pill); background: var(--swr-brand); color: var(--swr-on-brand); font-size: var(--swr-text-2xs); text-align: center; }
 @media (max-width: 820px) {
   .collapsed .label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
 }
@@ -1931,7 +1968,7 @@ export function StudioDialog({ title, onClose, children, footer = null }) {
 
 - [ ] **Step 4: Verificar**
 
-Run: `npm --prefix ui test -- tests/primitives-container.test.jsx && npm --prefix ui test`
+Run: `npm -C ui test -- tests/primitives-container.test.jsx && npm -C ui test`
 Expected: 7 tests PASS en el fichero nuevo y el suite completo en verde (19 tests acumulados).
 
 - [ ] **Step 5: Commit**
@@ -2066,7 +2103,7 @@ test("LevelMeter reports its value accessibly and honours reduced motion", () =>
 
 - [ ] **Step 2: Verificar que fallan**
 
-Run: `npm --prefix ui test -- tests/hooks.test.jsx ui/tests/meter.test.jsx`
+Run: `npm -C ui test -- tests/hooks.test.jsx ui/tests/meter.test.jsx`
 Expected: FAIL —«Failed to resolve import "../src/hooks/useWorkspace.js"».
 
 - [ ] **Step 3: Implementar los hooks y el medidor**
@@ -2230,7 +2267,7 @@ export function LevelMeter({ value = 0, label, reduced = false, className = "" }
 
 - [ ] **Step 4: Verificar**
 
-Run: `npm --prefix ui test -- tests/hooks.test.jsx ui/tests/meter.test.jsx && node scripts/build-ui.mjs`
+Run: `npm -C ui test -- tests/hooks.test.jsx ui/tests/meter.test.jsx && node scripts/build-ui.mjs`
 Expected: 8 tests PASS y build sin errores.
 
 - [ ] **Step 5: Commit**
@@ -2349,7 +2386,7 @@ test("the room title clips instead of overflowing", () => {
 
 - [ ] **Step 2: Verificar que fallan**
 
-Run: `npm --prefix ui test -- tests/shell.test.jsx ui/tests/topbar.test.jsx`
+Run: `npm -C ui test -- tests/shell.test.jsx ui/tests/topbar.test.jsx`
 Expected: FAIL —«Failed to resolve import "../src/components/StudioShell.jsx"».
 
 - [ ] **Step 3: Añadir las claves de idioma y escribir el grid y el shell**
@@ -2607,7 +2644,7 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
 
 - [ ] **Step 5: Verificar**
 
-Run: `npm --prefix ui test -- tests/shell.test.jsx ui/tests/topbar.test.jsx && npm --prefix ui test && node scripts/build-ui.mjs`
+Run: `npm -C ui test -- tests/shell.test.jsx ui/tests/topbar.test.jsx && npm -C ui test && node scripts/build-ui.mjs`
 Expected: los 8 tests nuevos PASS, los 20 anteriores siguen PASS (27 en total sin contar los de `node --test`), build correcto.
 
 Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
@@ -2736,7 +2773,7 @@ test("dock actions that do not fit collapse into the menu, never into an empty p
 
 - [ ] **Step 2: Verificar que fallan**
 
-Run: `npm --prefix ui test -- tests/regions.test.jsx`
+Run: `npm -C ui test -- tests/regions.test.jsx`
 Expected: FAIL —«Failed to resolve import "../src/components/SceneRail.jsx"».
 
 - [ ] **Step 3: Implementar rail, escenario y layouts**
@@ -3034,7 +3071,7 @@ Montar las regiones en `StudioShell.jsx` sustituyendo los `Slot` vacíos:
 
 - [ ] **Step 5: Verificar y commit**
 
-Run: `npm --prefix ui test -- tests/regions.test.jsx && npm --prefix ui test && node scripts/build-ui.mjs`
+Run: `npm -C ui test -- tests/regions.test.jsx && npm -C ui test && node scripts/build-ui.mjs`
 Expected: 8 tests PASS y suite completo en verde.
 
 Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && node --check web/js/studio.js"`
@@ -3139,7 +3176,7 @@ test("notify publishes into the snapshot so React can render toasts", () => {
 
 - [ ] **Step 2: Verificar que fallan**
 
-Run: `npm --prefix ui test -- tests/toasts.test.jsx ui/tests/bridge.test.jsx`
+Run: `npm -C ui test -- tests/toasts.test.jsx ui/tests/bridge.test.jsx`
 Expected: FAIL —«Failed to resolve import "../src/lib/toasts.js"» y «bridge.notify is not a function».
 
 - [ ] **Step 3: Implementar cola, bridge y capa**
@@ -3260,7 +3297,7 @@ dentro del componente.
 
 - [ ] **Step 4: Verificar**
 
-Run: `npm --prefix ui test -- tests/toasts.test.jsx ui/tests/bridge.test.jsx && npm --prefix ui test`
+Run: `npm -C ui test -- tests/toasts.test.jsx ui/tests/bridge.test.jsx && npm -C ui test`
 Expected: los 6 tests nuevos PASS y el resto de la suite de `ui/tests/` sigue PASS.
 
 - [ ] **Step 5: Commit**
@@ -3418,7 +3455,7 @@ se quede obsoleto:
 
 - [ ] **Step 5: Verificar y commit**
 
-Run: `npm --prefix ui test && node --test tests/*.test.mjs`
+Run: `npm -C ui test && node --test tests/*.test.mjs`
 Expected: todo en verde (la puerta no cubre el modo legacy: ese camino lo vigila `interface-smoke.py`).
 
 ```bash
@@ -3565,7 +3602,7 @@ En `CHANGELOG.md`, bajo la versión sin publicar:
 
 Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && make test"`
 Expected: verde — `go vet`, `go test`, `node --check` de todos los `web/js/*.js`, `jslint.py`,
-`node --test tests/*.test.mjs` (incluidos los dos ficheros nuevos) y `npm --prefix ui test`.
+`node --test tests/*.test.mjs` (incluidos los dos ficheros nuevos) y `npm -C ui test`.
 
 Run: `python scripts/interface-smoke.py --url http://localhost:18443 && python scripts/studio-smoke.py --url http://localhost:18443`
 Expected: ambos PASS — el Studio real no cambió de comportamiento.
