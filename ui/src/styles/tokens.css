@@ -12,6 +12,8 @@
   --swr-text-faint: #6f7a94;
   --swr-brand: #7c5cff;
   --swr-brand-soft: rgba(124, 92, 255, 0.18);
+  --swr-brand-deep: #4f2fd6;
+  --swr-on-brand: #ffffff;
   --swr-ok: #34d399;
   --swr-warn: #fbbf24;
   --swr-err: #fb7185;

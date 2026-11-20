@@ -1,4 +1,4 @@
-// ui/tests/tokens.test.jsx — the --swr-* contract Tasks 6-10 consume.
+// ui/tests/tokens.test.jsx — the --swr-* contract Tasks 6-11 consume.
 import { test, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -29,33 +29,33 @@ const declared = new Set(
   (readFileSync(tokensFile, "utf8").match(/--swr-[a-z0-9-]+(?=\s*:)/g) || []),
 );
 
+// Los 46 nombres son el contrato que consumen las Tasks 6-11. Se copian a mano a
+// propósito: derivarlos de tokens.css dejaría el test sin ninguna afirmación.
+const CONTRACT = [
+  "--swr-bg-deep", "--swr-bg-raise", "--swr-bg-panel", "--swr-bg-glass", "--swr-line",
+  "--swr-line-strong", "--swr-text", "--swr-text-dim", "--swr-text-faint", "--swr-brand",
+  "--swr-brand-soft", "--swr-brand-deep", "--swr-on-brand", "--swr-ok", "--swr-warn",
+  "--swr-err", "--swr-live", "--swr-font-ui", "--swr-font-mono", "--swr-text-2xs",
+  "--swr-text-xs", "--swr-text-sm", "--swr-text-md", "--swr-text-lg", "--swr-text-xl",
+  "--swr-sp-1", "--swr-sp-2", "--swr-sp-3", "--swr-sp-4", "--swr-sp-5", "--swr-sp-6",
+  "--swr-r-sm", "--swr-r-md", "--swr-r-pill", "--swr-shadow-1", "--swr-shadow-2",
+  "--swr-blur", "--swr-fast", "--swr-base", "--swr-slow", "--swr-ease",
+  "--swr-z-stage", "--swr-z-panel", "--swr-z-dock", "--swr-z-dialog", "--swr-z-toast",
+];
+
 test("every --swr variable used is declared in tokens.css", () => {
   const used = new Set();
-  for (const [, css] of sources) for (const m of css.matchAll(/var\((--swr-[a-z0-9-]+)/g)) used.add(m[1]);
+  // \s* so a formatted var( --swr-x ) cannot slip past the subset gate below.
+  for (const [, css] of sources) for (const m of css.matchAll(/var\(\s*(--swr-[a-z0-9-]+)/g)) used.add(m[1]);
   expect([...used].filter((name) => !declared.has(name))).toEqual([]);
-  // The usage count only becomes meaningful when component modules land in
-  // Tasks 6-10; here motion.css contributes exactly one var(). What must hold
-  // today is that the token file declares the whole approved family.
-  expect(declared.size).toBeGreaterThanOrEqual(44);
   expect(used.size).toBeGreaterThan(0);
+  expect(declared.size).toBe(CONTRACT.length);
+  expect([...declared].filter((name) => !CONTRACT.includes(name))).toEqual([]);
 });
 
 // The Interfaces block is a contract: a silent rename in tokens.css would only
 // surface as a missing-token bug three tasks later, so pin the names literally.
-const CONTRACT = [
-  "--swr-bg-deep", "--swr-bg-raise", "--swr-bg-panel", "--swr-bg-glass", "--swr-line",
-  "--swr-line-strong", "--swr-text", "--swr-text-dim", "--swr-text-faint", "--swr-brand",
-  "--swr-brand-soft", "--swr-ok", "--swr-warn", "--swr-err", "--swr-live",
-  "--swr-font-ui", "--swr-font-mono", "--swr-text-2xs", "--swr-text-xs", "--swr-text-sm",
-  "--swr-text-md", "--swr-text-lg", "--swr-text-xl",
-  "--swr-sp-1", "--swr-sp-2", "--swr-sp-3", "--swr-sp-4", "--swr-sp-5", "--swr-sp-6",
-  "--swr-r-sm", "--swr-r-md", "--swr-r-pill",
-  "--swr-shadow-1", "--swr-shadow-2", "--swr-blur",
-  "--swr-fast", "--swr-base", "--swr-slow", "--swr-ease",
-  "--swr-z-stage", "--swr-z-panel", "--swr-z-dock", "--swr-z-dialog", "--swr-z-toast",
-];
-
-test("the approved token family is declared by exact name", () => {
+test("the token contract is fully declared", () => {
   expect(CONTRACT.filter((name) => !declared.has(name))).toEqual([]);
 });
 
@@ -68,13 +68,13 @@ test("the palette matches the approved Control Room Pro direction", () => {
 
 test("motion durations stay inside the broadcast band", () => {
   const tokens = readFileSync(tokensFile, "utf8");
-  // Scoped to the :root block: the plan's own reduced-motion override re-declares
-  // --swr-fast/base/slow as 0ms, so a whole-file scan would see six durations and
-  // could never equal the approved band. The declared values are what must be in
-  // range; zeroing them under prefers-reduced-motion is the point of that block.
-  const rootBlock = tokens.slice(0, tokens.indexOf("[data-theme"));
-  const ms = [...rootBlock.matchAll(/--swr-(?:fast|base|slow):\s*(\d+)ms/g)].map((m) => Number(m[1]));
+  // Cut at the first @media so the reduced-motion override — which re-declares
+  // fast/base/slow as 0ms by design — can never widen or narrow the scanned
+  // region by being renamed or reordered.
+  const root = tokens.split("@media")[0];
+  const ms = [...root.matchAll(/--swr-(?:fast|base|slow):\s*(\d+)ms/g)].map((m) => Number(m[1]));
   expect(ms).toEqual([120, 160, 220]);
+  expect(tokens).toMatch(/prefers-reduced-motion: reduce[\s\S]*--swr-fast: 0ms[\s\S]*--swr-base: 0ms[\s\S]*--swr-slow: 0ms/);
 });
 
 test("no CSS module hardcodes a hex colour", () => {
