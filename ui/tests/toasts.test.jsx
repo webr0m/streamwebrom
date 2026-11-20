@@ -1,7 +1,10 @@
 // ui/tests/toasts.test.jsx
-import { test, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { test, expect, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createToastQueue } from "../src/lib/toasts.js";
 import { ToastLayer } from "../src/components/ToastLayer.jsx";
 import { StudioRoot } from "../src/components/StudioShell.jsx";
@@ -12,7 +15,7 @@ import { nextStudioFixture } from "../src/fixtures/next-studio.js";
 afterEach(cleanup);
 
 test("the queue caps at three items and drops the oldest", () => {
-  const queue = createToastQueue({ now: () => 0, schedule: () => () => {} });
+  const queue = createToastQueue({ max: 3, now: () => 0, schedule: () => () => {} });
   for (const text of ["a", "b", "c", "d"]) queue.push(text, "info");
   expect(queue.items().map((item) => item.text)).toEqual(["b", "c", "d"]);
 });
@@ -23,6 +26,27 @@ test("a toast disappears after its severity budget", () => {
   queue.push("grabando", "ok");
   queue.push("sin conexión", "err");
   expect(timers.map(([, ms]) => ms)).toEqual([2600, 7000]);
+});
+
+test("an unknown severity falls back to the info budget", () => {
+  const timers = [];
+  const queue = createToastQueue({ now: () => 0, schedule: (fn, ms) => { timers.push([fn, ms]); return () => {}; } });
+  queue.push("misterioso", "trace");
+  expect(timers.map(([, ms]) => ms)).toEqual([3200]);
+});
+
+test("destroy cancels every timer and stops publishing", () => {
+  const cancelled = [];
+  let published = 0;
+  const queue = createToastQueue({ now: () => 0, schedule: () => () => cancelled.push(1) });
+  queue.subscribe(() => { published += 1; });
+  queue.push("a", "info");
+  queue.push("b", "info");
+  queue.destroy();
+  expect(cancelled).toHaveLength(2);
+  published = 0;
+  queue.dismiss("something-gone");
+  expect(published).toBe(0);
 });
 
 // Las tres de arriba no miran el id. Un temporizador que disparara sin quitar el aviso, o dos
@@ -61,6 +85,23 @@ test("the toast the cap drops loses its timer too", () => {
   queue.push("c", "info");
   expect(queue.items().map((item) => item.text)).toEqual(["b", "c"]);
   expect(cancelled).toHaveLength(1);
+});
+
+// Los cuatro `expect` de abajo son el ancla de las tres garantías que impiden que un aviso
+// visible vuelva sordo todo el dock (`pointer-events`) o se esconda detrás (`z-index`). La
+// geometría —si solapa o no— es invisible para jsdom y la mide la puerta de Playwright de
+// Task 12; lo que sí se puede afirmar aquí es el texto del fichero que el repo ya lee desde
+// disco. Se abre con `resolve(dirname(fileURLToPath(...)), "..", …)` a propósito: Vite's
+// `vite:asset-import-meta-url` reescribe toda forma de `new URL("../src/…", import.meta.url)`
+// dentro de un módulo de Vitest y `readFile` responde «The URL must be of scheme file».
+test("a toast floats over the dock without stealing its clicks", () => {
+  const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "..", "src/components/ToastLayer.module.css"), "utf8");
+  const layer = css.match(/^\.layer \{([^}]*)\}/m)[1];
+  const toast = css.match(/^\.toast \{([^}]*)\}/m)[1];
+  expect(layer).toMatch(/position: fixed/);
+  expect(layer).toMatch(/pointer-events: none/);
+  expect(layer).toMatch(/z-index: var\(--swr-z-toast\)/);
+  expect(toast).toMatch(/pointer-events: auto/);
 });
 
 test("the bridge notifies error listeners per domain", async () => {
