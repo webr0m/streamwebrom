@@ -39,6 +39,28 @@ test("the panel toggle mirrors the legacy class contract", async () => {
   expect(container.querySelector(".studio-root")).toHaveClass("panel-collapsed");
 });
 
+// Los dos botones de la barra prometen `aria-controls="scenesRail"` y
+// `aria-controls="studioPanes"`, y el modo legacy tiene esos ids en el HTML de
+// `web/studio.html`. Un `id` que solo viva en una rama del colapso deja el
+// `aria-controls` huérfano sin romper ningún test visual, así que se fija aquí
+// en los dos estados y dentro de la región que lo lleva — no basta con que el
+// documento tenga el nodo.
+test("both panel states keep the ids the topbar points at", async () => {
+  const { container } = setup();
+  for (const panelOpen of [true, false]) {
+    if (container.querySelector(".panel-collapsed")) {
+      await userEvent.click(screen.getByRole("button", { name: /panel/i }));
+    }
+    for (const [id, region] of [["scenesRail", "rail"], ["studioPanes", "panel"]]) {
+      const node = document.querySelector(`#${id}`);
+      expect(node).toBeInTheDocument();
+      expect(node).toHaveAttribute("data-region", region);
+      expect(container.querySelector(`[data-region="${region}"]`)).toBe(node);
+    }
+    await userEvent.click(screen.getByRole("button", { name: /panel/i }));
+  }
+});
+
 // jsdom no aplica `layout.css` sobre los nodos, así que el grid no es observable
 // aquí; lo que sí se puede fijar es que cada token que usa siga declarado. Un
 // `var(--swr-inexistente)` es invisible en el test y deja el panel sin color en
