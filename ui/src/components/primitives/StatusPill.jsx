@@ -1,8 +1,6 @@
 // ui/src/components/primitives/StatusPill.jsx
+import { cx } from "./cx.js";
 import styles from "./StatusPill.module.css";
-
-// An unknown tone must never reach the DOM as the literal word "undefined".
-const cx = (...names) => names.filter(Boolean).join(" ");
 
 export function StatusPill({ tone = "idle", label, dot = false, className = "" }) {
   return (

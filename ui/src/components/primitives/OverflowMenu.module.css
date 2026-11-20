@@ -1,0 +1,46 @@
+/* ui/src/components/primitives/OverflowMenu.module.css */
+.slot { position: relative; display: inline-flex; flex: 0 0 auto; }
+.trigger {
+  inline-size: 30px;
+  block-size: 30px;
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-sm);
+  background: var(--swr-bg-panel);
+  color: var(--swr-text-dim);
+  cursor: pointer;
+}
+.trigger:hover { color: var(--swr-text); border-color: var(--swr-line-strong); }
+.menu {
+  position: absolute;
+  inset-block-start: calc(100% + var(--swr-sp-1));
+  inset-inline-end: 0;
+  z-index: var(--swr-z-panel);
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 168px;
+  max-inline-size: 240px;
+  padding: var(--swr-sp-1);
+  border: 1px solid var(--swr-line-strong);
+  border-radius: var(--swr-r-md);
+  background: var(--swr-bg-glass);
+  backdrop-filter: blur(var(--swr-blur));
+  box-shadow: var(--swr-shadow-2);
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--swr-sp-2);
+  min-width: 0;
+  padding: var(--swr-sp-2);
+  border: 0;
+  border-radius: var(--swr-r-sm);
+  background: transparent;
+  color: var(--swr-text);
+  font: inherit;
+  font-size: var(--swr-text-sm);
+  text-align: start;
+  cursor: pointer;
+}
+.item:hover { background: var(--swr-brand-soft); }
+.itemLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.danger { color: var(--swr-err); }

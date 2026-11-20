@@ -1,0 +1,24 @@
+/* ui/src/components/primitives/Switch.module.css */
+.switch {
+  flex: 0 0 auto;
+  inline-size: 40px;
+  block-size: 22px;
+  padding: 2px;
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-pill);
+  background: var(--swr-bg-raise);
+  cursor: pointer;
+  transition: border-color var(--swr-base) var(--swr-ease), background var(--swr-base) var(--swr-ease);
+}
+.on { border-color: var(--swr-brand); background: var(--swr-brand-soft); }
+.knob {
+  display: block;
+  inline-size: 16px;
+  block-size: 16px;
+  border-radius: 50%;
+  background: var(--swr-text-dim);
+  transition: transform var(--swr-base) var(--swr-ease), background var(--swr-base) var(--swr-ease);
+}
+.on .knob { transform: translateX(18px); background: var(--swr-brand); }
+.switch:focus-visible { outline: 2px solid var(--swr-brand); outline-offset: 2px; }
+.switch:disabled { opacity: 0.5; cursor: not-allowed; }

@@ -1,8 +1,6 @@
 // ui/src/components/primitives/IconButton.jsx
+import { cx } from "./cx.js";
 import styles from "./IconButton.module.css";
-
-// Same guard as CommandButton: an unknown size must not reach the DOM as "undefined".
-const cx = (...names) => names.filter(Boolean).join(" ");
 
 export function IconButton({ icon, label, onClick, size = "sm", className = "", ...rest }) {
   if (!label) throw new Error("IconButton needs an accessible name (label)");
