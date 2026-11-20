@@ -368,10 +368,14 @@ y en el job `browser`, antes de `go build -o /tmp/streamwebrom ./cmd/streamwebro
 ```
 ui/node_modules/
 web/.vite/
-web/js/studio-*.js
-web/css/studio-*.css
+web/js/*-????????.js
+web/css/*-????????.css
 web/js/sw-assets.json
 ```
+
+Los dos patrones de hash sustituyen a `web/js/studio-*.js`: a partir de la Task 4 Vite emite además
+`mode-*`, `boot-legacy-*`, `mount-next-*` y `preload-helper-*`, y los módulos escritos a mano en
+`web/js` no llevan sufijo de 8 caracteres, así que el patrón ancho no puede tragarse una fuente.
 
 `web/studio.html` **no** se ignora: sigue controlado por git aunque desde la Task 4 lo genere Vite,
 así `go test ./internal/server/` y el `//go:embed` tienen siempre una página aunque nadie haya
