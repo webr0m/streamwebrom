@@ -52,6 +52,7 @@ buscará aquí): plan 2 = porta del motor + `SceneRail`/`ProgramStage`/`LayoutBa
 - Las claves de destino jamás salen del navegador; el snapshot entrega solo valores enmascarados (spec §6).
 - `make test` actual (vet + go test + `node --check` de `web/js/*.js` + `jslint.py` + `node --test tests/*.test.mjs`) sigue en verde en cada tarea.
 - Entorno del propietario: Node 24 está en PATH de Windows; `go` y `make` se ejecutan en WSL Ubuntu (`wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && make test"`).
+- Contrato del entorno de tests (commit `4edcb3d`, no lo re-imponga cada task): `ui/vite.config.js` fija `esbuild.jsx = "automatic"` porque bajo la transformación SSR de Vitest `@vitejs/plugin-react` no interviene y el JSX caería al runtime clásico, y `test.css.modules.classNameStrategy = "non-scoped"` para que `styles.primary` valga `"primary"` y las aserciones de clase del plan (`toHaveClass`, `querySelector(".studio-root")`) vean el nombre real. Las primitivas no necesitan `import React` y tampoco lo deben tener.
 - Nunca escribir `git push`, desplegar ni subir credenciales: este plan termina en commits locales.
 
 ---
