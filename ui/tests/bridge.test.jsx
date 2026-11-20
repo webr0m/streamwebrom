@@ -58,3 +58,11 @@ test("the bridge mirrors engine publications into the snapshot", () => {
   engine.emit({ production: { ...engine.snapshot().production, live: false } });
   expect(spy).toHaveBeenCalledTimes(1);
 });
+
+test("notify publishes into the snapshot so React can render toasts", () => {
+  const bridge = createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) });
+  bridge.notify("hola", "info");
+  expect(bridge.getSnapshot().toasts.items.map((item) => item.text)).toEqual(["hola"]);
+  bridge.dismissToast(bridge.getSnapshot().toasts.items[0].id);
+  expect(bridge.getSnapshot().toasts.items).toEqual([]);
+});

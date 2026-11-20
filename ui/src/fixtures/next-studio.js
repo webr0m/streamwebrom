@@ -45,5 +45,4 @@ export const nextStudioFixture = {
   workspace: { scenesCollapsed: false, panelOpen: true, activeTab: "dest", stageHeight: 0, theme: "dark", lang: "es" },
   errors: { media: "", broadcast: "", room: "", network: "" },
   pending: {},
-  toasts: { items: [] },
 };

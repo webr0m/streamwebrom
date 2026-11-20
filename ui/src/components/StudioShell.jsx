@@ -47,7 +47,7 @@ export function StudioRoot({ bridge }) {
           </section>
         )}
       </div>
-      <ToastLayer />
+      <ToastLayer bridge={bridge} />
     </div>
   );
 }
