@@ -3494,9 +3494,13 @@ test("SourceTray keeps every control named when the card shrinks", async () => {
   render(<SourceTray sources={media.sources} command={command} />);
   const long = media.sources[0];
   expect(screen.getByText(long.name)).toHaveAttribute("data-truncated");
-  await userEvent.click(document.querySelector('[data-role="visibility"]'));
+  const node = document.querySelector('[data-role="visibility"]');
+  expect(node, 'el Switch debe publicar data-role: sin ...rest en el botón, el selector es null').toBeInTheDocument();
+  await userEvent.click(node);
   expect(command).toHaveBeenCalledWith("source.hide", { id: media.sources[0].id, hidden: true });
-  fireEvent.click(document.querySelector('[data-role="source-more"]'));
+  const more = document.querySelector('[data-role="source-more"]');
+  expect(more, 'OverflowMenu ya reparte ...rest; el ancla se fija igual que arriba').toBeInTheDocument();
+  fireEvent.click(more);
   await userEvent.click(screen.getAllByRole("menuitem").at(-1));
   expect(command).toHaveBeenLastCalledWith("source.remove", { id: media.sources[0].id });
 });
@@ -3649,10 +3653,15 @@ export function ProgramStage({ production, media }) {
 import { t } from "../i18n.js";
 import styles from "./LayoutBar.module.css";
 
+// The eight layout ids are the real ones web/js/studio.js paints. The keys live
+// in the `studiojs.*` namespace: `web/js/i18n/es/studio.js` has no layout name
+// keys at all, and t() echoes an unknown key back, so a `studio.layoutX` lookup
+// would render the literal "studio.layoutSolo" as every button's accessible
+// name instead of its translated label.
 const LAYOUTS = [
-  ["solo", "studio.layoutSolo"], ["split", "studio.layoutSplit"], ["grid", "studio.layoutGrid"],
-  ["pip", "studio.layoutPip"], ["sidebar", "studio.layoutSidebar"], ["spotlight", "studio.layoutSpotlight"],
-  ["screen", "studio.layoutScreen"], ["news", "studio.layoutNews"],
+  ["solo", "studiojs.layoutSolo"], ["split", "studiojs.layoutSplit"], ["grid", "studiojs.layoutGrid"],
+  ["pip", "studiojs.layoutPip"], ["sidebar", "studiojs.layoutSidebar"], ["spotlight", "studiojs.layoutSpotlight"],
+  ["screen", "studiojs.layoutScreen"], ["news", "studiojs.layoutNews"],
 ];
 
 export function LayoutBar({ layout, command, sources = [], featured = "" }) {
@@ -3775,8 +3784,8 @@ const ACTIONS = [
   { id: "screen", icon: "▣", label: () => t("studio.screen"), hint: () => t("studio.screenHint"), command: "device.screen" },
   { id: "media", icon: "▶", label: () => t("studio.media"), hint: () => t("studio.mediaHint"), command: "device.media" },
   { id: "vdo", icon: "⌁", label: () => "VDO" /* i18n-lint-ignore nombre propio */, hint: () => t("studio.vdoHint"), command: "device.vdo" },
-  { id: "settings", icon: "⚙", label: () => t("studio.settings"), hint: () => t("studio.settings"), command: "room.settings" },
-  { id: "invite", icon: "＋", label: () => t("studio.invite"), hint: () => t("studio.invite"), command: "room.invite" },
+  { id: "settings", icon: "⚙", label: () => t("studio.settings"), hint: () => t("studio.settingsHint"), command: "room.settings" },
+  { id: "invite", icon: "＋", label: () => t("studio.invite"), hint: () => t("studio.inviteHint"), command: "room.invite" },
 ];
 
 export function ProductionDock({ snapshot, command, collapsedActions = [] }) {
@@ -3852,6 +3861,26 @@ Tres detalles del bloque anterior son de contrato, no de gusto:
   `SourceTray.module.css` define `.card.pending` y `.card.error`, pero `status` también vale
   `"active"`, y `styles["active"]` es `undefined`: la plantilla de cadena literal metía el literal
   `undefined` en el `class` de cada tarjeta correcta.
+
+Hay una cuarta pieza, y es de primitiva: `Switch` no repartía `...rest` sobre su `<button>`, así que
+el `data-role="visibility"` que la bandeja le pasa se quedaba en las props y nunca llegaba al DOM —
+`document.querySelector('[data-role="visibility"]')` devolvía `null` y el test fallaba antes de poder
+afirmar nada del comando. `IconButton`, `CommandButton`, `OverflowMenu` y `TruncatedText` ya aceptan
+props extra; `Switch` era el único que las descartaba en silencio. Se le añade `...rest` (después de
+`onClick`, para que un caller no pueda pisar el contrato de `onChange`) y las dos anclas del test
+quedan fijadas con su propio `expect(...).toBeInTheDocument()`: si la primitiva vuelve a tragarse el
+atributo, el fallo nombra el selector, no el spy.
+
+Dos claves más estaban mal citadas en los bloques y se corrigen aquí, porque el texto viejo no
+fallaba ningún test pero sí pintaba la interfaz:
+
+- `LayoutBar` usaba `studio.layoutSolo`… No existen ocho claves así: los nombres de layout viven en
+  `studiojs.*` (`web/js/i18n/es/studio.js` solo tiene `studio.layouts`, el título del grupo) y
+  `web/js/studio.js:44` usa precisamente esa lista. Como `t()` devuelve la clave cuando no la
+  encuentra, cada botón habría mostrado `studio.layoutSolo` como etiqueta y nombre accesible.
+- El `hint` de Ajustes e Invitar repetía la clave de la etiqueta. El legacy pone
+  `studio.settingsHint` / `studio.inviteHint` en `data-i18n-title` (ui/studio.html:96-97); con la
+  clave duplicada el tooltip perdía su texto.
 
 - [ ] **Step 5: Verificar y commit**
 
