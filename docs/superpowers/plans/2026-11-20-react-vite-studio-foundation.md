@@ -2257,8 +2257,9 @@ git commit -m "feat(ui): add tabs, switch, overflow menu, field and dialog primi
   - `useStageHeight(ref) → number` — escribe `--stage-height` en el elemento observado, igual que el `ResizeObserver` legacy, y devuelve la altura redondeada. jsdom no trae `ResizeObserver`: el hook lo detecta y el test lo stubea.
   - `useReducedMotion() → boolean`.
   - `throttle(fn, { hz = 10, now, later }) → { run(value), cancel() }` con llamada final garantizada. `cancel()` no puede desprogramar el temporizador que devolvió `later` (puede ser cualquier scheduler), así que usa un centinela `pending === undefined`: el flush disparado no entrega nada y `run()` vuelve a programar.
-  - `<LevelMeter value={0..1} label />` — `role="meter"`, `aria-valuenow` en porcentaje, `--swr-level` como
+  - `<LevelMeter value={0..1} label />` — `role="meter"`, `aria-valuenow` en porcentaje, `--level` como
     longitud de la barra, `data-reduced="true"` cuando no hay animación. `value` es lineal 0..1: quien tenga decibelios (Task 10) los mapea antes de pasarlos.
+    La variable se llama `--level` y no `--swr-level`: el prefijo `--swr-` está reservado por `ui/tests/tokens.test.jsx`, que escanea todo `var(--swr-*)` escrito en un `.module.css` y solo acepta los 46 nombres declarados en `styles/tokens.css`; un dato por instancia en ese namespace es una trampa porque la primera lectura desde CSS rompería el gate de la Task 3. La geometría —degradado sobre el relleno, la rampa escala con la barra— es la de `.meter i` de `web/css/app.css` y del `#meter` que `web/js/guest.js` escribe en línea, así que no es una regresión visual frente al Studio de hoy.
   - `ui/src/i18n.js`: re-exporta `t`, `installI18n`, `onLangChange`, `setLang`, `LANGS`, `LANG_LABELS` desde `../../web/js/i18n.js`, única vía para leer textos. También re-exporta `lang`, porque los stores de React necesitan leer el idioma actual sin copiarlo.
 
 - [ ] **Step 1: Escribir el re-export y los tests que fallan**
@@ -2397,7 +2398,7 @@ test("LevelMeter reports its value accessibly and honours reduced motion", () =>
   const meter = screen.getByRole("meter", { name: "Nivel de Cámara principal" });
   expect(meter).toHaveAttribute("aria-valuenow", "72");
   expect(meter).toHaveAttribute("aria-valuemin", "0");
-  expect(meter.style.getPropertyValue("--swr-level")).toBe("72%");
+  expect(meter.style.getPropertyValue("--level")).toBe("72%");
   cleanup();
   render(<LevelMeter value={0.4} label="Nivel" reduced />);
   expect(screen.getByRole("meter")).toHaveAttribute("data-reduced", "true");
@@ -2549,7 +2550,7 @@ export function LevelMeter({ value = 0, label, reduced = false, className = "" }
       aria-valuemax={100}
       data-reduced={String(reduced)}
       className={cx(styles.meter, className)}
-      style={{ "--swr-level": `${percent}%` }}
+      style={{ "--level": `${percent}%` }}
     >
       <span className={styles.fill} aria-hidden="true" />
     </span>
@@ -2575,7 +2576,7 @@ export function LevelMeter({ value = 0, label, reduced = false, className = "" }
   position: absolute;
   inset-block: 0;
   inset-inline-start: 0;
-  inline-size: var(--swr-level, 0%);
+  inline-size: var(--level, 0%);
   background: linear-gradient(90deg, var(--swr-ok), var(--swr-warn) 78%, var(--swr-err));
   transition: inline-size var(--swr-fast) linear;
 }
@@ -2596,7 +2597,7 @@ Expected: 44 tests PASS en 9 ficheros (35 de la Task 7 + 9 nuevos).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/src/hooks ui/src/lib ui/src/i18n.js ui/tests/hooks.test.jsx ui/tests/meter.test.jsx
+git add ui/src/hooks ui/src/lib ui/src/i18n.js ui/src/components/primitives/LevelMeter.jsx ui/src/components/primitives/LevelMeter.module.css ui/tests/hooks.test.jsx ui/tests/meter.test.jsx
 git commit -m "feat(ui): add bridge hooks, local workspace store and audio meter"
 ```
 
