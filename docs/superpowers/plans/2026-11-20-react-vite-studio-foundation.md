@@ -1311,7 +1311,7 @@ git commit -m "feat(ui): define the bridge snapshot contract with a fixture engi
   - `<TruncatedText as="span" title={string} className?>{children}</TruncatedText>` — añade `title` solo cuando detecta corte real; `data-truncated="true|false"`.
   - `<StatusPill tone="ok|warn|err|idle|live" label={string} dot?: boolean>` — `role="status"`, texto traducido obligatorio por caller.
   - `<IconButton icon={string} label={string} onClick size?>` — lanza si falta `label`.
-  - `<CommandButton status="idle|pending|active|error" icon={string} label={string} onClick title? error? collapsible? primary?>` — en `pending` queda `disabled` + `aria-busy`; en `error` publica `role="status"` con `error`; si `collapsible`, conserva el icono cuando la etiqueta se oculta por CSS.
+  - `<CommandButton status="idle|pending|active|error" icon={string} label={string} onClick title? error? collapsible? primary?>` — en `pending` queda `disabled` + `aria-busy`; en `error` publica `role="status"` con `error`; si `collapsible`, conserva el icono cuando la etiqueta se oculta por CSS y **mantiene el nombre accesible vía `aria-label`** (bajo 1100 px la etiqueta es `display:none`). `idle` es el estilo base y no tiene clase: ninguna clase puede llegar a escribir el literal `undefined` en el DOM.
 
 - [ ] **Step 1: Escribir el test que falla**
 
@@ -1339,17 +1339,25 @@ test("StatusPill announces its tone and never overflows the box", () => {
   render(<StatusPill tone="live" label="En directo" dot />);
   const pill = screen.getByRole("status");
   expect(pill).toHaveTextContent("En directo");
-  expect(pill.className).toContain("live");
+  expect(pill).toHaveClass("live");
+  expect(pill.querySelector(".dot")).toBeInTheDocument();
 });
 
 test("IconButton cannot exist without an accessible name", () => {
   expect(() => render(<IconButton icon="⚙" onClick={() => {}} />)).toThrow(/accessible name/);
+  render(<IconButton icon="⚙" label="Ajustes" size="md" onClick={() => {}} className="extra" />);
+  const button = screen.getByRole("button", { name: "Ajustes" });
+  expect(button).toHaveClass("md");
+  // A missing tone/size class must never reach the DOM as the literal word.
+  expect(button.className).not.toContain("undefined");
 });
 
 test("CommandButton walks idle → pending → error and keeps its icon", async () => {
   const onClick = () => {};
   const { rerender } = render(<CommandButton status="idle" icon="▲" label="Transmitir" onClick={onClick} />);
-  expect(screen.getByRole("button", { name: "Transmitir" })).toHaveAttribute("aria-pressed", "false");
+  const idle = screen.getByRole("button", { name: "Transmitir" });
+  expect(idle).toHaveAttribute("aria-pressed", "false");
+  expect(idle.className).not.toContain("undefined");
 
   rerender(<CommandButton status="pending" icon="▲" label="Transmitir" onClick={onClick} />);
   expect(screen.getByRole("button", { name: "Transmitir" })).toBeDisabled();
@@ -1358,6 +1366,9 @@ test("CommandButton walks idle → pending → error and keeps its icon", async 
   rerender(<CommandButton status="error" icon="▲" label="Transmitir" onClick={onClick} error="no fue" collapsible />);
   const button = screen.getByRole("button", { name: "Transmitir" });
   expect(button).toHaveAttribute("data-status", "error");
+  // Below 1100px the label is display:none; aria-label is the only name left.
+  expect(button).toHaveAttribute("aria-label", "Transmitir");
+  expect(button).not.toHaveAttribute("aria-disabled");
   expect(button.querySelector("[data-icon]").textContent).toBe("▲");
   await userEvent.click(button);
   expect(screen.getByText("no fue")).toBeInTheDocument();
@@ -1365,7 +1376,9 @@ test("CommandButton walks idle → pending → error and keeps its icon", async 
 
 test("the primary command reserves its own width", () => {
   render(<CommandButton status="active" icon="▲" label="Transmitir" onClick={() => {}} primary />);
-  expect(screen.getByRole("button", { name: "Transmitir" })).toHaveClass("primary");
+  const button = screen.getByRole("button", { name: "Transmitir" });
+  expect(button).toHaveClass("primary");
+  expect(button).toHaveAttribute("aria-pressed", "true");
 });
 ```
 
@@ -1443,7 +1456,7 @@ import styles from "./StatusPill.module.css";
 
 export function StatusPill({ tone = "idle", label, dot = false, className = "" }) {
   return (
-    <span role="status" className={`${styles.pill} ${styles[tone]} ${className}`} data-tone={tone}>
+    <span role="status" className={[styles.pill, styles[tone], className].filter(Boolean).join(" ")} data-tone={tone}>
       {dot ? <i className={styles.dot} aria-hidden="true" /> : null}
       <span className={styles.text}>{label}</span>
     </span>
@@ -1475,18 +1488,21 @@ export function StatusPill({ tone = "idle", label, dot = false, className = "" }
 .warn { color: var(--swr-warn); }
 .idle { color: var(--swr-text-faint); }
 .live { color: var(--swr-live); border-color: var(--swr-live); }
+/* One rule: a second .live .dot would override a future pulse by cascade order. */
 .live .dot { box-shadow: 0 0 12px 2px rgba(255, 59, 82, 0.45); }
-.live .dot { animation: none; }
 ```
 
 ```jsx
 // ui/src/components/primitives/IconButton.jsx
 import styles from "./IconButton.module.css";
 
+// Same guard as CommandButton: an unknown size must not reach the DOM as "undefined".
+const cx = (...names) => names.filter(Boolean).join(" ");
+
 export function IconButton({ icon, label, onClick, size = "sm", className = "", ...rest }) {
   if (!label) throw new Error("IconButton needs an accessible name (label)");
   return (
-    <button type="button" className={`${styles.button} ${styles[size]} ${className}`} onClick={onClick} aria-label={label} title={label} {...rest}>
+    <button type="button" className={cx(styles.button, styles[size], className)} onClick={onClick} aria-label={label} title={label} {...rest}>
       <span data-icon aria-hidden="true">{icon}</span>
     </button>
   );
@@ -1516,21 +1532,25 @@ export function IconButton({ icon, label, onClick, size = "sm", className = "", 
 // ui/src/components/primitives/CommandButton.jsx
 import styles from "./CommandButton.module.css";
 
+// filter(Boolean) is load-bearing: `idle` is the base look and declares no class, and
+// a template literal would write the literal token "undefined" into the DOM.
+const cx = (...names) => names.filter(Boolean).join(" ");
+
 export function CommandButton({
   status = "idle", icon, label, onClick, title, error = "",
   collapsible = false, primary = false, className = "", ...rest
 }) {
   const pending = status === "pending";
   return (
-    <span className={`${styles.slot} ${collapsible ? styles.collapsible : ""} ${className}`}>
+    <span className={cx(styles.slot, collapsible && styles.collapsible, className)}>
       <button
         type="button"
-        className={`${styles.button} ${styles[status]} ${primary ? styles.primary : ""}`}
+        className={cx(styles.button, styles[status], primary && styles.primary)}
         onClick={onClick}
         disabled={pending}
         aria-busy={pending}
         aria-pressed={status === "active" ? "true" : "false"}
-        aria-disabled={status === "error" ? "false" : undefined}
+        aria-label={label}
         title={title ?? label}
         data-status={status}
         {...rest}
@@ -1578,7 +1598,7 @@ export function CommandButton({
   color: var(--swr-on-brand);
   font-weight: 650;
 }
-.live { border-color: var(--swr-live); color: var(--swr-live); }
+/* No .live rule here: "on air" is StatusPill's tone, not a CommandButton status. */
 /* Below the tablet line a collapsible action keeps only its glyph. */
 @media (max-width: 1100px) {
   .collapsible .label { display: none; }
