@@ -186,4 +186,12 @@ export const ru = {
   "studio.vdoCaptureHelpText": "Создайте или подключите камеру, чтобы подготовить предпросмотр.",
   "studio.vdoCapture": "Захватить вкладку на сцену",
   "studio.vdoCaptureNote": "Предпросмотр сам не попадает в программу. Захват просмотрщика добавляет звук и видео как обычный источник в 16:9, который организатор может разместить на сцене. Захват добавляет обработку; прямая ссылка OBS избавляет от неё.",
+  "studio.showPanel": "Панель настроек",
+  "studio.showSource": "Показать источник",
+  "studio.hideSource": "Скрыть источник",
+  "studio.removeSource": "Удалить источник",
+  "studio.qualityHd": "Качество HD",
+  "studio.qualityFullHd": "Качество Full HD",
+  "studio.notifications": "Уведомления студии",
+  "studio.closeNotification": "Закрыть уведомление",
 };

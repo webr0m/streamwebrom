@@ -1,16 +1,27 @@
-import { createElement } from "react";
+// ui/src/mount-next.jsx
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { installI18n } from "./i18n.js";
+import { createStudioBridge } from "./bridge/studio-bridge.js";
+import { createFixtureEngine } from "./bridge/fixture-engine.js";
+import { nextStudioFixture } from "./fixtures/next-studio.js";
+import { StudioRoot } from "./components/StudioShell.jsx";
 
-// Task 4 only proves the switch mounts React. Task 9 replaces this placeholder
-// with <StudioRoot bridge={…}/> fed by the fixture engine.
-// Task 9 must mount into this same #studioRoot node and reuse the root it
-// returns: calling createRoot twice on one node wipes the tree.
+// Task 4's placeholder returned the #studioRoot node; the bridge is what the
+// console and plan 2's instrumentation need. `main.jsx` ignores both, and this
+// is the only place a root is created: a second createRoot on the same node
+// wipes the tree, so callers must reuse what is mounted here.
 export async function mountNext() {
+  installI18n();
   const root = document.querySelector("#studioRoot");
   root.replaceChildren();
+  const engine = createFixtureEngine(nextStudioFixture);
+  const bridge = createStudioBridge({ engine });
   root.dataset.uiMode = "next";
   createRoot(root).render(
-    createElement("section", { className: "swr-next-placeholder" }, "Studio next"),
+    <StrictMode>
+      <StudioRoot bridge={bridge} />
+    </StrictMode>,
   );
-  return root;
+  return bridge;
 }

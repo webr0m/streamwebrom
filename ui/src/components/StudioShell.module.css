@@ -1,0 +1,14 @@
+/* ui/src/components/StudioShell.module.css */
+.root { display: block; block-size: 100%; }
+.slot { display: flex; flex-direction: column; gap: var(--swr-sp-2); min-width: 0; min-height: 0; }
+.rail { display: flex; align-items: flex-start; }
+.restore {
+  inline-size: 100%;
+  block-size: 44px;
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-sm);
+  background: var(--swr-bg-glass);
+  color: var(--swr-text-dim);
+  cursor: pointer;
+}
+.restore:hover { color: var(--swr-text); border-color: var(--swr-line-strong); }

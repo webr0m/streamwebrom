@@ -1,5 +1,6 @@
 import "./styles/tokens.css";
 import "./styles/motion.css";
+import "./styles/layout.css";
 import { uiMode, storedMode, assetBase } from "./mode.js";
 
 const mode = uiMode(new URLSearchParams(location.search), storedMode());

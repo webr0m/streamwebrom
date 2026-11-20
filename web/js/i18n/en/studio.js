@@ -186,4 +186,12 @@ export const en = {
   "studio.vdoCaptureHelpText": "Create or connect a camera to prepare the preview.",
   "studio.vdoCapture": "Capture tab to the stage",
   "studio.vdoCaptureNote": "The preview is not added to the program by itself. Capturing the viewer adds audio and video as a regular source, in 16:9, that the host can place on the stage. Capturing adds processing; the direct OBS link avoids that extra capture.",
+  "studio.showPanel": "Settings panel",
+  "studio.showSource": "Show source",
+  "studio.hideSource": "Hide source",
+  "studio.removeSource": "Remove source",
+  "studio.qualityHd": "HD quality",
+  "studio.qualityFullHd": "Full HD quality",
+  "studio.notifications": "Studio notices",
+  "studio.closeNotification": "Close notice",
 };

@@ -1,0 +1,51 @@
+/* ui/src/styles/layout.css */
+/* Balanced density: rail 216px, stage absorbs the rest, panel 340px. */
+.swr-shell {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr) 340px;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "top  top   top"
+    "rail stage panel"
+    "rail tray  panel"
+    "dock dock  dock";
+  gap: var(--swr-sp-2);
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 0;
+  padding: var(--swr-sp-2);
+  background: radial-gradient(120% 120% at 12% 0%, var(--swr-bg-raise), var(--swr-bg-deep) 62%);
+  color: var(--swr-text);
+  font-family: var(--swr-font-ui);
+  font-size: var(--swr-text-sm);
+  overflow: hidden;
+}
+.swr-shell > * { min-width: 0; min-height: 0; }
+[data-region="top"] { grid-area: top; }
+[data-region="rail"] { grid-area: rail; }
+[data-region="stage"] { grid-area: stage; }
+[data-region="tray"] { grid-area: tray; }
+[data-region="dock"] { grid-area: dock; }
+[data-region="panel"] { grid-area: panel; background: var(--swr-bg-glass); backdrop-filter: blur(var(--swr-blur)); border: 1px solid var(--swr-line); border-radius: var(--swr-r-md); }
+
+.scenes-collapsed .swr-shell { grid-template-columns: 48px minmax(0, 1fr) 340px; }
+.panel-collapsed .swr-shell { grid-template-columns: 216px minmax(0, 1fr) 52px; }
+.scenes-collapsed.panel-collapsed .swr-shell { grid-template-columns: 48px minmax(0, 1fr) 52px; }
+
+@media (max-width: 1120px) {
+  .swr-shell,
+  .scenes-collapsed .swr-shell { grid-template-columns: 168px minmax(0, 1fr) 300px; }
+}
+
+@media (max-width: 820px) {
+  .swr-shell,
+  .scenes-collapsed .swr-shell,
+  .panel-collapsed .swr-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "top" "rail" "stage" "tray" "dock";
+    overflow: auto;
+  }
+  [data-region="panel"] { position: fixed; inset: auto 0 0 0; max-block-size: 62vh; z-index: var(--swr-z-panel); border-radius: var(--swr-r-md) var(--swr-r-md) 0 0; }
+  .panel-collapsed [data-region="panel"] { display: none; }
+}

@@ -186,4 +186,12 @@ export const es = {
   "studio.vdoCaptureHelpText": "Crea o conecta una cámara para preparar la vista previa.",
   "studio.vdoCapture": "Capturar pestaña para el escenario",
   "studio.vdoCaptureNote": "La vista previa no se incorpora sola al programa. La captura del visor agrega audio y video como una fuente normal, en 16:9, que el anfitrión puede colocar en el escenario. La captura añade procesamiento; el enlace OBS directo evita esa captura adicional.",
+  "studio.showPanel": "Panel de ajustes",
+  "studio.showSource": "Mostrar fuente",
+  "studio.hideSource": "Ocultar fuente",
+  "studio.removeSource": "Quitar fuente",
+  "studio.qualityHd": "Calidad HD",
+  "studio.qualityFullHd": "Calidad Full HD",
+  "studio.notifications": "Avisos del estudio",
+  "studio.closeNotification": "Cerrar aviso",
 };
