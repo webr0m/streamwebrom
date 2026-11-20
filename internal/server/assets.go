@@ -36,6 +36,16 @@ func shellPrefix(files fs.FS) string {
 	return "/assets/" + hex.EncodeToString(h.Sum(nil)[:12])
 }
 
+// The Vite build publishes the hashed bundle list; the offline shell must
+// precache exactly those URLs, never a hand-maintained one.
+func shellAssets(files fs.FS) []byte {
+	data, err := fs.ReadFile(files, "js/sw-assets.json")
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		return []byte("[]")
+	}
+	return bytes.TrimSpace(data)
+}
+
 func noShellCache(w http.ResponseWriter) {
 	for _, header := range []string{"Cache-Control", "CDN-Cache-Control", "Cloudflare-CDN-Cache-Control"} {
 		w.Header().Set(header, "no-store")
@@ -55,6 +65,7 @@ func (s *Server) serveShell(w http.ResponseWriter, r *http.Request, name string,
 	case ".js":
 		if name == "sw.js" {
 			data = bytes.ReplaceAll(data, []byte("__SWR_ASSET_PREFIX__"), []byte(s.assetPrefix))
+			data = bytes.ReplaceAll(data, []byte("__SWR_SHELL__"), shellAssets(s.static))
 		}
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	case ".css":
