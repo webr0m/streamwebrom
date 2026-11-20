@@ -1311,13 +1311,16 @@ git commit -m "feat(ui): define the bridge snapshot contract with a fixture engi
   - `<TruncatedText as="span" title={string} className?>{children}</TruncatedText>` — añade `title` solo cuando detecta corte real; `data-truncated="true|false"`.
   - `<StatusPill tone="ok|warn|err|idle|live" label={string} dot?: boolean>` — `role="status"`, texto traducido obligatorio por caller.
   - `<IconButton icon={string} label={string} onClick size?>` — lanza si falta `label`.
-  - `<CommandButton status="idle|pending|active|error" icon={string} label={string} onClick title? error? collapsible? primary?>` — en `pending` queda `disabled` + `aria-busy`; en `error` publica `role="status"` con `error`; si `collapsible`, conserva el icono cuando la etiqueta se oculta por CSS y **mantiene el nombre accesible vía `aria-label`** (bajo 1100 px la etiqueta es `display:none`). `idle` es el estilo base y no tiene clase: ninguna clase puede llegar a escribir el literal `undefined` en el DOM.
+  - `<CommandButton status="idle|pending|active|error" icon={string} label={string} onClick title? error? collapsible? primary?>` — en `pending` queda `disabled` + `aria-busy`; en `error` publica `role="status"` con `error`; si `collapsible`, conserva el icono cuando la etiqueta se oculta por CSS y **mantiene el nombre accesible vía `aria-label`** (bajo 1100 px la etiqueta es `display:none`). `idle` es el estilo base y no tiene clase: el join filtra los falsy para que el bundle escalado no escriba el literal `undefined` en el DOM (en jsdom, con `classNameStrategy: "non-scoped"`, la clave ecoa su nombre y esa diferencia no es observable: el ancla real es la prueba estática que lee las `.module.css`).
 
 - [ ] **Step 1: Escribir el test que falla**
 
 ```jsx
 // ui/tests/primitives-text.test.jsx
 import { test, expect, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TruncatedText } from "../src/components/primitives/TruncatedText.jsx";
@@ -1348,8 +1351,6 @@ test("IconButton cannot exist without an accessible name", () => {
   render(<IconButton icon="⚙" label="Ajustes" size="md" onClick={() => {}} className="extra" />);
   const button = screen.getByRole("button", { name: "Ajustes" });
   expect(button).toHaveClass("md");
-  // A missing tone/size class must never reach the DOM as the literal word.
-  expect(button.className).not.toContain("undefined");
 });
 
 test("CommandButton walks idle → pending → error and keeps its icon", async () => {
@@ -1357,7 +1358,6 @@ test("CommandButton walks idle → pending → error and keeps its icon", async 
   const { rerender } = render(<CommandButton status="idle" icon="▲" label="Transmitir" onClick={onClick} />);
   const idle = screen.getByRole("button", { name: "Transmitir" });
   expect(idle).toHaveAttribute("aria-pressed", "false");
-  expect(idle.className).not.toContain("undefined");
 
   rerender(<CommandButton status="pending" icon="▲" label="Transmitir" onClick={onClick} />);
   expect(screen.getByRole("button", { name: "Transmitir" })).toBeDisabled();
@@ -1379,6 +1379,36 @@ test("the primary command reserves its own width", () => {
   const button = screen.getByRole("button", { name: "Transmitir" });
   expect(button).toHaveClass("primary");
   expect(button).toHaveAttribute("aria-pressed", "true");
+});
+
+// toHaveClass("primary") can only prove which key the component asked for: with
+// classNameStrategy "non-scoped" (ui/vite.config.js) styles.nope answers "nope", so a
+// deleted CSS rule is invisible to it. The component↔stylesheet pairing is pinned to the
+// files here, the same way ui/tests/tokens.test.jsx pins --swr-*, and only the Playwright
+// gate of Task 12 can prove the browser agrees.
+test("each primitive stylesheet declares the classes its component asks for", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const css = (name) => readFileSync(resolve(here, "..", "src", "components", "primitives", name), "utf8");
+
+  const pill = css("StatusPill.module.css");
+  for (const cls of ["pill", "text", "dot", "ok", "warn", "err", "idle", "live"]) {
+    expect(pill, `StatusPill .${cls}`).toMatch(new RegExp(`^\\s*\\.${cls} \\{`, "m"));
+  }
+  // A second .live .dot rule would silently override a future pulse by cascade order.
+  expect(pill.match(/^\s*\.live \.dot \{/gm) || []).toHaveLength(1);
+
+  const command = css("CommandButton.module.css");
+  for (const cls of ["slot", "button", "label", "pending", "active", "error", "primary"]) {
+    expect(command, `CommandButton .${cls}`).toMatch(new RegExp(`^\\s*\\.${cls} \\{`, "m"));
+  }
+  expect(command, "CommandButton .collapsible").toMatch(/^\s*\.collapsible \.label \{/m);
+  // idle is the base look and "on air" is StatusPill's tone: neither may grow a class here,
+  // because styles[status] would then emit a token no rule answers for.
+  expect(command).not.toMatch(/^\s*\.idle \{/m);
+  expect(command).not.toMatch(/^\s*\.live \{/m);
+
+  const icon = css("IconButton.module.css");
+  for (const cls of ["button", "sm", "md"]) expect(icon, `IconButton .${cls}`).toMatch(new RegExp(`^\\s*\\.${cls} \\{`, "m"));
 });
 ```
 
@@ -1454,9 +1484,13 @@ export function TruncatedText({ as: Tag = "span", title, className = "", childre
 // ui/src/components/primitives/StatusPill.jsx
 import styles from "./StatusPill.module.css";
 
+// A one-line join, deliberately repeated in IconButton.jsx and CommandButton.jsx:
+// a fourth copy is the signal to promote it to ui/src/components/primitives/cx.js.
+const cx = (...names) => names.filter(Boolean).join(" ");
+
 export function StatusPill({ tone = "idle", label, dot = false, className = "" }) {
   return (
-    <span role="status" className={[styles.pill, styles[tone], className].filter(Boolean).join(" ")} data-tone={tone}>
+    <span role="status" className={cx(styles.pill, styles[tone], className)} data-tone={tone}>
       {dot ? <i className={styles.dot} aria-hidden="true" /> : null}
       <span className={styles.text}>{label}</span>
     </span>
@@ -1609,7 +1643,7 @@ export function CommandButton({
 - [ ] **Step 4: Verificar**
 
 Run: `npm -C ui test -- tests/primitives-text.test.jsx && node scripts/build-ui.mjs`
-Expected: 5 tests PASS; el build sigue escribiendo solo `js/` y `css/`; el test de tokens de la Task 3
+Expected: 6 tests PASS (los 5 de componentes más el ancla estática de hojas de clase); el build sigue escribiendo solo `js/` y `css/`; el test de tokens de la Task 3
 sigue en verde (ningún `.module.css` usa hex fuera de `tokens.css` — el `rgba(255,59,82,.45)` de
 `StatusPill` es la única excepción permitida porque `--swr-live` no admite alpha; si el test de tokens
 lo detecta, sustituirlo por `color-mix(in srgb, var(--swr-live) 45%, transparent)`).
