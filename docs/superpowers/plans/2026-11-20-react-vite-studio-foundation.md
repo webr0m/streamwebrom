@@ -2831,19 +2831,34 @@ git commit -m "feat(ui): add bridge hooks, local workspace store and audio meter
 ### Task 9: Shell, grid del estudio y barra superior
 
 **Files:**
-- Create: `ui/src/styles/layout.css`, `ui/src/components/StudioShell.jsx`, `ui/src/components/StudioShell.module.css`, `ui/src/components/Topbar.jsx`, `ui/src/components/Topbar.module.css`
+- Create: `ui/src/styles/layout.css`, `ui/src/components/StudioShell.jsx`, `ui/src/components/StudioShell.module.css`, `ui/src/components/Topbar.jsx`, `ui/src/components/Topbar.module.css`, `ui/src/components/ToastLayer.jsx` (stub vacío que la Task 11 reemplaza entero)
 - Modify: `ui/src/main.jsx` (importa `styles/layout.css`), `ui/src/mount-next.jsx` (la Task 4 lo deja como marcador; aquí llama `installI18n()`, crea el motor de juguete con su bridge y monta `<StudioRoot bridge={…}/>`), `web/js/i18n/es/studio.js`, `web/js/i18n/en/studio.js`, `web/js/i18n/ru/studio.js` (las ocho claves de Step 3)
 - Test: `ui/tests/shell.test.jsx`, `ui/tests/topbar.test.jsx`
 
 **Interfaces:**
-- Consumes: `useStudioSnapshot`, `useWorkspace`, primitivas de las Tasks 6–8, `nextStudioFixture`.
+- Consumes: `useStudioSnapshot` y `useWorkspace()` —la firma embarcada en la Task 8 no recibe
+  argumentos: el workspace local no vive en el snapshot, se lee de `swr.workspace` y se persiste con
+  sus dos grafías—, primitivas de las Tasks 6-8, `nextStudioFixture`, `createFixtureEngine` y
+  `createStudioBridge` (Task 5), cuyo `bridge.command(action, payload)` devuelve una promesa.
 - Produces:
-  - `StudioRoot({ bridge })` — export nombrado que `main.jsx` ya importa. Reparte `{ snapshot, command, workspace, updateWorkspace }` a las regiones y aplica las clases `scenes-collapsed` / `panel-collapsed` (mismos nombres que el CSS legacy de `workspace.js`).
-  - `<Topbar snapshot command workspace onToggleScenes onTogglePanel />` — `role="banner"`, píldora de
-    conexión, píldora LIVE, `CommandButton` de grabar y transmitir, menú Ver con las dos acciones de
-    colapso.
-  - Regiones con `data-region`: `rail`, `stage`, `tray`, `dock`, `panel`. Las tareas 10 y 11 sustituyen
-    los `slot` vacíos por sus componentes.
+  - `StudioRoot({ bridge })` — export nombrado que `mount-next.jsx` importa (no `main.jsx`: ése solo
+    decide el modo y carga `styles/layout.css`). Reparte `{ snapshot, command, workspace }` y los dos
+    toggles a las regiones y aplica las clases `scenes-collapsed` / `panel-collapsed` en el nodo
+    `.studio-root` (mismos nombres que el CSS legacy de `web/js/workspace.js`).
+  - `<Topbar snapshot command workspace onToggleScenes onTogglePanel />` — `role="banner"` con dos
+    botones de colapso propios (`aria-expanded` + `aria-controls` hacia `scenesRail` y `studioPanes`),
+    título por `TruncatedText`, píldora de conexión, píldora de bitrate del relay, píldora `EN VIVO`
+    cuando hay directo, y `CommandButton` de grabar y de transmitir. Transmitir mantiene la etiqueta
+    `studio.goLive` en los dos estados; lo que cambia es `aria-pressed` y la píldora.
+  - Regiones con `data-region`: `top`, `rail`, `stage`, `tray`, `dock`, `panel`. `rail` lleva
+    `id="scenesRail"` y `panel` lleva `id="studioPanes"` en las dos ramas del colapso, porque esos
+    son los `aria-controls` que prometen los botones de la barra. Las tareas 10 y 11 sustituyen los
+    `slot` vacíos por sus componentes.
+  - `ui/src/components/ToastLayer.jsx` como stub `export function ToastLayer() { return null; }`:
+    la Task 11 lo reemplaza **entero** (allí su texto dirá Modify, no Create).
+  - `mountNext()` ahora devuelve el `bridge`, no el nodo `#studioRoot` como el marcador de la Task 4.
+    Nadie consume el valor salvo `main.jsx`, que lo descarta, y seguir creando un segundo `createRoot`
+    sobre el mismo nodo borraría el árbol: el único root se crea aquí.
 
 - [ ] **Step 1: Escribir los tests que fallan**
 
@@ -2857,7 +2872,7 @@ import { createStudioBridge } from "../src/bridge/studio-bridge.js";
 import { createFixtureEngine } from "../src/bridge/fixture-engine.js";
 import { nextStudioFixture } from "../src/fixtures/next-studio.js";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); });
 const setup = () => {
   const engine = createFixtureEngine(nextStudioFixture);
   const bridge = createStudioBridge({ engine });
@@ -2885,6 +2900,21 @@ test("the panel toggle mirrors the legacy class contract", async () => {
   const { container } = setup();
   await userEvent.click(screen.getByRole("button", { name: /panel/i }));
   expect(container.querySelector(".studio-root")).toHaveClass("panel-collapsed");
+});
+
+// jsdom no aplica `layout.css` sobre los nodos, así que el grid no es observable
+// aquí; lo que sí se puede fijar es que cada token que usa siga declarado. Un
+// `var(--swr-inexistente)` es invisible en el test y deja el panel sin color en
+// el navegador. Es la misma ancla estática que `tokens.test.jsx` usa con los
+// `.module.css`, y `layout.css` no la cubre porque no es un módulo CSS.
+test("every token the shell grid reaches for is declared", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const layout = await readFile(new URL("../src/styles/layout.css", import.meta.url), "utf8");
+  const tokens = await readFile(new URL("../src/styles/tokens.css", import.meta.url), "utf8");
+  const declared = new Set([...tokens.matchAll(/(--swr-[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+  const used = [...layout.matchAll(/var\(\s*(--swr-[a-z0-9-]+)/g)].map((m) => m[1]);
+  expect(used.length).toBeGreaterThan(10);
+  expect(used.filter((name) => !declared.has(name))).toEqual([]);
 });
 ```
 
@@ -2916,33 +2946,55 @@ test("going live is the reserved primary action and sends the command", async ()
   expect(live.className).toContain("primary");
 });
 
-test("the live state swaps the primary label and stops first", async () => {
+test("the live state swaps the reserved action to a stop and keeps the badge", async () => {
   const command = vi.fn();
   const snapshot = { ...base, production: { ...base.production, live: true } };
   render(<Topbar snapshot={snapshot} command={command} workspace={base.workspace} onToggleScenes={() => {}} onTogglePanel={() => {}} />);
-  await userEvent.click(screen.getByRole("button", { name: /directo|Transmitir/i }));
+  const live = screen.getByRole("button", { name: /Transmitir/i });
+  await userEvent.click(live);
   expect(command).toHaveBeenCalledWith("live.stop", {});
-  expect(screen.getByText(/En directo/i) || screen.getAllByRole("status").length).toBeTruthy();
+  expect(live).toHaveAttribute("aria-pressed", "true");
+  // El ES de `studio.liveBadge` es "EN VIVO"; el botón sigue diciendo
+  // "Transmitir" porque así lo hace el Studio de hoy (web/js/studio.js:443
+  // muestra la píldora y deja intacta la etiqueta del botón).
+  expect(screen.getByText("EN VIVO")).toBeInTheDocument();
 });
 
 test("the room title clips instead of overflowing", () => {
   const snapshot = { ...base, room: { ...base.room, title: "Sala con un nombre exageradamente largo de demostración" } };
   render(<Topbar snapshot={snapshot} command={() => {}} workspace={base.workspace} onToggleScenes={() => {}} onTogglePanel={() => {}} />);
   const title = screen.getByText(snapshot.room.title);
-  expect(title).toHaveAttribute("data-truncated");
+  // jsdom no maquetan, así que `useOverflow` mide 0 píxeles y `clipped` es
+  // false: lo que se puede fijar aquí es que el título pasa por TruncatedText
+  // (el atributo existe y vale "false") y que lleva el tooltip puesto.
+  expect(title).toHaveAttribute("data-truncated", "false");
+  expect(title).toHaveAttribute("title", snapshot.room.title);
+});
+
+// La parte cortable del título tampoco es observable en jsdom: se ancla desde
+// el CSS en disco, igual que las primitivas de la Task 6. Sin estas tres
+// reglas, el texto largo empuja la acción Transmitir fuera de la barra.
+test("the topbar stylesheet keeps the identity column shrinkable", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const css = await readFile(new URL("../src/components/Topbar.module.css", import.meta.url), "utf8");
+  expect(css).toMatch(/\.identity\s*{[^}]*min-width:\s*0/);
+  expect(css).toMatch(/\.title\s*{[^}]*max-inline-size:/);
+  expect(css).toMatch(/\.collapseLabel\s*{[^}]*text-overflow:\s*ellipsis/);
 });
 ```
 
 - [ ] **Step 2: Verificar que fallan**
 
-Run: `npm -C ui test -- tests/shell.test.jsx ui/tests/topbar.test.jsx`
-Expected: FAIL —«Failed to resolve import "../src/components/StudioShell.jsx"».
+Run: `npm -C ui test -- tests/shell.test.jsx tests/topbar.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/components/StudioShell.jsx"». Los dos filtros van relativos a `ui/` porque `npm -C ui test` ejecuta `vitest` con cwd `ui/`; un filtro `ui/tests/…` no coincide con ningún fichero y, con `--passWithNoTests`, daría verde sin ejecutar nada.
 
 - [ ] **Step 3: Añadir las claves de idioma y escribir el grid y el shell**
 
 Ocho claves nuevas, una línea plana por clave al final del objeto de `web/js/i18n/es/studio.js`,
 `en/studio.js` y `ru/studio.js`, en el mismo orden en los tres idiomas. Las usan Topbar (esta tarea),
-SourceTray (Task 10) y ToastLayer (Task 11); `tests/ui-i18n.test.mjs` (Task 13) falla si falta alguna.
+SourceTray (Task 10) y ToastLayer (Task 11). El gate ya existe hoy y corre en `node --test`:
+`tests/i18n.test.mjs:15` exige que es, en y ru tengan exactamente las mismas claves, así que
+olvidar un idioma pone rojo el suite node en el mismo momento en que se añade la clave.
 
 | clave | es | en | ru |
 | --- | --- | --- | --- |
@@ -3024,8 +3076,8 @@ import { Topbar } from "./Topbar.jsx";
 import { ToastLayer } from "./ToastLayer.jsx";
 import styles from "./StudioShell.module.css";
 
-function Slot({ region, children }) {
-  return <section data-region={region} className={styles.slot}>{children}</section>;
+function Slot({ region, id, children }) {
+  return <section data-region={region} id={id} className={styles.slot}>{children}</section>;
 }
 
 export function StudioRoot({ bridge }) {
@@ -3043,14 +3095,14 @@ export function StudioRoot({ bridge }) {
         <Slot region="top">
           <Topbar snapshot={snapshot} command={command} workspace={workspace} onToggleScenes={toggleScenes} onTogglePanel={togglePanel} />
         </Slot>
-        <Slot region="rail">{null}</Slot>
+        <Slot region="rail" id="scenesRail">{null}</Slot>
         <Slot region="stage">{null}</Slot>
         <Slot region="tray">{null}</Slot>
         <Slot region="dock">{null}</Slot>
         {workspace.panelOpen ? (
-          <Slot region="panel">{null}</Slot>
+          <Slot region="panel" id="studioPanes">{null}</Slot>
         ) : (
-          <section data-region="panel" className={styles.rail}>
+          <section data-region="panel" id="studioPanes" className={styles.rail}>
             <button type="button" className={styles.restore} onClick={togglePanel}>❯</button>
           </section>
         )}
@@ -3060,6 +3112,12 @@ export function StudioRoot({ bridge }) {
   );
 }
 ```
+
+`scenesRail` y `studioPanes` no son decorativos: son los `id` que los dos `aria-controls`
+ (`ui/src/components/Topbar.jsx`) ya prometen, los mismos que `ui/studio.html` usa en el modo
+ legacy, y `mount-next.jsx` borra los antiguos con `replaceChildren()` al montar. Un
+ `aria-controls` huérfano es exactamente el fallo que la puerta de accesibilidad de la Task 12
+ tiene que poder señalar.
 
 `ToastLayer` se crea en la Task 11; para que esta tarea compile, crear ahora su versión mínima que
 `ToastLayer.jsx` reemplazará intacta:
@@ -3101,6 +3159,10 @@ import { createFixtureEngine } from "./bridge/fixture-engine.js";
 import { nextStudioFixture } from "./fixtures/next-studio.js";
 import { StudioRoot } from "./components/StudioShell.jsx";
 
+// Task 4's placeholder returned the #studioRoot node; the bridge is what the
+// console and plan 2's instrumentation need. `main.jsx` ignores both, and this
+// is the only place a root is created: a second createRoot on the same node
+// wipes the tree, so callers must reuse what is mounted here.
 export async function mountNext() {
   installI18n();
   const root = document.querySelector("#studioRoot");
@@ -3166,7 +3228,7 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
           status={live ? "active" : "idle"}
           icon="▲"
           primary
-          label={live ? t("studio.goLive") : t("studio.goLive")}
+          label={t("studio.goLive")}
           error={error("broadcast")}
           onClick={() => command(live ? "live.stop" : "live.start", {})}
         />
@@ -3216,23 +3278,42 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
 }
 ```
 
-`ui/src/main.jsx` añade `import "./styles/layout.css";` junto a los otros dos estilos, y
-`ui/src/mount-next.jsx` añade `installI18n()` (importado de `./i18n.js`) como primera línea de
-`mountNext`, antes de `createFixtureEngine`.
+`ui/src/main.jsx` añade `import "./styles/layout.css";` junto a los otros dos estilos (es el único
+sitio donde se importa: los tests de esta tarea anclan `layout.css` desde el disco, no desde el
+DOM). El `installI18n()` de `mount-next.jsx` ya está en el bloque de arriba — el Step 3 reescribe
+el fichero entero, así que no hay segunda edición que aplicar.
+
+La acción Transmitir se escribe con `label={t("studio.goLive")}`, sin ternario: el texto del botón
+es el mismo en los dos estados porque el Studio de hoy también lo deja igual
+(`web/js/studio.js:443` muestra y oculta la píldora `#liveBadge` sin tocar la etiqueta). Lo que
+cambia es el estado accesible —`aria-pressed` sale del `status` de `CommandButton`— y la píldora
+`studio.liveBadge`. Un `live ? t("studio.goLive") : t("studio.goLive")` sería un ternario con las
+dos ramas idénticas: el revisor lo señala con razón como defecto, y la rama verdadera no existe.
 
 - [ ] **Step 5: Verificar**
 
-Run: `npm -C ui test -- tests/shell.test.jsx ui/tests/topbar.test.jsx && npm -C ui test && node scripts/build-ui.mjs`
-Expected: los 8 tests nuevos PASS, los 20 anteriores siguen PASS (27 en total sin contar los de `node --test`), build correcto.
+Run: `npm -C ui test -- tests/shell.test.jsx tests/topbar.test.jsx && npm -C ui test && node scripts/build-ui.mjs`
+Expected: 9 tests PASS (4 en `shell.test.jsx`, 5 en `topbar.test.jsx`) y `npm -C ui test` 63 PASS en 11 ficheros (54 hasta la Task 8 + 9 nuevos), con el build emitiendo los mismos cinco nombres de chunk y `web/studio.html` con md5 `015873072aa5f065c0837478f0a6a593` (ningún fichero nuevo es alcanzable desde `main.jsx` hasta que se añade el import de `layout.css`, y ese import no cambia el HTML).
 
-Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
-Expected: `ok` — el HTML generado sigue conteniendo los contenedores legacy.
+Run: `node --test tests/*.test.mjs`
+Expected: 83 PASS. Aquí se comprueban las ocho claves nuevas: `tests/ui-i18n*.test.mjs` y el gate de artefactos exigen que todo idioma tenga las mismas claves y que ningún `.jsx` declare textos propios.
 
-- [ ] **Step 6: Comprobar en el navegador y commit**
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && go test -count=1 ./internal/server/"`
+Expected: `ok` — el HTML generado sigue conteniendo los contenedores legacy. El `cd` va a la **worktree**, no al repositorio principal: en `/mnt/d/Descargas/streamwebrom` no existe ninguna de las tareas de este plan y el test diría `ok` sobre el árbol equivocado.
 
-Run: abrir `http://localhost:8443/studio?room=<sala-de-prueba>#key=<clave>` con `?ui=next` y `?ui=legacy`
-Expected: legacy idéntico a hoy; next muestra la barra Control Room Pro con píldoras y la acción
-Transmitir reservando su ancho, sin barras de scroll en 1440 px.
+- [ ] **Step 6: Comprobar el arranque y commit**
+
+No hay navegador en este paso: abrir el Studio real necesita sala y clave, y eso lo hace el
+propietario. Lo que sí se puede probar aquí es que el bundle del modo `next` se construye y que
+el modo `legacy` sigue sirviendo el HTML de siempre:
+
+Run: `node scripts/build-ui.mjs && grep -c "studioRoot\|toggleScenes\|studioPanes" web/studio.html`
+Expected: build correcto y `4` — las cuatro líneas que el modo legacy necesita siguen en el HTML que
+sirve Go: `#studioRoot`, `#toggleScenes`, `#togglePanel` y `#studioPanes`.
+
+La comprobación visual real (barra Control Room Pro, píldoras, Transmitir reservando su ancho, sin
+barras de scroll en 1440 px, `?ui=next` e `?ui=legacy` comparados) es la puerta Playwright de la
+Task 12; esta tarea deja el shell montado para que esa puerta tenga algo que medir.
 
 ```bash
 git add ui/src/styles/layout.css ui/src/components ui/src/main.jsx ui/src/mount-next.jsx ui/tests/shell.test.jsx ui/tests/topbar.test.jsx web/js/i18n
