@@ -3405,15 +3405,24 @@ git commit -m "feat(ui): lay out the studio shell and control-room topbar"
 
 **Files:**
 - Create: `ui/src/components/SceneRail.jsx` + `.module.css`, `ProgramStage.jsx` + `.module.css`, `LayoutBar.jsx` + `.module.css`, `SourceTray.jsx` + `.module.css`, `ProductionDock.jsx` + `.module.css`
-- Modify: `ui/src/components/StudioShell.jsx` (sustituye los `Slot` vacíos), `ui/src/fixtures/next-studio.js` (fuente con nombre de 96 caracteres para forzar el corte)
+- Modify: `ui/src/components/StudioShell.jsx` (sustituye los `Slot` vacíos), `ui/src/bridge/actions.js`
+  (los cuatro nombres nuevos), `ui/tests/actions.test.jsx` (la lista `names` documenta el contrato:
+  van los cuatro también)
 - Test: `ui/tests/regions.test.jsx`
+- Sin tocar: `ui/src/fixtures/next-studio.js`. La primera fuente ya mide 73 caracteres
+  (`Cámara principal — Anfitrión con un nombre muy largo para probar el corte`) y el test pide el
+  nombre por referencia, no por longitud. Alargar el dato del fixture no cambia nada observable en
+  jsdom —quien no puede maquetar tampoco puede medir— y la longitud real la corta Task 12 con
+  Playwright.
 
 **Interfaces:**
 - Consumes: primitivas (Tasks 6–8), `useStageHeight` (Task 8), acciones de `actions.js` (Task 5).
 - Produces:
-  - `<SceneRail production command collapsed />` — `#scenesRail`, tarjetas por escena con
+  - `<SceneRail production command collapsed />` — tarjetas por escena con
     `aria-current="true"` en la editada, contador, botón de enlace OBS (`command("scene.copyObsLink")`) y
-    botón de expansión cuando `collapsed`.
+    botón de expansión cuando `collapsed`. El componente NO pone `id`: `#scenesRail` es del `Slot`
+    del shell, que lo mantiene en las dos ramas del colapso y es lo que señala el `aria-controls`
+    de la barra.
   - `<ProgramStage production media />` — `#program` con `--stage-height`, badge LIVE, overlay de
     `clearScreen` y `countdown` cuando `> 0`.
   - `<LayoutBar layout featured sources command />` — los ocho ids reales
@@ -3436,9 +3445,14 @@ import { ProgramStage } from "../src/components/ProgramStage.jsx";
 import { LayoutBar } from "../src/components/LayoutBar.jsx";
 import { SourceTray } from "../src/components/SourceTray.jsx";
 import { ProductionDock } from "../src/components/ProductionDock.jsx";
+import { StudioRoot } from "../src/components/StudioShell.jsx";
+import { createStudioBridge } from "../src/bridge/studio-bridge.js";
+import { createFixtureEngine } from "../src/bridge/fixture-engine.js";
 import { nextStudioFixture } from "../src/fixtures/next-studio.js";
 
-afterEach(cleanup);
+// `localStorage.clear()` en el afterEach: el test del rail colapsado siembra
+// `swr.workspace`, y sin limpiarlo el estado se filtraría al resto del fichero.
+afterEach(() => { cleanup(); localStorage.clear(); });
 const { production, media, room } = nextStudioFixture;
 
 test("SceneRail marks the edited scene and asks for the OBS link", async () => {
@@ -3502,10 +3516,22 @@ test("ProductionDock renders the seven dock actions", () => {
 
 test("dock actions that do not fit collapse into the menu, never into an empty pill", () => {
   const command = () => {};
-  render(<ProductionDock snapshot={{ production, media, room }} command={command} collapsedActions={["ajustes", "invite"]} />);
+  render(<ProductionDock snapshot={{ production, media, room }} command={command} collapsedActions={["settings", "invite"]} />);
   const menu = document.querySelector('[data-action="dock-more"]');
   fireEvent.click(menu);
   expect(screen.getAllByRole("menuitem").length).toBe(2);
+});
+
+// El `id` del rail es del shell, no del rail: la barra señala `scenesRail` con
+// `aria-controls`, y si el componente se lo quedara solo en su rama expandida,
+// colapsar escenas dejaría el puntero en el aire. Ningún test de componente
+// suelto lo ve, porque ahí el rail se monta fuera del `Slot`.
+test("the rail keeps its id when scenes collapse, because the shell owns it", () => {
+  localStorage.setItem("swr.workspace", JSON.stringify({ scenesCollapsed: true }));
+  render(<StudioRoot bridge={createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) })} />);
+  const rail = document.querySelector("#scenesRail");
+  expect(rail).toHaveAttribute("data-region", "rail");
+  expect(rail).toContainElement(document.querySelector('[data-action="expand-scenes"]'));
 });
 ```
 
@@ -3539,7 +3565,7 @@ export function SceneRail({ production, command, collapsed = false, onExpand }) 
     );
   }
   return (
-    <div id="scenesRail" className={styles.rail}>
+    <div className={styles.rail}>
       <h2 className={styles.heading}>{t("studio.organizeProgram")}</h2>
       <div className={styles.cards}>
         {production.scenes.map((scene) => (
@@ -3666,6 +3692,7 @@ import { LevelMeter } from "./primitives/LevelMeter.jsx";
 import { IconButton } from "./primitives/IconButton.jsx";
 import { Switch } from "./primitives/Switch.jsx";
 import { OverflowMenu } from "./primitives/OverflowMenu.jsx";
+import { cx } from "./primitives/cx.js";
 import { t } from "../i18n.js";
 import styles from "./SourceTray.module.css";
 
@@ -3673,11 +3700,11 @@ const meters = (source) => Math.max(0, Math.min(1, (Number(source.level) + 60) /
 
 export function SourceTray({ sources, command }) {
   return (
-    <div id="backstage" className={styles.tray} aria-label={t("studio.backstage")}>
+    <section id="backstage" className={styles.tray} aria-label={t("studio.backstage")}>
       <h2 className={styles.heading}>{t("studio.backstage")}</h2>
       <ul className={styles.grid}>
         {sources.map((source) => (
-          <li key={source.id} data-source={source.id} className={`${styles.card} ${styles[source.status]}`}>
+          <li key={source.id} data-source={source.id} className={cx(styles.card, source.status !== "active" && styles[source.status])}>
             <div className={styles.head}>
               <span data-icon aria-hidden="true">{icon(source.kind)}</span>
               <TruncatedText className={styles.name} title={source.name}>{source.name}</TruncatedText>
@@ -3711,7 +3738,7 @@ export function SourceTray({ sources, command }) {
           </li>
         ))}
       </ul>
-    </div>
+    </section>
   );
 }
 
@@ -3791,12 +3818,16 @@ export function ProductionDock({ snapshot, command, collapsedActions = [] }) {
 Añadir a `ui/src/bridge/actions.js`, en la lista de nombres, las acciones de chrome local que ya usan
 Topbar, Dock y Rail: `device.monitor`, `device.vdo`, `room.settings`, `room.invite`,
 `scene.copyObsLink`. En modo `next` con fixture, `engine.apply` las ignora y quedan registradas para la
-Task 6 del plan 2.
+Task 6 del plan 2. Añade los cuatro nombres nuevos a la lista `names` de `ui/tests/actions.test.jsx`,
+que es lo que declara el contrato: sin ellos, `StudioBridge.command()` lanza
+`unknown action` (`ui/src/bridge/studio-bridge.js:11`) y el envoltorio `.catch(() => {})` del shell
+lo traga, así que Monitor, VDO, Ajustes e Invitar se quedarían en botones mudos sin ningún fallo a
+la vista.
 
 Montar las regiones en `StudioShell.jsx` sustituyendo los `Slot` vacíos:
 
 ```jsx
-        <Slot region="rail">
+        <Slot region="rail" id="scenesRail">
           <SceneRail production={snapshot.production} command={command} collapsed={workspace.scenesCollapsed} onExpand={toggleScenes} />
         </Slot>
         <Slot region="stage">
@@ -3807,16 +3838,45 @@ Montar las regiones en `StudioShell.jsx` sustituyendo los `Slot` vacíos:
         <Slot region="dock"><ProductionDock snapshot={snapshot} command={command} /></Slot>
 ```
 
+Tres detalles del bloque anterior son de contrato, no de gusto:
+
+- El `Slot region="rail"` conserva `id="scenesRail"` exactamente como lo dejó Task 9, y
+  `SceneRail` no lo declara. Un segundo elemento con el mismo id en el documento es HTML inválido,
+  y si el id se mudara al componente, la rama colapsada lo perdería y el `aria-controls` de la barra
+  señalaría a la nada. El test «the rail keeps its id when scenes collapse» es el que fija esta
+  elección; sin ella, el mismo texto del plan daba para tener el id en los dos sitios o en ninguno.
+- `#backstage` es un `<section>` con `aria-label`, no un `<div>`: el nombre accesible de un `div`
+  sin rol se descarta, así que la bandeja no aparecía como región ante el lector de pantalla. Con
+  `section` + nombre, la región existe sola.
+- La clase de estado de una tarjeta de fuente se compone con `cx` y solo para `pending`/`error`.
+  `SourceTray.module.css` define `.card.pending` y `.card.error`, pero `status` también vale
+  `"active"`, y `styles["active"]` es `undefined`: la plantilla de cadena literal metía el literal
+  `undefined` en el `class` de cada tarjeta correcta.
+
 - [ ] **Step 5: Verificar y commit**
 
-Run: `npm -C ui test -- tests/regions.test.jsx && npm -C ui test && node scripts/build-ui.mjs`
-Expected: 8 tests PASS y suite completo en verde.
+Run: `npm -C ui test -- tests/regions.test.jsx`
+Expected: 9 tests PASS.
 
-Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && node --check web/js/studio.js"`
-Expected: sin salida — ninguna lógica del motor fue tocada.
+Run: `npm -C ui test`
+Expected: 74 tests en 12 ficheros, todo en verde (65 al cerrar Task 9 + los 9 nuevos).
+
+Run: `node scripts/build-ui.mjs && node --test tests/*.test.mjs`
+Expected: build con los nombres de chunk cambiados —las cinco regiones son alcanzables desde
+`mount-next`— y 83 tests node en verde. El orden importa (Global Constraints): el test de
+determinismo compara el `sw-assets.json` en disco con un rebuild, así que si corres `node --test`
+antes del build, falla el golpe siguiente y se cura solo.
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && node --check web/js/studio.js && go test -count=1 ./internal/server/"`
+Expected: sin salida en el `--check` —ninguna lógica del motor fue tocada— y `ok` del paquete
+`internal/server`. El `cd` va al worktree: la ruta del repo principal comprobaría y testearía un
+árbol que esta rama no está cambiando.
+
+`web/studio.html` sale regenerado con los hashes nuevos y ES de la rama (R32): se commitea, no se
+descarta. Los chunks con hash siguen ignorados.
 
 ```bash
-git add ui/src/components ui/src/bridge/actions.js ui/src/fixtures/next-studio.js ui/tests/regions.test.jsx
+git add ui/src/components ui/src/bridge/actions.js ui/tests/actions.test.jsx ui/tests/regions.test.jsx web/studio.html docs/superpowers/plans/2026-11-20-react-vite-studio-foundation.md
 git commit -m "feat(ui): render scenes, program, layouts, source tray and dock from the snapshot"
 ```
 
