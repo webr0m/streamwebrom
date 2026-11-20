@@ -1,0 +1,8 @@
+/* ui/src/components/ProgramStage.module.css */
+.stage { position: relative; display: flex; flex-direction: column; gap: var(--swr-sp-2); min-width: 0; block-size: 100%; }
+.canvas { inline-size: 100%; block-size: var(--stage-height, auto); max-block-size: 100%; border-radius: var(--swr-r-md); background: var(--swr-bg-deep); box-shadow: var(--swr-shadow-2); object-fit: contain; }
+.live { position: absolute; inset-block-start: var(--swr-sp-2); inset-inline-start: var(--swr-sp-2); }
+.countdown { position: absolute; inset: 0; display: grid; place-content: center; font-size: var(--swr-text-xl); font-family: var(--swr-font-mono); color: var(--swr-text); text-shadow: 0 2px 20px rgba(0, 0, 0, 0.8); }
+.clear { position: absolute; inset: 0; display: grid; place-content: center; background: color-mix(in srgb, var(--swr-bg-deep) 92%, transparent); color: var(--swr-text-dim); font-size: var(--swr-text-sm); }
+.strip { display: flex; gap: var(--swr-sp-1); margin: 0; padding: 0; list-style: none; min-width: 0; overflow: hidden; }
+.chip { max-inline-size: 22ch; padding: 2px var(--swr-sp-2); border: 1px solid var(--swr-line); border-radius: var(--swr-r-pill); color: var(--swr-text-faint); font-size: var(--swr-text-2xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

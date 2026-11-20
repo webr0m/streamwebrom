@@ -1,0 +1,13 @@
+/* ui/src/components/SceneRail.module.css */
+.rail { display: flex; flex-direction: column; gap: var(--swr-sp-2); min-width: 0; block-size: 100%; }
+.collapsed { display: flex; flex-direction: column; align-items: center; gap: var(--swr-sp-1); }
+.mini { inline-size: 32px; block-size: 28px; border: 1px solid var(--swr-line); border-radius: var(--swr-r-sm); background: transparent; color: var(--swr-text-faint); font-size: var(--swr-text-2xs); cursor: pointer; }
+.mini[aria-current="true"] { color: var(--swr-text); border-color: var(--swr-brand); }
+.heading { margin: 0; font-size: var(--swr-text-2xs); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--swr-text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: var(--swr-sp-1); min-width: 0; overflow: auto; }
+.card { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--swr-sp-2); border: 1px solid var(--swr-line); border-radius: var(--swr-r-sm); background: var(--swr-bg-raise); color: var(--swr-text-dim); font-size: var(--swr-text-xs); cursor: pointer; transition: border-color var(--swr-fast) var(--swr-ease), background var(--swr-fast) var(--swr-ease); }
+.card:hover { border-color: var(--swr-line-strong); color: var(--swr-text); }
+.card[aria-current="true"] { border-color: var(--swr-brand); background: var(--swr-brand-soft); color: var(--swr-text); }
+.program { border-style: dashed; }
+.name, .count { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.count { color: var(--swr-text-faint); font-size: var(--swr-text-2xs); }

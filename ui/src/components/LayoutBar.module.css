@@ -1,0 +1,7 @@
+/* ui/src/components/LayoutBar.module.css */
+.bar { display: flex; flex-wrap: wrap; gap: var(--swr-sp-1); min-width: 0; }
+.button { display: inline-flex; align-items: center; gap: var(--swr-sp-1); min-width: 0; padding: var(--swr-sp-1) var(--swr-sp-2); border: 1px solid var(--swr-line); border-radius: var(--swr-r-pill); background: transparent; color: var(--swr-text-dim); font-size: var(--swr-text-2xs); cursor: pointer; transition: color var(--swr-fast) var(--swr-ease), border-color var(--swr-fast) var(--swr-ease); }
+.button:hover { color: var(--swr-text); border-color: var(--swr-line-strong); }
+.button[aria-pressed="true"] { color: var(--swr-text); background: var(--swr-brand-soft); border-color: var(--swr-brand); }
+.label { max-inline-size: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1120px) { .label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); } }

@@ -13,6 +13,10 @@ test("every documented action exists and lands in one of four domains", () => {
     "live.start", "live.stop", "record.toggle", "relay.retry", "relay.setProvider",
     "dest.add", "dest.update", "dest.remove", "dest.toggle",
     "source.mute", "source.hide", "source.remove", "source.setQuality", "device.camera", "device.screen", "device.media",
+    // Chrome-local actions the Task 10 dock and rail fire. `names` is the contract:
+    // an action missing here is an action nobody declared, and bridge.command()
+    // would throw `unknown action` on it.
+    "device.monitor", "device.vdo", "room.settings", "room.invite",
     "room.save", "room.forget", "brand.apply", "banner.set", "chat.send", "people.admit", "people.deny", "people.mute",
     "network.retry",
   ];

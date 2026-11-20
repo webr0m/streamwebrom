@@ -23,6 +23,12 @@ export function createActions(engine) {
       "live.start", "live.stop", "record.toggle", "relay.retry", "relay.setProvider",
       "dest.add", "dest.update", "dest.remove", "dest.toggle",
       "source.mute", "source.hide", "source.remove", "source.setQuality", "device.camera", "device.screen", "device.media",
+      // Local-chrome actions Topbar, Dock and Rail fire. The fixture engine ignores
+      // them in `next` mode; they are registered so bridge.command() never throws
+      // `unknown action` — the shell's `.catch(() => {})` would swallow that and
+      // leave the button mute with no failure in sight. Plan 2 Task 6 gives them
+      // their real effect.
+      "device.monitor", "device.vdo", "room.settings", "room.invite",
       "room.save", "room.forget", "brand.apply", "banner.set", "chat.send", "people.admit", "people.deny", "people.mute",
       "network.retry",
     ].map((name) => [name, run(name)]),
