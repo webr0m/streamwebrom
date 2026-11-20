@@ -14,6 +14,7 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
   const { room, production, broadcast } = snapshot;
   const status = statusOf(room);
   const live = production.live;
+  const rate = Math.round(broadcast.relay.bitrate / 100) / 10;
   const error = (domain) => (snapshot.errors?.[domain] ? String(snapshot.errors[domain]) : "");
   return (
     <header className={styles.bar} role="banner">
@@ -26,7 +27,7 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
         <StatusPill tone={status.tone} label={status.label} />
         {live ? <StatusPill tone="live" dot label={t("studio.liveBadge")} /> : null}
         {production.recording ? <StatusPill tone="err" label={t("studio.record")} /> : null}
-        {broadcast.relay?.active ? <StatusPill tone="idle" label={`${Math.round(broadcast.relay.bitrate / 100) / 10} Mbps`} /> : null}
+        {broadcast.relay?.active ? <StatusPill tone="idle" label={t("studio.relayBitrate", { rate })} /> : null}
       </div>
       <div className={styles.actions}>
         <CommandButton

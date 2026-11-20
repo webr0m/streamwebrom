@@ -194,4 +194,5 @@ export const en = {
   "studio.qualityFullHd": "Full HD quality",
   "studio.notifications": "Studio notices",
   "studio.closeNotification": "Close notice",
+  "studio.relayBitrate": "Relay · {rate} Mbps",
 };

@@ -45,11 +45,20 @@ test("the room title clips instead of overflowing", () => {
   const snapshot = { ...base, room: { ...base.room, title: "Sala con un nombre exageradamente largo de demostración" } };
   render(<Topbar snapshot={snapshot} command={() => {}} workspace={base.workspace} onToggleScenes={() => {}} onTogglePanel={() => {}} />);
   const title = screen.getByText(snapshot.room.title);
-  // jsdom no maquetan, así que `useOverflow` mide 0 píxeles y `clipped` es
+  // jsdom no maqueta, así que `useOverflow` mide 0 píxeles y `clipped` es
   // false: lo que se puede fijar aquí es que el título pasa por TruncatedText
   // (el atributo existe y vale "false") y que lleva el tooltip puesto.
   expect(title).toHaveAttribute("data-truncated", "false");
   expect(title).toHaveAttribute("title", snapshot.room.title);
+});
+
+// La píldora del relay no puede ser texto sin traducir: la convención del repo
+// mete la unidad dentro de la clave (`studio.relayBitrate` con `{rate}`), así
+// que un `24 Mbps` pelado pasaría este ancla y seguiría ilegible en inglés.
+test("the relay pill carries the translated bitrate", () => {
+  const snapshot = { ...base, broadcast: { ...base.broadcast, relay: { ...base.broadcast.relay, active: true } } };
+  render(<Topbar snapshot={snapshot} command={() => {}} workspace={base.workspace} onToggleScenes={() => {}} onTogglePanel={() => {}} />);
+  expect(screen.getByText("Relevo · 2.4 Mbps")).toBeInTheDocument();
 });
 
 // La parte cortable del título tampoco es observable en jsdom: se ancla desde

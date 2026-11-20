@@ -194,4 +194,5 @@ export const ru = {
   "studio.qualityFullHd": "Качество Full HD",
   "studio.notifications": "Уведомления студии",
   "studio.closeNotification": "Закрыть уведомление",
+  "studio.relayBitrate": "Ретранслятор · {rate} Мбит/с",
 };
