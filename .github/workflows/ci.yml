@@ -29,6 +29,12 @@ jobs:
       - uses: actions/setup-node@v4
         if: runner.os == 'Linux'
         with: { node-version: 22 }
+      - name: build the React studio shell
+        if: runner.os == 'Linux'
+        run: node scripts/build-ui.mjs
+      - name: ui bundle tests
+        if: runner.os == 'Linux'
+        run: npm --prefix ui test
       - name: check JS syntax
         if: runner.os == 'Linux'
         run: for f in web/js/*.js; do cp $f /tmp/$(basename $f).mjs; node --check /tmp/$(basename $f).mjs; done
@@ -72,6 +78,9 @@ jobs:
         with: { go-version: '1.27.x' }
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: node scripts/build-ui.mjs
       - run: pip install playwright==1.64.0 Pillow==13.0.0
       - name: select existing Chromium for critical media tests
         run: |

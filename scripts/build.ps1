@@ -3,6 +3,8 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
 try {
+    node scripts/build-ui.mjs
+    if ($LASTEXITCODE) { throw 'UI build failed' }
     New-Item -ItemType Directory -Force dist | Out-Null
     $previousOS = $env:GOOS; $previousArch = $env:GOARCH; $previousCGO = $env:CGO_ENABLED
     try {

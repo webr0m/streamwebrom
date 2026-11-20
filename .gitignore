@@ -24,3 +24,8 @@ __pycache__/
 
 # isolated workspaces for feature branches
 .worktrees/
+ui/node_modules/
+web/.vite/
+web/js/studio-*.js
+web/css/studio-*.css
+web/js/sw-assets.json

@@ -1,9 +1,19 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.26-alpine AS build
+FROM node:24-alpine AS ui
+WORKDIR /src
+COPY package*.json ui/package*.json ./
+RUN npm ci --prefix ui --no-audit --no-fund
+COPY ui ui
+COPY web web
+COPY scripts scripts
+RUN node scripts/build-ui.mjs
+
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=ui /src/web web
 ARG VERSION=docker
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /streamwebrom ./cmd/streamwebrom
 
