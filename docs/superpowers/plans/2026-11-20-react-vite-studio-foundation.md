@@ -3420,7 +3420,8 @@ git commit -m "feat(ui): lay out the studio shell and control-room topbar"
 - Modify: `ui/src/components/StudioShell.jsx` (sustituye los `Slot` vacíos), `ui/src/bridge/actions.js`
   (los cuatro nombres nuevos), `ui/tests/actions.test.jsx` (la lista `names` documenta el contrato:
   van los cuatro también)
-- Test: `ui/tests/regions.test.jsx`
+- Test: `ui/tests/regions.test.jsx`, y en la ronda de revisión: el escáner React de
+  `tests/i18n.test.mjs` y las claves `studio.vdo` de `web/js/i18n/{es,en,ru}/studio.js`
 - Sin tocar: `ui/src/fixtures/next-studio.js`. La primera fuente ya mide 73 caracteres
   (`Cámara principal — Anfitrión con un nombre muy largo para probar el corte`) y el test pide el
   nombre por referencia, no por longitud. Alargar el dato del fixture no cambia nada observable en
@@ -3432,12 +3433,14 @@ git commit -m "feat(ui): lay out the studio shell and control-room topbar"
 - Produces:
   - `<SceneRail production command collapsed />` — tarjetas por escena con
     `aria-current="true"` en la editada, contador, botón de enlace OBS (`command("scene.copyObsLink")`) y
-    botón de expansión cuando `collapsed`. El componente NO pone `id`: `#scenesRail` es del `Slot`
+    botón de expansión cuando `collapsed`. La rama colapsada ES el control de expandir y nada más:
+    el Studio legacy, al plegar `#scenesRail`, esconde la lista y deja un único restaurar
+    (`#restoreScenes`), nunca chips por escena. El componente NO pone `id`: `#scenesRail` es del `Slot`
     del shell, que lo mantiene en las dos ramas del colapso y es lo que señala el `aria-controls`
     de la barra.
   - `<ProgramStage production media />` — `#program` con `--stage-height`, badge LIVE, overlay de
     `clearScreen` y `countdown` cuando `> 0`.
-  - `<LayoutBar layout featured sources command />` — los ocho ids reales
+  - `<LayoutBar layout command />` — los ocho ids reales
     `solo split grid pip sidebar spotlight screen news`, `aria-pressed` en el activo.
   - `<SourceTray sources command />` — tarjetas `auto-fit minmax(148px,1fr)`; cada una con `IconButton`
     de micro, `Switch` de visibilidad, `TruncatedText` del nombre, `LevelMeter` y `OverflowMenu`
@@ -3485,10 +3488,22 @@ test("a collapsed rail still exposes an expand control with a name", () => {
   expect(document.querySelector('[data-action="expand-scenes"]')).toBeInTheDocument();
 });
 
+// La rama colapsada del Studio legacy esconde la lista de escenas y deja un
+// único restaurar (`#restoreScenes`, web/studio.html:53); nunca muestra chips
+// por escena. Controles en vez de píxeles: jsdom no maqueta, así que medir el
+// desbordamiento le corresponde a la puerta de Playwright de la Task 12.
+test("collapsing the rail leaves one control, as the legacy page does", () => {
+  const { container } = render(<SceneRail production={production} command={() => {}} collapsed onExpand={() => {}} />);
+  expect(container.querySelectorAll("button")).toHaveLength(1);
+});
+
 test("LayoutBar presses exactly one layout", async () => {
   const command = vi.fn();
-  render(<LayoutBar layout="grid" featured="" sources={media.sources} command={command} />);
+  render(<LayoutBar layout="grid" command={command} />);
   expect(document.querySelectorAll("[data-layout]")).toHaveLength(8);
+  const pressed = document.querySelectorAll('[data-layout][aria-pressed="true"]');
+  expect(pressed).toHaveLength(1);
+  expect(pressed[0]).toHaveAttribute("data-layout", "grid");
   await userEvent.click(document.querySelector('[data-layout="pip"]'));
   expect(command).toHaveBeenCalledWith("scene.setLayout", { layout: "pip" });
 });
@@ -3522,12 +3537,14 @@ test("an errored source states its problem without blocking the tray", () => {
   expect(document.querySelector('[data-source="media-loop"] [role="status"]')).toBeInTheDocument();
 });
 
-test("ProductionDock renders the seven dock actions", () => {
+test("ProductionDock renders the seven dock actions", async () => {
   const command = vi.fn();
   render(<ProductionDock snapshot={{ production, media, room }} command={command} />);
   for (const id of ["monitor", "camera", "screen", "media", "vdo", "settings", "invite"]) {
     expect(document.querySelector('[data-action="' + id + '"]')).toBeInTheDocument();
   }
+  await userEvent.click(document.querySelector('[data-action="camera"]'));
+  expect(command).toHaveBeenCalledWith("device.camera", expect.objectContaining({}));
 });
 
 test("dock actions that do not fit collapse into the menu, never into an empty pill", () => {
@@ -3536,6 +3553,20 @@ test("dock actions that do not fit collapse into the menu, never into an empty p
   const menu = document.querySelector('[data-action="dock-more"]');
   fireEvent.click(menu);
   expect(screen.getAllByRole("menuitem").length).toBe(2);
+});
+
+test("the mounted regions render no echoed i18n key", () => {
+  const { container } = render(<StudioRoot bridge={createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) })} />);
+  // aria-label and title carry the labels too, and an unkeyed `t()` echo lands
+  // in exactly those attributes: the layout group's accessible name is one.
+  const attrs = [...container.querySelectorAll("[aria-label], [title]")]
+    .map((node) => `${node.getAttribute("aria-label") ?? ""}|${node.getAttribute("title") ?? ""}`)
+    .filter((value) => /(^|\|)studio(?:js)?\.[a-zA-Z]/.test(value));
+  const echoes = [...container.querySelectorAll("*")]
+    .filter((node) => !node.children.length)
+    .map((node) => node.textContent?.trim() ?? "")
+    .filter((text) => /^studio(?:js)?\.[a-zA-Z]/.test(text));
+  expect([...attrs, ...echoes]).toEqual([]);
 });
 
 // El `id` del rail es del shell, no del rail: la barra señala `scenesRail` con
@@ -3572,11 +3603,6 @@ export function SceneRail({ production, command, collapsed = false, onExpand }) 
     return (
       <div className={styles.collapsed}>
         <IconButton icon="◫" data-action="expand-scenes" label={t("studio.showScenes")} onClick={onExpand} />
-        {production.scenes.map((scene) => (
-          <button key={scene.name} type="button" className={styles.mini} aria-current={scene.name === production.editScene ? "true" : undefined} onClick={() => command("scene.select", { name: scene.name })}>
-            {scene.name}
-          </button>
-        ))}
       </div>
     );
   }
@@ -3609,8 +3635,6 @@ export function SceneRail({ production, command, collapsed = false, onExpand }) 
 /* ui/src/components/SceneRail.module.css */
 .rail { display: flex; flex-direction: column; gap: var(--swr-sp-2); min-width: 0; block-size: 100%; }
 .collapsed { display: flex; flex-direction: column; align-items: center; gap: var(--swr-sp-1); }
-.mini { inline-size: 32px; block-size: 28px; border: 1px solid var(--swr-line); border-radius: var(--swr-r-sm); background: transparent; color: var(--swr-text-faint); font-size: var(--swr-text-2xs); cursor: pointer; }
-.mini[aria-current="true"] { color: var(--swr-text); border-color: var(--swr-brand); }
 .heading { margin: 0; font-size: var(--swr-text-2xs); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--swr-text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: var(--swr-sp-1); min-width: 0; overflow: auto; }
 .card { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--swr-sp-2); border: 1px solid var(--swr-line); border-radius: var(--swr-r-sm); background: var(--swr-bg-raise); color: var(--swr-text-dim); font-size: var(--swr-text-xs); cursor: pointer; transition: border-color var(--swr-fast) var(--swr-ease), background var(--swr-fast) var(--swr-ease); }
@@ -3676,7 +3700,7 @@ const LAYOUTS = [
   ["screen", "studiojs.layoutScreen"], ["news", "studiojs.layoutNews"],
 ];
 
-export function LayoutBar({ layout, command, sources = [], featured = "" }) {
+export function LayoutBar({ layout, command }) {
   return (
     <div className={styles.bar} role="group" aria-label={t("studio.layouts")}>
       {LAYOUTS.map(([id, key]) => (
@@ -3795,7 +3819,7 @@ const ACTIONS = [
   { id: "camera", icon: "◉", label: () => t("studio.camera"), hint: () => t("studio.cameraHint"), command: "device.camera" },
   { id: "screen", icon: "▣", label: () => t("studio.screen"), hint: () => t("studio.screenHint"), command: "device.screen" },
   { id: "media", icon: "▶", label: () => t("studio.media"), hint: () => t("studio.mediaHint"), command: "device.media" },
-  { id: "vdo", icon: "⌁", label: () => "VDO" /* i18n-lint-ignore nombre propio */, hint: () => t("studio.vdoHint"), command: "device.vdo" },
+  { id: "vdo", icon: "⌁", label: () => t("studio.vdo"), hint: () => t("studio.vdoHint"), command: "device.vdo" },
   { id: "settings", icon: "⚙", label: () => t("studio.settings"), hint: () => t("studio.settingsHint"), command: "room.settings" },
   { id: "invite", icon: "＋", label: () => t("studio.invite"), hint: () => t("studio.inviteHint"), command: "room.invite" },
 ];
@@ -3853,7 +3877,7 @@ Montar las regiones en `StudioShell.jsx` sustituyendo los `Slot` vacíos:
         </Slot>
         <Slot region="stage">
           <ProgramStage production={snapshot.production} media={snapshot.media} />
-          <LayoutBar layout={snapshot.production.layout} featured={snapshot.production.featured} sources={snapshot.media.sources} command={command} />
+          <LayoutBar layout={snapshot.production.layout} command={command} />
         </Slot>
         <Slot region="tray"><SourceTray sources={snapshot.media.sources} command={command} /></Slot>
         <Slot region="dock"><ProductionDock snapshot={snapshot} command={command} /></Slot>
@@ -3897,14 +3921,15 @@ fallaba ningún test pero sí pintaba la interfaz:
 - [ ] **Step 5: Verificar y commit**
 
 Run: `npm -C ui test -- tests/regions.test.jsx`
-Expected: 9 tests PASS.
+Expected: 11 tests PASS (los 9 de la primera pasada más los dos anclajes de la revisión: el rail
+colapsado con un solo botón y el árbol montado sin claves eco).
 
 Run: `npm -C ui test`
-Expected: 74 tests en 12 ficheros, todo en verde (65 al cerrar Task 9 + los 9 nuevos).
+Expected: 76 tests en 12 ficheros, todo en verde (65 al cerrar Task 9 + los 9 nuevos + los 2 de la ronda de revisión).
 
 Run: `node scripts/build-ui.mjs && node --test tests/*.test.mjs`
 Expected: build con los nombres de chunk cambiados —las cinco regiones son alcanzables desde
-`mount-next`— y 83 tests node en verde. El orden importa (Global Constraints): el test de
+`mount-next`— y 84 tests node en verde (83 + el escáner React de `tests/i18n.test.mjs`). El orden importa (Global Constraints): el test de
 determinismo compara el `sw-assets.json` en disco con un rebuild, así que si corres `node --test`
 antes del build, falla el golpe siguiente y se cura solo.
 
@@ -3920,7 +3945,7 @@ comprobaría y testearía un árbol que esta rama no está cambiando.
 descarta. Los chunks con hash siguen ignorados.
 
 ```bash
-git add ui/src/components ui/src/bridge/actions.js ui/tests/actions.test.jsx ui/tests/regions.test.jsx web/studio.html docs/superpowers/plans/2026-11-20-react-vite-studio-foundation.md
+git add ui/src/components ui/src/bridge/actions.js ui/tests/actions.test.jsx ui/tests/regions.test.jsx tests/i18n.test.mjs web/js/i18n/es/studio.js web/js/i18n/en/studio.js web/js/i18n/ru/studio.js web/studio.html docs/superpowers/plans/2026-11-20-react-vite-studio-foundation.md
 git commit -m "feat(ui): render scenes, program, layouts, source tray and dock from the snapshot"
 ```
 
