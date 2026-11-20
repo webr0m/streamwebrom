@@ -2,7 +2,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: run ui test test-race lint build all windows launcher docker clean
+.PHONY: run ui test test-race lint build all windows launcher docker clean overflow
 
 run:
 	go run ./cmd/streamwebrom -open
@@ -48,3 +48,7 @@ docker:
 
 clean:
 	rm -rf dist
+
+# Blocking layout gate: needs a Chromium and a running server, so it is not part of `test`.
+overflow:
+	python3 scripts/overflow-smoke.py --url http://localhost:18443

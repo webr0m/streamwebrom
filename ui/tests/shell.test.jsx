@@ -1,6 +1,7 @@
 // ui/tests/shell.test.jsx
 import { test, expect, afterEach } from "vitest";
 import { dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -82,4 +83,44 @@ test("every token the shell grid reaches for is declared", async () => {
   const used = [...layout.matchAll(/var\(\s*(--swr-[a-z0-9-]+)/g)].map((m) => m[1]);
   expect(used.length).toBeGreaterThan(10);
   expect(used.filter((name) => !declared.has(name))).toEqual([]);
+});
+
+test("the next shell outranks the legacy studio grid", () => {
+  const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "..", "src/styles/layout.css"), "utf8");
+  const rule = css.match(/#studioRoot\[data-ui-mode="next"\] \{([^}]*)\}/);
+  expect(rule, "el modo next tiene que desmontar la rejilla legacy de #studioRoot").not.toBeNull();
+  expect(rule[1]).toMatch(/display: grid/);
+  expect(rule[1]).toMatch(/grid-template-areas: "root"/);
+  expect(rule[1]).toMatch(/height: 100dvh/);
+  expect(rule[1]).toMatch(/min-height: 0/);
+});
+
+// La puerta de Playwright (Task 12) denuncia además un desborde VERTICAL en la celda `stage`: el
+// `min-height: 0` que `.swr-shell > *` impone a todo hijo deja el alto de la celda a merced del
+// contenido, y `--stage-height` mide el contenedor sin descontar el hueco. Como jsdom no maqueta,
+// aquí solo se puede fijar la declaración, igual que arriba con la rejilla legacy: borrarla debe
+// poner rojo `make test`, no dejar la puerta huérfana de su propia corrección.
+test("the stage slot outranks the shell's blanket min-height", () => {
+  const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "..", "src/styles/layout.css"), "utf8");
+  const stage = css.match(/#studioRoot\[data-ui-mode="next"\] \.swr-shell > \[data-region="stage"\] \{([^}]*)\}/);
+  expect(stage, "el escenario tiene que recuperar un suelo de tamaño o desborda en alto").not.toBeNull();
+  expect(stage[1]).toMatch(/min-block-size: 100%/);
+  const inner = css.match(/#studioRoot\[data-ui-mode="next"\] \.swr-shell > \[data-region="stage"\] > \[data-region="stage-inner"\] \{([^}]*)\}/);
+  expect(inner, "el interior del escenario tiene que descontar el hueco del slot").not.toBeNull();
+  expect(inner[1]).toMatch(/block-size: calc\(100% - var\(--swr-sp-2\)\)/);
+});
+
+// Tercera causa, la que solo vio la barrida de estados de la puerta: con las dos barras colapsadas
+// por debajo de 820px, la regla global `.scenes-collapsed.panel-collapsed .swr-shell` (0,3,0) ganaba
+// a la lista del media query (0,2,0), que no la mencionaba, y dejaba tres columnas dentro de un área
+// de una sola: las cinco regiones medían 48px de ancho —la barra superior, 237px de contenido en 48—
+// y el panel, 0x0. Se fija la lista de selectores, que es lo que impide que la combinación se caiga.
+test("the mobile grid covers every collapse combination", () => {
+  const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "..", "src/styles/layout.css"), "utf8");
+  const block = css.match(/@media \(max-width: 820px\) \{([\s\S]*?)\n\}/);
+  expect(block, "el bloque de móvil tiene que seguir existiendo").not.toBeNull();
+  const selectors = block[1].slice(0, block[1].indexOf("{")).split(",").map((s) => s.trim().replace(/\s+/g, " "));
+  for (const want of [".swr-shell", ".scenes-collapsed .swr-shell", ".panel-collapsed .swr-shell", ".scenes-collapsed.panel-collapsed .swr-shell"]) {
+    expect(selectors, `el bloque de móvil tiene que re-pinar ${want}`).toContain(want);
+  }
 });

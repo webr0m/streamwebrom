@@ -44,6 +44,9 @@ jobs:
       - name: signalling and storage regression tests
         if: runner.os == 'Linux'
         run: node --test tests/*.test.mjs
+      - name: overflow gate documentation exists
+        if: runner.os == 'Linux'
+        run: test -s docs/OVERFLOW-GATE.md
       - name: known reachable vulnerabilities
         if: runner.os == 'Linux'
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
@@ -109,6 +112,8 @@ jobs:
       - run: python scripts/framing-smoke.py --url http://localhost:18443
       - run: python scripts/screen-share-smoke.py --url http://localhost:18443
       - run: python scripts/interface-smoke.py --url http://localhost:18443
+      - name: overflow gate (the studio must never clip)
+        run: python scripts/overflow-smoke.py --url http://localhost:18443
       - run: python scripts/studio-smoke.py --url http://localhost:18443
       - run: python scripts/relay-vdo-smoke.py --url http://localhost:18443
       - run: python scripts/effects-smoke.py --url http://localhost:18443
