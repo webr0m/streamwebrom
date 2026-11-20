@@ -727,16 +727,19 @@ git commit -m "style(ui): add Control Room Pro design tokens"
 **Interfaces:**
 - Consumes: el pipeline de la Task 1 y los tokens de la Task 3.
 - Produces: `uiMode(params: URLSearchParams, stored: string|null): "legacy"|"next"` — pureza exigida
-  para poder probarla sin DOM; `UI_MODES = ["legacy","next"]`. Contrato del arranque: en modo `legacy`
-  se ejecuta `await import("/js/studio.js")` y **no** se monta React; en modo `next` se monta
-  `<StudioRoot>` en `#studioRoot` y nunca se importa `studio.js`.
+  para poder probarla sin DOM; `UI_MODES = ["legacy","next"]`; `assetBase(url: string): string` que
+  devuelve el prefijo de contenido (`/assets/<hash>`) o `""`. Contrato del arranque: en modo `legacy`
+  se ejecuta `await import(`${base}/js/studio.js`)` con `base = assetBase(import.meta.url)` — la URL
+  sin prefijo quedaría fuera de lo que el service worker precachea y rompería el Studio offline — y
+  **no** se monta React; en modo `next` se monta el marcador de React en `#studioRoot` (la Task 9 lo
+  sustituye por `<StudioRoot bridge={…}/>`) y nunca se importa `studio.js`.
 
 - [ ] **Step 1: Escribir los tests que fallan**
 
 ```jsx
 // ui/tests/mode.test.jsx
 import { test, expect } from "vitest";
-import { uiMode, UI_MODES } from "../src/mode.js";
+import { uiMode, UI_MODES, assetBase } from "../src/mode.js";
 
 const q = (search) => new URLSearchParams(search);
 
@@ -754,6 +757,11 @@ test("the query wins over storage, and both accept only known modes", () => {
 
 test("only two modes exist", () => {
   expect(UI_MODES).toEqual(["legacy", "next"]);
+});
+
+test("the legacy boot keeps the content-addressed prefix the worker precaches", () => {
+  expect(assetBase("http://h/assets/ab12cd34ef56/js/studio-XY.js")).toBe("/assets/ab12cd34ef56");
+  expect(assetBase("http://h/js/studio-XY.js")).toBe("");
 });
 ```
 
@@ -830,14 +838,27 @@ export function uiMode(params, stored) {
 export function storedMode() {
   try { return localStorage.getItem(KEY); } catch { return null; }
 }
+
+// El bundle se sirve en `/assets/<hash>/js/studio-<hash>.js` y el service worker
+// solo precachea rutas ya prefijadas: importar `/js/studio.js` a secas rompería
+// el modo legacy sin red. Esta función recupera el prefijo desde la propia URL.
+export function assetBase(url) {
+  const path = new URL(url, "http://localhost").pathname;
+  const at = path.lastIndexOf("/js/");
+  return at === -1 ? "" : path.slice(0, at);
+}
 ```
 
 ```js
 // ui/src/boot-legacy.js
 // The untouched Studio: no React, no bridge, same modules as today.
+import { assetBase } from "./mode.js";
+
+const base = assetBase(import.meta.url);
+
 export async function bootLegacy() {
-  await import("/js/pwa.js");
-  await import("/js/studio.js");
+  await import(`${base}/js/pwa.js`);
+  await import(`${base}/js/studio.js`);
 }
 ```
 
@@ -852,36 +873,32 @@ if (mode === "legacy") {
   const { bootLegacy } = await import("./boot-legacy.js");
   await bootLegacy();
 } else {
-  const [{ StudioRoot }, { mountNext }] = await Promise.all([import("./components/StudioShell.jsx"), import("./mount-next.jsx")]);
-  await mountNext(StudioRoot);
+  const { mountNext } = await import("./mount-next.jsx");
+  await mountNext();
 }
 
 export { mode };
 ```
 
 `ui/src/mount-next.jsx` se crea en este paso como mínimo funcional para que el modo `next` no reviente
-antes de la Task 9:
+antes de la Task 9. No importa `bridge/*`, `fixtures/*` ni `components/StudioShell.jsx`: esos ficheros
+nacen en las Tasks 5 y 9, y un `import` a una ruta inexistente rompe el build de Rollup aquí mismo.
 
 ```jsx
 // ui/src/mount-next.jsx
-import { StrictMode } from "react";
+import { createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { createStudioBridge } from "./bridge/studio-bridge.js";
-import { createFixtureEngine } from "./bridge/fixture-engine.js";
-import { nextStudioFixture } from "./fixtures/next-studio.js";
 
-export async function mountNext(StudioRoot) {
+// Task 4 only proves the switch mounts React. Task 9 replaces this placeholder
+// with <StudioRoot bridge={…}/> fed by the fixture engine.
+export async function mountNext() {
   const root = document.querySelector("#studioRoot");
   root.replaceChildren();
-  const engine = createFixtureEngine(nextStudioFixture);
-  const bridge = createStudioBridge({ engine });
   root.dataset.uiMode = "next";
   createRoot(root).render(
-    <StrictMode>
-      <StudioRoot bridge={bridge} />
-    </StrictMode>,
+    createElement("section", { className: "swr-next-placeholder" }, "Studio next"),
   );
-  return bridge;
+  return root;
 }
 ```
 
@@ -890,7 +907,7 @@ export async function mountNext(StudioRoot) {
 - [ ] **Step 4: Verificar**
 
 Run: `node scripts/build-ui.mjs && npm -C ui test -- tests/mode.test.jsx`
-Expected: build escribe `web/studio.html` y `js/studio-<hash>.js`; 3 tests PASS.
+Expected: build escribe `web/studio.html` y `js/studio-<hash>.js`; 4 tests PASS.
 
 Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
 Expected: `ok`.
@@ -2283,7 +2300,7 @@ git commit -m "feat(ui): add bridge hooks, local workspace store and audio meter
 
 **Files:**
 - Create: `ui/src/styles/layout.css`, `ui/src/components/StudioShell.jsx`, `ui/src/components/StudioShell.module.css`, `ui/src/components/Topbar.jsx`, `ui/src/components/Topbar.module.css`
-- Modify: `ui/src/main.jsx` (importa `styles/layout.css`), `ui/src/mount-next.jsx` (llama `installI18n()` antes de montar), `web/js/i18n/es/studio.js`, `web/js/i18n/en/studio.js`, `web/js/i18n/ru/studio.js` (las ocho claves de Step 3)
+- Modify: `ui/src/main.jsx` (importa `styles/layout.css`), `ui/src/mount-next.jsx` (la Task 4 lo deja como marcador; aquí llama `installI18n()`, crea el motor de juguete con su bridge y monta `<StudioRoot bridge={…}/>`), `web/js/i18n/es/studio.js`, `web/js/i18n/en/studio.js`, `web/js/i18n/ru/studio.js` (las ocho claves de Step 3)
 - Test: `ui/tests/shell.test.jsx`, `ui/tests/topbar.test.jsx`
 
 **Interfaces:**
@@ -2537,6 +2554,35 @@ export function ToastLayer() {
   cursor: pointer;
 }
 .restore:hover { color: var(--swr-text); border-color: var(--swr-line-strong); }
+```
+
+Y se reescribe `ui/src/mount-next.jsx`, que la Task 4 dejó como marcador, para que el modo `next`
+monte de verdad el shell sobre el motor de juguete:
+
+```jsx
+// ui/src/mount-next.jsx
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { installI18n } from "./i18n.js";
+import { createStudioBridge } from "./bridge/studio-bridge.js";
+import { createFixtureEngine } from "./bridge/fixture-engine.js";
+import { nextStudioFixture } from "./fixtures/next-studio.js";
+import { StudioRoot } from "./components/StudioShell.jsx";
+
+export async function mountNext() {
+  installI18n();
+  const root = document.querySelector("#studioRoot");
+  root.replaceChildren();
+  const engine = createFixtureEngine(nextStudioFixture);
+  const bridge = createStudioBridge({ engine });
+  root.dataset.uiMode = "next";
+  createRoot(root).render(
+    <StrictMode>
+      <StudioRoot bridge={bridge} />
+    </StrictMode>,
+  );
+  return bridge;
+}
 ```
 
 - [ ] **Step 4: Escribir la barra superior**
