@@ -3973,17 +3973,16 @@ git commit -m "feat(ui): render scenes, program, layouts, source tray and dock f
 ### Task 11: Avisos, errores por dominio y región `aria-live`
 
 **Files:**
-- Create: `ui/src/lib/toasts.js`, `ui/src/hooks/useToasts.js`, `ui/src/components/ToastLayer.jsx` (reemplaza el stub de la Task 9) + `ToastLayer.module.css`
-- Modify: `ui/src/bridge/studio-bridge.js` (`onError` multicanal), `ui/tests/bridge.test.jsx` (dos casos nuevos)
-- Test: `ui/tests/toasts.test.jsx`
+- Create: `ui/src/lib/toasts.js`, `ui/src/hooks/useToasts.js`, `ui/tests/toasts.test.jsx`
+- Modify: `ui/src/components/ToastLayer.jsx` (ES el stub `export function ToastLayer() { return null; }` que dejó Task 9: se rellena, no se crea), `ui/src/components/ToastLayer.module.css`, `ui/src/bridge/studio-bridge.js` (`onError` multicanal, la cola y el suscriptor del motor), `ui/src/components/StudioShell.jsx` (le pasa `bridge` al `ToastLayer`), `ui/src/fixtures/next-studio.js` (quita la clave `toasts` muerta), `ui/tests/bridge.test.jsx` (dos casos nuevos)
 
 **Interfaces:**
-- Consumes: `snapshot.errors` (cuatro dominios, Task 5) y `snapshot.toasts.items`.
+- Consumes: `snapshot.errors` (cuatro dominios, Task 5).
 - Produces:
-  - `createToastQueue({ max = 3, ttl = { ok: 2600, info: 3200, warn: 5000, err: 7000 }, now, schedule }) → { push(text, kind): id, items(): item[], dismiss(id), subscribe(fn) }`
+  - `createToastQueue({ max = 3, ttl = { ok: 2600, info: 3200, warn: 5000, err: 7000 }, now, schedule }) → { push(text, kind): id, items(): item[], dismiss(id), subscribe(fn), destroy() }`. `item` es `{ id, text, kind }`. La cola es la DUEÑA de `toasts`: el snapshot del motor ya no lleva esa clave y `createStudioBridge` la publica (`store.set({ toasts: { items } })`), así que `snapshot.toasts.items` existe en cuanto el bridge se construye.
   - `useToasts(bridge) → [items, { push, dismiss }]`
   - `bridge.onError(listener) → unsubscribe`, `listener(error, domain)`; se dispara en el `catch` de
-    `command()` además de publicar en `snapshot.errors`.
+    `command()` además de publicar en `snapshot.errors` y encolar un aviso de error.
 
 - [ ] **Step 1: Escribir los tests que fallan**
 
@@ -3994,6 +3993,7 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createToastQueue } from "../src/lib/toasts.js";
 import { ToastLayer } from "../src/components/ToastLayer.jsx";
+import { StudioRoot } from "../src/components/StudioShell.jsx";
 import { createStudioBridge } from "../src/bridge/studio-bridge.js";
 import { createFixtureEngine } from "../src/bridge/fixture-engine.js";
 import { nextStudioFixture } from "../src/fixtures/next-studio.js";
@@ -4014,6 +4014,44 @@ test("a toast disappears after its severity budget", () => {
   expect(timers.map(([, ms]) => ms)).toEqual([2600, 7000]);
 });
 
+// Las tres de arriba no miran el id. Un temporizador que disparara sin quitar el aviso, o dos
+// avisos con el mismo id, habrían dejado este bloque en verde: `notify` recibía el OBJETO y
+// `dismiss` lo buscaba como clave de `Map`, así que el filtro `item.id !== id` nunca comparaba
+// iguales y el auto-cierre no existía.
+test("firing the scheduled expiry removes the toast it armed", () => {
+  const timers = [];
+  const queue = createToastQueue({ now: () => 0, schedule: (fn, ms) => { timers.push([fn, ms]); return () => {}; } });
+  queue.push("grabando", "ok");
+  timers[0][0]();
+  expect(queue.items()).toEqual([]);
+});
+
+test("dismissing by hand cancels the timer it armed", () => {
+  let cancelled = 0;
+  const queue = createToastQueue({ now: () => 0, schedule: () => () => { cancelled += 1; } });
+  queue.push("aviso", "info");
+  queue.dismiss(queue.items()[0].id);
+  expect(cancelled).toBe(1);
+});
+
+test("two toasts in the same millisecond get different ids", () => {
+  const queue = createToastQueue({ now: () => 0, schedule: () => () => {} });
+  queue.push("a", "info");
+  queue.push("b", "info");
+  expect(new Set(queue.items().map((item) => item.id)).size).toBe(2);
+});
+
+test("the toast the cap drops loses its timer too", () => {
+  const timers = [];
+  const cancelled = [];
+  const queue = createToastQueue({ max: 2, now: () => 0, schedule: (fn, ms) => { timers.push([fn, ms]); return () => cancelled.push(ms); } });
+  queue.push("a", "info");
+  queue.push("b", "info");
+  queue.push("c", "info");
+  expect(queue.items().map((item) => item.text)).toEqual(["b", "c"]);
+  expect(cancelled).toHaveLength(1);
+});
+
 test("the bridge notifies error listeners per domain", async () => {
   const engine = createFixtureEngine(nextStudioFixture);
   const bridge = createStudioBridge({ engine });
@@ -4028,7 +4066,18 @@ test("the bridge notifies error listeners per domain", async () => {
   expect(seen).toHaveLength(1);
 });
 
-test("toasts are dismissible, polite and never overlap the dock", async () => {
+// El suscriptor del motor solía hacer `store.set(engine.snapshot())`, que sobre escribe la clave
+// `toasts` con la del fixture. Un aviso visible desaparecía en cuanto el motor emitía cualquier
+// cosa, y ningún test lo veía porque ninguno emitía después de encolar.
+test("an engine snapshot arriving does not clear the queue", () => {
+  const engine = createFixtureEngine(nextStudioFixture);
+  const bridge = createStudioBridge({ engine });
+  bridge.notify("sigue ahí", "warn");
+  engine.emit({ production: { ...engine.snapshot().production, live: true } });
+  expect(bridge.getSnapshot().toasts.items.map((item) => item.text)).toEqual(["sigue ahí"]);
+});
+
+test("toasts are dismissible and announced politely", async () => {
   const bridge = createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) });
   bridge.notify("Cámara añadida", "ok");
   bridge.notify("Sin conexión con el relé", "err");
@@ -4046,6 +4095,16 @@ test("an empty queue renders nothing", () => {
   const { container } = render(<ToastLayer bridge={bridge} />);
   expect(container.querySelector("[data-toast]")).toBeNull();
 });
+
+// El shell renderizaba `<ToastLayer />` sin props —con el stub no se notaba—, así que el cableado
+// de esta tarea se veía en rojo solo en el navegador. Este ancla rompe el shell si el `bridge` no
+// llega: `useToasts(undefined)` tira al llamar `bridge.subscribe`.
+test("the shell hands its bridge to the toast layer", () => {
+  const bridge = createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) });
+  bridge.notify("aviso desde el shell", "info");
+  render(<StudioRoot bridge={bridge} />);
+  expect(screen.getByText("aviso desde el shell")).toBeInTheDocument();
+});
 ```
 
 Añadir a `ui/tests/bridge.test.jsx`:
@@ -4062,8 +4121,8 @@ test("notify publishes into the snapshot so React can render toasts", () => {
 
 - [ ] **Step 2: Verificar que fallan**
 
-Run: `npm -C ui test -- tests/toasts.test.jsx ui/tests/bridge.test.jsx`
-Expected: FAIL —«Failed to resolve import "../src/lib/toasts.js"» y «bridge.notify is not a function».
+Run: `npm -C ui test -- tests/toasts.test.jsx tests/bridge.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/lib/toasts.js"» y «bridge.notify is not a function». El filtro va relativo a `ui/` porque `npm -C ui` ya cambia ahí; `ui/tests/...` no casa con ningún fichero.
 
 - [ ] **Step 3: Implementar cola, bridge y capa**
 
@@ -4073,26 +4132,34 @@ const TTL = { ok: 2600, info: 3200, warn: 5000, err: 7000 };
 
 export function createToastQueue({ max = 3, ttl = TTL, now = () => Date.now(), schedule = (fn, ms) => { const id = setTimeout(fn, ms); return () => clearTimeout(id); } } = {}) {
   let items = [];
+  let seq = 0;
   const listeners = new Set();
   const cancel = new Map();
   const publish = () => { for (const listener of [...listeners]) listener(); };
-  const notify = (id) => {
-    cancel.set(id, schedule(() => { dismiss(id); }, ttl[id.kind] ?? ttl.info));
-  };
   function dismiss(id) {
     cancel.get(id)?.();
     cancel.delete(id);
     items = items.filter((item) => item.id !== id);
     publish();
   }
+  // Todo el mapa de temporizadores va indexado por el STRING `id`: si `arm` recibe el item y guarda
+  // bajo el objeto, `dismiss(id)` ya no lo encuentra y el aviso queda en pantalla para siempre.
+  function arm(item) {
+    cancel.set(item.id, schedule(() => dismiss(item.id), ttl[item.kind] ?? ttl.info));
+  }
   return {
     items: () => items,
     push(text, kind = "info") {
-      const id = `${now()}-${items.length + 1}`;
-      items = [...items, { id, text, kind }].slice(-max);
-      notify(items.at(-1));
+      const item = { id: `${now()}-${++seq}`, text, kind };
+      const next = [...items, item].slice(-max);
+      for (const gone of items.filter((old) => !next.includes(old))) {
+        cancel.get(gone.id)?.();
+        cancel.delete(gone.id);
+      }
+      items = next;
+      arm(item);
       publish();
-      return id;
+      return item.id;
     },
     dismiss,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
@@ -4101,11 +4168,17 @@ export function createToastQueue({ max = 3, ttl = TTL, now = () => Date.now(), s
 }
 ```
 
-En `ui/src/bridge/studio-bridge.js`, añadir dentro de `createStudioBridge` (después de `store`) y antes
-de `command`:
+En `ui/src/bridge/studio-bridge.js`, primero el import (`import { createToastQueue } from "../lib/toasts.js";`, junto a los de `snapshot.js` y `actions.js`) y el suscriptor del motor, que deja
+de ser `store.set(engine.snapshot())`:
 
 ```js
   const queue = createToastQueue();
+  const stop = engine.subscribe(() => store.set({ ...engine.snapshot(), toasts: { items: queue.items() } }));
+```
+
+Añadir dentro de `createStudioBridge` después de `stop` y antes de `command`:
+
+```js
   const errorListeners = new Set();
   const relay = () => store.set({ toasts: { items: queue.items() } });
   queue.subscribe(relay);
@@ -4116,18 +4189,23 @@ dentro del `catch` de `command`, justo antes de `throw error`:
 
 ```js
       for (const listener of [...errorListeners]) listener(error, domain);
-      queue.notify(error?.message || String(error), "err");
+      queue.push(error?.message || String(error), "err");
 ```
 
 y en el objeto devuelto:
 
 ```js
-    notify: (text, kind = "info") => queue.notify(text, kind),
+    notify: (text, kind = "info") => queue.push(text, kind),
     dismissToast: (id) => queue.dismiss(id),
     onError(listener) { errorListeners.add(listener); return () => errorListeners.delete(listener); },
 ```
 
 con `destroy()` llamando además `queue.destroy(); errorListeners.clear();`.
+
+`relay()` se llama en la construcción para que `snapshot.toasts` exista desde el primer render, y por
+eso `ui/src/fixtures/next-studio.js` pierde su línea `toasts: { items: [] }`: nada la leía, y
+mientras el motor la llevara, cada `emit` volvía a poner el array vacío y borraba avisos reales
+(esa es la prueba «an engine snapshot arriving does not clear the queue»).
 
 ```jsx
 // ui/src/hooks/useToasts.js
@@ -4164,8 +4242,15 @@ export function ToastLayer({ bridge }) {
 ```
 
 `studio.notifications` y `studio.closeNotification` se añadieron a las tres dictionaries en Task 9
-Step 3; si falta alguna lo detecta `tests/ui-i18n.test.mjs` (Task 13). No escribir el texto literal
-dentro del componente.
+Step 3; si falta alguna lo detecta `tests/i18n.test.mjs` (la prueba «every key used by the React
+sources exists» ya recorre `ui/src`). No escribir el texto literal dentro del componente.
+
+En `ui/src/components/StudioShell.jsx`, la línea que Task 9 dejó como `<ToastLayer />` pasa a llevar
+el bridge; con el stub anterior da igual, con esta capa no:
+
+```jsx
+      <ToastLayer bridge={bridge} />
+```
 
 ```css
 /* ui/src/components/ToastLayer.module.css */
@@ -4183,13 +4268,18 @@ dentro del componente.
 
 - [ ] **Step 4: Verificar**
 
-Run: `npm -C ui test -- tests/toasts.test.jsx ui/tests/bridge.test.jsx && npm -C ui test`
-Expected: los 6 tests nuevos PASS y el resto de la suite de `ui/tests/` sigue PASS.
+Run: `npm -C ui test -- tests/toasts.test.jsx tests/bridge.test.jsx && npm -C ui test`
+Expected: los 12 tests nuevos PASS (11 en `toasts.test.jsx`, 1 en `bridge.test.jsx`) y la suite entera
+en verde: 88 tests en 13 ficheros.
+
+Que el aviso no pise el dock no lo puede afirmar ningún test de aquí: `56px` del CSS es la altura del
+dock a ojo y jsdom no maqueta. Lo mide la puerta de Playwright de Task 12; en esta tarea basta con que
+la capa esté fija, `pointer-events: none` fuera de la tarjeta y por encima del dock en `z-index`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/src/lib/toasts.js ui/src/hooks/useToasts.js ui/src/components/ToastLayer.jsx ui/src/components/ToastLayer.module.css ui/src/bridge/studio-bridge.js ui/tests/toasts.test.jsx ui/tests/bridge.test.jsx
+git add ui/src/lib/toasts.js ui/src/hooks/useToasts.js ui/src/components/ToastLayer.jsx ui/src/components/ToastLayer.module.css ui/src/bridge/studio-bridge.js ui/src/components/StudioShell.jsx ui/src/fixtures/next-studio.js ui/tests/toasts.test.jsx ui/tests/bridge.test.jsx docs/superpowers/plans/2026-11-20-react-vite-studio-foundation.md
 git commit -m "feat(ui): add toast queue and per-domain error reporting"
 ```
 
