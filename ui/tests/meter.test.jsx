@@ -31,6 +31,15 @@ test("cancel drops a pending trailing value", () => {
   expect(seen).toEqual([1]);
 });
 
+test("LevelMeter clamps a value that arrives outside the linear range", () => {
+  const { rerender } = render(<LevelMeter value={1.4} label="Nivel" />);
+  expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "100");
+  rerender(<LevelMeter value={-3} label="Nivel" />);
+  expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "0");
+  rerender(<LevelMeter value="nope" label="Nivel" />);
+  expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "0");
+});
+
 test("LevelMeter reports its value accessibly and honours reduced motion", () => {
   render(<LevelMeter value={0.72} label="Nivel de Cámara principal" />);
   const meter = screen.getByRole("meter", { name: "Nivel de Cámara principal" });
