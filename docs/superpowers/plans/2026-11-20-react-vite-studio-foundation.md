@@ -3974,13 +3974,16 @@ git commit -m "feat(ui): render scenes, program, layouts, source tray and dock f
 
 **Files:**
 - Create: `ui/src/lib/toasts.js`, `ui/src/hooks/useToasts.js`, `ui/tests/toasts.test.jsx`
-- Modify: `ui/src/components/ToastLayer.jsx` (ES el stub `export function ToastLayer() { return null; }` que dejó Task 9: se rellena, no se crea), `ui/src/components/ToastLayer.module.css`, `ui/src/bridge/studio-bridge.js` (`onError` multicanal, la cola y el suscriptor del motor), `ui/src/components/StudioShell.jsx` (le pasa `bridge` al `ToastLayer`), `ui/src/fixtures/next-studio.js` (quita la clave `toasts` muerta), `ui/tests/bridge.test.jsx` (dos casos nuevos)
+- Modify: `ui/src/components/ToastLayer.jsx` (ES el stub `export function ToastLayer() { return null; }` que dejó Task 9: se rellena, no se crea), `ui/src/components/ToastLayer.module.css`, `ui/src/bridge/studio-bridge.js` (`onError` multicanal, la cola y el suscriptor del motor), `ui/src/components/StudioShell.jsx` (le pasa `bridge` al `ToastLayer`), `ui/src/fixtures/next-studio.js` (quita la clave `toasts` muerta), `ui/tests/bridge.test.jsx` (un caso nuevo)
 
 **Interfaces:**
 - Consumes: `snapshot.errors` (cuatro dominios, Task 5).
 - Produces:
   - `createToastQueue({ max = 3, ttl = { ok: 2600, info: 3200, warn: 5000, err: 7000 }, now, schedule }) → { push(text, kind): id, items(): item[], dismiss(id), subscribe(fn), destroy() }`. `item` es `{ id, text, kind }`. La cola es la DUEÑA de `toasts`: el snapshot del motor ya no lleva esa clave y `createStudioBridge` la publica (`store.set({ toasts: { items } })`), así que `snapshot.toasts.items` existe en cuanto el bridge se construye.
-  - `useToasts(bridge) → [items, { push, dismiss }]`
+  - `useToasts(bridge) → [items, { dismiss }]` — sin `push`: ningún consumidor lee el campo, y un
+    hook que lo anunciara prometería un contrato que nadie usa (la misma regla que quitó
+    `sources`/`featured` de `LayoutBar` en Task 10). Para levantar un aviso desde un componente se
+    pasa por `bridge.notify`, que ya es el camino público.
   - `bridge.onError(listener) → unsubscribe`, `listener(error, domain)`; se dispara en el `catch` de
     `command()` además de publicar en `snapshot.errors` y encolar un aviso de error.
 
@@ -3988,9 +3991,12 @@ git commit -m "feat(ui): render scenes, program, layouts, source tray and dock f
 
 ```jsx
 // ui/tests/toasts.test.jsx
-import { test, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { test, expect, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createToastQueue } from "../src/lib/toasts.js";
 import { ToastLayer } from "../src/components/ToastLayer.jsx";
 import { StudioRoot } from "../src/components/StudioShell.jsx";
@@ -4001,7 +4007,7 @@ import { nextStudioFixture } from "../src/fixtures/next-studio.js";
 afterEach(cleanup);
 
 test("the queue caps at three items and drops the oldest", () => {
-  const queue = createToastQueue({ now: () => 0, schedule: () => () => {} });
+  const queue = createToastQueue({ max: 3, now: () => 0, schedule: () => () => {} });
   for (const text of ["a", "b", "c", "d"]) queue.push(text, "info");
   expect(queue.items().map((item) => item.text)).toEqual(["b", "c", "d"]);
 });
@@ -4012,6 +4018,27 @@ test("a toast disappears after its severity budget", () => {
   queue.push("grabando", "ok");
   queue.push("sin conexión", "err");
   expect(timers.map(([, ms]) => ms)).toEqual([2600, 7000]);
+});
+
+test("an unknown severity falls back to the info budget", () => {
+  const timers = [];
+  const queue = createToastQueue({ now: () => 0, schedule: (fn, ms) => { timers.push([fn, ms]); return () => {}; } });
+  queue.push("misterioso", "trace");
+  expect(timers.map(([, ms]) => ms)).toEqual([3200]);
+});
+
+test("destroy cancels every timer and stops publishing", () => {
+  const cancelled = [];
+  let published = 0;
+  const queue = createToastQueue({ now: () => 0, schedule: () => () => cancelled.push(1) });
+  queue.subscribe(() => { published += 1; });
+  queue.push("a", "info");
+  queue.push("b", "info");
+  queue.destroy();
+  expect(cancelled).toHaveLength(2);
+  published = 0;
+  queue.dismiss("something-gone");
+  expect(published).toBe(0);
 });
 
 // Las tres de arriba no miran el id. Un temporizador que disparara sin quitar el aviso, o dos
@@ -4050,6 +4077,23 @@ test("the toast the cap drops loses its timer too", () => {
   queue.push("c", "info");
   expect(queue.items().map((item) => item.text)).toEqual(["b", "c"]);
   expect(cancelled).toHaveLength(1);
+});
+
+// Los cuatro `expect` de abajo son el ancla de las tres garantías que impiden que un aviso
+// visible vuelva sordo todo el dock (`pointer-events`) o se esconda detrás (`z-index`). La
+// geometría —si solapa o no— es invisible para jsdom y la mide la puerta de Playwright de
+// Task 12; lo que sí se puede afirmar aquí es el texto del fichero que el repo ya lee desde
+// disco. Se abre con `resolve(dirname(fileURLToPath(...)), "..", …)` a propósito: Vite's
+// `vite:asset-import-meta-url` reescribe toda forma de `new URL("../src/…", import.meta.url)`
+// dentro de un módulo de Vitest y `readFile` responde «The URL must be of scheme file».
+test("a toast floats over the dock without stealing its clicks", () => {
+  const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "..", "src/components/ToastLayer.module.css"), "utf8");
+  const layer = css.match(/^\.layer \{([^}]*)\}/m)[1];
+  const toast = css.match(/^\.toast \{([^}]*)\}/m)[1];
+  expect(layer).toMatch(/position: fixed/);
+  expect(layer).toMatch(/pointer-events: none/);
+  expect(layer).toMatch(/z-index: var\(--swr-z-toast\)/);
+  expect(toast).toMatch(/pointer-events: auto/);
 });
 
 test("the bridge notifies error listeners per domain", async () => {
@@ -4214,7 +4258,7 @@ import { useCallback, useSyncExternalStore } from "react";
 export function useToasts(bridge) {
   const subscribe = useCallback((onChange) => bridge.subscribe(onChange), [bridge]);
   const items = useSyncExternalStore(subscribe, () => bridge.getSnapshot().toasts.items, () => []);
-  return [items, { push: bridge.notify, dismiss: bridge.dismissToast }];
+  return [items, { dismiss: bridge.dismissToast }];
 }
 ```
 
@@ -4269,12 +4313,21 @@ el bridge; con el stub anterior da igual, con esta capa no:
 - [ ] **Step 4: Verificar**
 
 Run: `npm -C ui test -- tests/toasts.test.jsx tests/bridge.test.jsx && npm -C ui test`
-Expected: los 12 tests nuevos PASS (11 en `toasts.test.jsx`, 1 en `bridge.test.jsx`) y la suite entera
-en verde: 88 tests en 13 ficheros.
+Expected: los 15 tests nuevos PASS (14 en `toasts.test.jsx`, 1 en `bridge.test.jsx`) y la suite entera
+en verde: 91 tests en 13 ficheros.
 
 Que el aviso no pise el dock no lo puede afirmar ningún test de aquí: `56px` del CSS es la altura del
 dock a ojo y jsdom no maqueta. Lo mide la puerta de Playwright de Task 12; en esta tarea basta con que
-la capa esté fija, `pointer-events: none` fuera de la tarjeta y por encima del dock en `z-index`.
+la capa esté fija, `pointer-events: none` fuera de la tarjeta y por encima del dock en `z-index` — tres
+garantías que ancla desde disco la prueba «a toast floats over the dock without stealing its clicks».
+
+En Step 3 se revisaron y se falló DEJAR COMO ESTÁN tres cosas que la revisión señaló: el id
+`${now()}-${++seq}` no colisiona porque `seq` es global a la cola e incrementa en cada `push` (el test
+que inyecta `now: () => 0` es justo ese caso); `aria-live="polite"` en la contenedora lo eligió la
+especificación (`docs/superpowers/specs/2026-11-20-react-vite-studio-ui-design.md:216`) y la asertividad
+del `role="alert"` anidado es una pregunta de navegador aparcada para la revisión de rama; y el glifo
+`✕` no necesita `aria-hidden` porque el botón lleva `aria-label`, que gana en el cálculo del nombre
+accesible — igual que la página legacy (`web/studio.html:249`).
 
 - [ ] **Step 5: Commit**
 
