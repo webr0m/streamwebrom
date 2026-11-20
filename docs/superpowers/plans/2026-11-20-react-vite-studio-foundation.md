@@ -2246,27 +2246,31 @@ git commit -m "feat(ui): add tabs, switch, overflow menu, field and dialog primi
 
 **Files:**
 - Create: `ui/src/hooks/useStudioSnapshot.js`, `ui/src/hooks/useWorkspace.js`, `ui/src/hooks/useStageHeight.js`, `ui/src/hooks/useReducedMotion.js`, `ui/src/lib/throttle.js`, `ui/src/components/primitives/LevelMeter.jsx`, `ui/src/components/primitives/LevelMeter.module.css`
+- Modify: `ui/src/i18n.js` (ya existe desde la Task 1 con los seis re-exports; aquí se le añade `lang`)
 - Test: `ui/tests/hooks.test.jsx`, `ui/tests/meter.test.jsx`
 
 **Interfaces:**
-- Consumes: `createStudioBridge` (Task 5) y `i18n.js` del repo a través de `ui/src/i18n.js`.
+- Consumes: `createStudioBridge` (Task 5) y `i18n.js` del repo a través de `ui/src/i18n.js`. Las clases CSS comparten el `cx` ya promovido en `ui/src/components/primitives/cx.js` (Task 7).
 - Produces:
-  - `useStudioSnapshot(bridge) → snapshot` — re-renderiza además cuando cambia `swr:lang`.
-  - `useWorkspace() → [workspace, updateWorkspace(patch)]` con `workspace = { scenesCollapsed, panelOpen, activeTab }` persistido en `localStorage["swr.workspace"]` (misma clave y mismos significados que `web/js/workspace.js`).
-  - `useStageHeight(ref) → number` — escribe `--stage-height` en el elemento observado, igual que el `ResizeObserver` legacy.
+  - `useStudioSnapshot(bridge) → snapshot` — además de las publicaciones del bridge, re-renderiza cuando cambia el idioma. El objeto snapshot NO cambia al cambiar de idioma, así que `swr:lang` se engancha como segundo store (`useSyncExternalStore(onLangChange, lang, lang)`); sin él React haría bail-out y las etiquetas quedarían en el idioma viejo.
+  - `useWorkspace() → [workspace, updateWorkspace(patch)]` con `workspace = { scenesCollapsed, panelOpen, activeTab }` persistido en `localStorage["swr.workspace"]`. La clave es la misma que lee `web/js/workspace.js`, y ese chrome guarda `scenes`/`panel`: toda escritura lleva también los dos campos legacy (`scenes = !scenesCollapsed`, `panel = panelOpen`) y toda lectura acepta cualquiera de las dos grafías. Una sesión en modo `next` no puede borrar la preferencia que el modo `legacy` sigue leyendo (amendment A1).
+  - `useStageHeight(ref) → number` — escribe `--stage-height` en el elemento observado, igual que el `ResizeObserver` legacy, y devuelve la altura redondeada. jsdom no trae `ResizeObserver`: el hook lo detecta y el test lo stubea.
   - `useReducedMotion() → boolean`.
-  - `throttle(fn, { hz = 10, now, later }) → { run(value), cancel() }` con llamada final garantizada.
+  - `throttle(fn, { hz = 10, now, later }) → { run(value), cancel() }` con llamada final garantizada. `cancel()` no puede desprogramar el temporizador que devolvió `later` (puede ser cualquier scheduler), así que usa un centinela `pending === undefined`: el flush disparado no entrega nada y `run()` vuelve a programar.
   - `<LevelMeter value={0..1} label />` — `role="meter"`, `aria-valuenow` en porcentaje, `--swr-level` como
-    longitud de la barra, `data-reduced="true"` cuando no hay animación.
-  - `ui/src/i18n.js`: re-exporta `t`, `installI18n`, `onLangChange`, `setLang`, `LANGS`, `LANG_LABELS` desde `../../web/js/i18n.js`, única vía para leer textos.
+    longitud de la barra, `data-reduced="true"` cuando no hay animación. `value` es lineal 0..1: quien tenga decibelios (Task 10) los mapea antes de pasarlos.
+  - `ui/src/i18n.js`: re-exporta `t`, `installI18n`, `onLangChange`, `setLang`, `LANGS`, `LANG_LABELS` desde `../../web/js/i18n.js`, única vía para leer textos. También re-exporta `lang`, porque los stores de React necesitan leer el idioma actual sin copiarlo.
 
 - [ ] **Step 1: Escribir el re-export y los tests que fallan**
 
 ```js
-// ui/src/i18n.js
+// ui/src/i18n.js — MODIFICAR la única línea de re-export (el fichero ya existe).
 // The dictionaries stay in the repo's own module: React must not own a second
 // copy of the strings, so this file only re-exports the engine's translator.
-export { t, installI18n, onLangChange, setLang, LANGS, LANG_LABELS } from "../../web/js/i18n.js";
+// `lang` joins the list because a React store needs to read the current language
+// without copying it; tests/ui-artifacts.test.mjs checks every name re-exported
+// here really exists in web/js/i18n.js, so a wrong addition fails the node suite.
+export { t, installI18n, onLangChange, setLang, lang, LANGS, LANG_LABELS } from "../../web/js/i18n.js";
 ```
 
 ```jsx
@@ -2275,20 +2279,28 @@ import { test, expect, vi, afterEach } from "vitest";
 import { renderHook, act, cleanup } from "@testing-library/react";
 import { useWorkspace } from "../src/hooks/useWorkspace.js";
 import { useStudioSnapshot } from "../src/hooks/useStudioSnapshot.js";
+import { useStageHeight } from "../src/hooks/useStageHeight.js";
 import { useReducedMotion } from "../src/hooks/useReducedMotion.js";
 import { createStudioBridge } from "../src/bridge/studio-bridge.js";
 import { createFixtureEngine } from "../src/bridge/fixture-engine.js";
 import { nextStudioFixture } from "../src/fixtures/next-studio.js";
+import { lang, setLang } from "../src/i18n.js";
 
-afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-test("workspace persists the same key and shape as the legacy chrome", () => {
+test("workspace keeps the legacy key and leaves the legacy fields readable", () => {
   const { result } = renderHook(() => useWorkspace());
   expect(result.current[0]).toEqual({ scenesCollapsed: false, panelOpen: true, activeTab: "chat" });
   act(() => result.current[1]({ scenesCollapsed: true }));
   expect(JSON.parse(localStorage.getItem("swr.workspace"))).toEqual({
-    scenesCollapsed: true, panelOpen: true, activeTab: "chat",
+    scenesCollapsed: true, panelOpen: true, activeTab: "chat", scenes: false, panel: true,
   });
+});
+
+test("a workspace saved by the legacy chrome is read, not reset", () => {
+  localStorage.setItem("swr.workspace", JSON.stringify({ scenes: false, panel: false }));
+  const { result } = renderHook(() => useWorkspace());
+  expect(result.current[0]).toEqual({ scenesCollapsed: true, panelOpen: false, activeTab: "chat" });
 });
 
 test("an unreadable workspace falls back to the defaults", () => {
@@ -2300,14 +2312,40 @@ test("an unreadable workspace falls back to the defaults", () => {
 test("the snapshot hook re-renders on bridge and language publications", () => {
   const engine = createFixtureEngine(nextStudioFixture);
   const bridge = createStudioBridge({ engine });
-  const { result } = renderHook(() => useStudioSnapshot(bridge));
+  let renders = 0;
+  const { result } = renderHook(() => { renders += 1; return useStudioSnapshot(bridge); });
+  expect(renders).toBe(1);
   expect(result.current.production.live).toBe(false);
   act(() => {
     engine.emit({ production: { ...engine.snapshot().production, live: true } });
   });
   expect(result.current.production.live).toBe(true);
-  act(() => document.dispatchEvent(new CustomEvent("swr:lang", { detail: { lang: "en" } })));
-  expect(result.current).toBeTruthy();
+  expect(renders).toBe(2);
+  // El idioma real del motor, no un evento fabricado: es lo que engancha la App.
+  act(() => { setLang("en"); });
+  expect(lang()).toBe("en");
+  expect(renders).toBe(3);
+  // Devuelve el idioma que fijó ui/tests/setup.js, y dentro de act(): un setLang
+  // suelto deja un update de React sin envolver y ensucia la salida del suite.
+  act(() => { setLang("es"); });
+});
+
+test("useStageHeight writes --stage-height like the legacy observer", () => {
+  const observers = [];
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() {}
+    disconnect() { this.disconnected = true; }
+  });
+  const node = document.createElement("div");
+  const ref = { current: node };
+  const { result, unmount } = renderHook(() => useStageHeight(ref));
+  expect(observers).toHaveLength(1);
+  act(() => { observers[0].callback([{ contentRect: { height: 420.4 } }]); });
+  expect(result.current).toBe(420);
+  expect(node.style.getPropertyValue("--stage-height")).toBe("420px");
+  unmount();
+  expect(observers[0].disconnected).toBe(true);
 });
 
 test("useReducedMotion follows the media query", () => {
@@ -2335,20 +2373,23 @@ test("the meter throttles to ten updates per second and keeps the last value", (
   const seen = [];
   const meter = throttle((value) => seen.push(value), { hz: 10, later: (fn) => setTimeout(fn, 30) });
   for (let i = 0; i < 50; i += 1) meter.run(i);
-  expect(seen.length).toBeLessThanOrEqual(2);
+  // La primera va fuera de ventana y las 49 restantes se condensan: si el
+  // throttle no existiera, esta aserción vería 50 valores.
+  expect(seen).toEqual([0]);
   meter.run(999);
   vi.advanceTimersByTime(120);
-  expect(seen.at(-1)).toBe(999);
+  expect(seen).toEqual([0, 999]);
 });
 
 test("cancel drops a pending trailing value", () => {
   vi.useFakeTimers();
   const seen = [];
   const meter = throttle((value) => seen.push(value), { hz: 10, later: (fn) => setTimeout(fn, 30) });
-  meter.run(1);
+  meter.run(1);   // fuera de ventana: se entrega ya
+  meter.run(2);   // dentro de ventana: queda pendiente
   meter.cancel();
   vi.advanceTimersByTime(200);
-  expect(seen.filter((value) => value !== 1)).toEqual([]);
+  expect(seen).toEqual([1]);
 });
 
 test("LevelMeter reports its value accessibly and honours reduced motion", () => {
@@ -2365,8 +2406,8 @@ test("LevelMeter reports its value accessibly and honours reduced motion", () =>
 
 - [ ] **Step 2: Verificar que fallan**
 
-Run: `npm -C ui test -- tests/hooks.test.jsx ui/tests/meter.test.jsx`
-Expected: FAIL —«Failed to resolve import "../src/hooks/useWorkspace.js"».
+Run: `npm -C ui test -- tests/hooks.test.jsx tests/meter.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/hooks/useWorkspace.js"». Los dos filtros van relativos a `ui/` porque `npm -C ui test` ejecuta `vitest` con cwd `ui/`; un filtro `ui/tests/…` no coincide con ningún fichero y, con `--passWithNoTests`, daría verde sin ejecutar nada.
 
 - [ ] **Step 3: Implementar los hooks y el medidor**
 
@@ -2377,9 +2418,27 @@ import { useCallback, useState } from "react";
 const KEY = "swr.workspace";
 const DEFAULTS = { scenesCollapsed: false, panelOpen: true, activeTab: "chat" };
 
+function flag(saved, modern, legacy, invert = false) {
+  if (typeof saved[modern] === "boolean") return saved[modern];
+  if (typeof saved[legacy] === "boolean") return invert ? !saved[legacy] : saved[legacy];
+  return DEFAULTS[modern];
+}
+
 function read() {
-  try { return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY) || "{}") || {}) }; }
-  catch { return { ...DEFAULTS }; }
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch {}
+  return {
+    scenesCollapsed: flag(saved, "scenesCollapsed", "scenes", true),
+    panelOpen: flag(saved, "panelOpen", "panel"),
+    activeTab: typeof saved.activeTab === "string" ? saved.activeTab : DEFAULTS.activeTab,
+  };
+}
+
+// web/js/workspace.js reads `scenes`/`panel` from this same key, so a write from
+// the React chrome carries both spellings: trying `?ui=next` must not reset the
+// layout the legacy Studio still restores.
+function legacyMirror(workspace) {
+  return { scenes: !workspace.scenesCollapsed, panel: workspace.panelOpen };
 }
 
 export function useWorkspace() {
@@ -2387,7 +2446,7 @@ export function useWorkspace() {
   const update = useCallback((patch) => {
     setWorkspace((current) => {
       const next = { ...current, ...patch };
-      try { localStorage.setItem(KEY, JSON.stringify(next)); } catch {}
+      try { localStorage.setItem(KEY, JSON.stringify({ ...next, ...legacyMirror(next) })); } catch {}
       return next;
     });
   }, []);
@@ -2397,18 +2456,16 @@ export function useWorkspace() {
 
 ```js
 // ui/src/hooks/useStudioSnapshot.js
-import { useCallback, useSyncExternalStore } from "react";
-import { onLangChange } from "../i18n.js";
+import { useSyncExternalStore } from "react";
+import { lang, onLangChange } from "../i18n.js";
 
-// Labels live in the engine's dictionaries, so a language switch is just
-// another store publication for React.
+// Labels live in the engine's dictionaries, so a language switch is another
+// store publication — but a different one: switching language leaves the
+// snapshot object identical, so subscribing to swr:lang through the bridge's
+// getSnapshot would let React bail out and freeze the old strings.
 export function useStudioSnapshot(bridge) {
-  const subscribe = useCallback((onChange) => {
-    const offBridge = bridge.subscribe(onChange);
-    const offLang = onLangChange(onChange);
-    return () => { offBridge(); offLang(); };
-  }, [bridge]);
-  return useSyncExternalStore(subscribe, bridge.getSnapshot, bridge.getSnapshot);
+  useSyncExternalStore(onLangChange, lang, lang);
+  return useSyncExternalStore(bridge.subscribe, bridge.getSnapshot, bridge.getSnapshot);
 }
 ```
 
@@ -2478,6 +2535,7 @@ export function throttle(fn, { hz = 10, now = () => Date.now(), later = (callbac
 
 ```jsx
 // ui/src/components/primitives/LevelMeter.jsx
+import { cx } from "./cx.js";
 import styles from "./LevelMeter.module.css";
 
 export function LevelMeter({ value = 0, label, reduced = false, className = "" }) {
@@ -2490,7 +2548,7 @@ export function LevelMeter({ value = 0, label, reduced = false, className = "" }
       aria-valuemin={0}
       aria-valuemax={100}
       data-reduced={String(reduced)}
-      className={`${styles.meter} ${className}`}
+      className={cx(styles.meter, className)}
       style={{ "--swr-level": `${percent}%` }}
     >
       <span className={styles.fill} aria-hidden="true" />
@@ -2529,8 +2587,11 @@ export function LevelMeter({ value = 0, label, reduced = false, className = "" }
 
 - [ ] **Step 4: Verificar**
 
-Run: `npm -C ui test -- tests/hooks.test.jsx ui/tests/meter.test.jsx && node scripts/build-ui.mjs`
-Expected: 8 tests PASS y build sin errores.
+Run: `npm -C ui test -- tests/hooks.test.jsx tests/meter.test.jsx && node scripts/build-ui.mjs`
+Expected: 9 tests PASS (6 en `hooks.test.jsx`, 3 en `meter.test.jsx`) y build sin errores. Los cinco nombres de chunk pinados no cambian: nada de lo nuevo está alcanzable desde la entrada del build todavía (la Task 9 es la que engancha los hooks).
+
+Run: `npm -C ui test`
+Expected: 44 tests PASS en 9 ficheros (35 de la Task 7 + 9 nuevos).
 
 - [ ] **Step 5: Commit**
 
