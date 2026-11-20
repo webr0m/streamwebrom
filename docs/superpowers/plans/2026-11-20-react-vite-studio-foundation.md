@@ -1660,7 +1660,9 @@ git commit -m "feat(ui): add overflow-safe text and command primitives"
 ### Task 7: Primitivas de contenedor, pestañas y diálogo
 
 **Files:**
-- Create: `ui/src/components/primitives/Switch.jsx` + `.module.css`, `PanelTabs.jsx` + `.module.css`, `OverflowMenu.jsx` + `.module.css`, `Field.jsx` + `.module.css`, `StudioDialog.jsx` + `.module.css`
+- Create: `ui/src/components/primitives/cx.js`, `Switch.jsx` + `.module.css`, `PanelTabs.jsx` + `.module.css`, `OverflowMenu.jsx` + `.module.css`, `Field.jsx` + `.module.css`, `StudioDialog.jsx` + `.module.css`
+- Modify: `ui/src/components/primitives/{StatusPill,IconButton,CommandButton}.jsx` — las tres copias locales
+  de `cx` que la Task 6 dejó deliberadamente pasan a importar `./cx.js`.
 - Test: `ui/tests/primitives-container.test.jsx`
 
 **Interfaces:**
@@ -1671,16 +1673,21 @@ git commit -m "feat(ui): add overflow-safe text and command primitives"
     con `aria-selected`, navegación por flechas, etiqueta oculta al colapsar a icono cuando `icon` existe.
   - `<OverflowMenu label items={[{id,label,onClick,danger?}]}>` — botón `⋯` accesible, cierra con Escape
     y con clic fuera, `aria-expanded`.
-  - `<Field label inputId error help>` — etiqueta ligada por `htmlFor`, error con `role="status"`,
-    `aria-describedby` cuando hay ayuda.
-  - `<StudioDialog title onClose children footer?>` — `<dialog>` nativo con `showModal()` en el mount,
-    cierre por Escape que llama `onClose`, foco inicial en el primer control, `aria-labelledby`.
+  - `<Field label inputId error help>{un único elemento de control}</Field>` — etiqueta ligada por `htmlFor`;
+    el control recibe `id={inputId}` y `aria-describedby` por `cloneElement`, así conserva sus props;
+    el error se publica con `role="status"` y es la descripción cuando existe.
+  - `<StudioDialog title onClose children footer?>` — `<dialog>` nativo con `showModal()` en el mount
+    (con fallback `node.open = true` porque jsdom no implementa `showModal`), cierre por Escape que llama
+    `onClose` una sola vez, foco inicial en el primer control, `aria-labelledby`.
 
 - [ ] **Step 1: Escribir el test que falla**
 
 ```jsx
 // ui/tests/primitives-container.test.jsx
 import { test, expect, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Switch } from "../src/components/primitives/Switch.jsx";
@@ -1762,6 +1769,21 @@ test("StudioDialog opens modally, is labelled and closes on Escape", async () =>
   fireEvent.keyDown(dialog, { key: "Escape" });
   expect(onClose).toHaveBeenCalledTimes(1);
 });
+
+// Mismo ancla que la Task 6 (R22): con classNameStrategy "non-scoped" el test renderizado
+// no puede ver una regla borrada, así que el contrato componente↔hoja de estilo se fija aquí.
+// \b y no ` \{` porque .collapsed solo aparece como `.collapsed .label`, dentro del @media.
+test("each container stylesheet declares the classes its component asks for", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const css = (name) => readFileSync(resolve(here, "..", "src", "components", "primitives", name), "utf8");
+  const declared = (name, cls) => expect(css(name), `${name} .${cls}`).toMatch(new RegExp(`^\\s*\\.${cls}\\b`, "m"));
+
+  for (const cls of ["switch", "on", "knob"]) declared("Switch.module.css", cls);
+  for (const cls of ["tabs", "tab", "label", "badge", "collapsed"]) declared("PanelTabs.module.css", cls);
+  for (const cls of ["slot", "trigger", "menu", "item", "itemLabel", "danger"]) declared("OverflowMenu.module.css", cls);
+  for (const cls of ["field", "label", "control", "error", "help"]) declared("Field.module.css", cls);
+  for (const cls of ["dialog", "header", "title", "close", "body", "footer"]) declared("StudioDialog.module.css", cls);
+});
 ```
 
 - [ ] **Step 2: Verificar que falla**
@@ -1771,8 +1793,18 @@ Expected: FAIL —«Failed to resolve import "../src/components/primitives/Switc
 
 - [ ] **Step 3: Implementar**
 
+```js
+// ui/src/components/primitives/cx.js
+// The single place a falsy class is dropped before it reaches the DOM. Task 6 shipped
+// three copies of this line and said a fourth was the trigger to promote it; this is
+// that module, so `idle`, an unknown size or an absent `className` can never be
+// written as the literal "undefined" by the scoped (production) build.
+export const cx = (...names) => names.filter(Boolean).join(" ");
+```
+
 ```jsx
 // ui/src/components/primitives/Switch.jsx
+import { cx } from "./cx.js";
 import styles from "./Switch.module.css";
 
 export function Switch({ label, checked, onChange, disabled = false, className = "" }) {
@@ -1783,7 +1815,7 @@ export function Switch({ label, checked, onChange, disabled = false, className =
       aria-checked={String(Boolean(checked))}
       aria-label={label}
       disabled={disabled}
-      className={`${styles.switch} ${checked ? styles.on : ""} ${className}`}
+      className={cx(styles.switch, checked && styles.on, className)}
       onClick={() => onChange?.(!checked)}
     >
       <span className={styles.knob} aria-hidden="true" />
@@ -1822,6 +1854,7 @@ export function Switch({ label, checked, onChange, disabled = false, className =
 ```jsx
 // ui/src/components/primitives/PanelTabs.jsx
 import { useRef } from "react";
+import { cx } from "./cx.js";
 import styles from "./PanelTabs.module.css";
 
 export function PanelTabs({ tabs, active, onSelect, collapsed = false, ariaLabel = "Paneles del estudio", className = "" }) {
@@ -1831,7 +1864,7 @@ export function PanelTabs({ tabs, active, onSelect, collapsed = false, ariaLabel
     refs.current.get(tabs[next].id)?.focus();
   };
   return (
-    <div role="tablist" aria-label={ariaLabel} className={`${styles.tabs} ${collapsed ? styles.collapsed : ""} ${className}`}>
+    <div role="tablist" aria-label={ariaLabel} className={cx(styles.tabs, collapsed && styles.collapsed, className)}>
       {tabs.map((tab, index) => (
         <button
           key={tab.id}
@@ -1839,7 +1872,7 @@ export function PanelTabs({ tabs, active, onSelect, collapsed = false, ariaLabel
           type="button"
           id={`tab-${tab.id}`}
           aria-selected={String(tab.id === active)}
-          aria-label={`${tab.icon ?? ""} ${tab.label}`.trim()}
+          aria-label={tab.badge ? `${tab.label} (${tab.badge})` : tab.label}
           ref={(node) => { if (node) refs.current.set(tab.id, node); else refs.current.delete(tab.id); }}
           className={styles.tab}
           onClick={() => onSelect(tab.id)}
@@ -1898,6 +1931,7 @@ export function PanelTabs({ tabs, active, onSelect, collapsed = false, ariaLabel
 ```jsx
 // ui/src/components/primitives/OverflowMenu.jsx
 import { useEffect, useRef, useState } from "react";
+import { cx } from "./cx.js";
 import styles from "./OverflowMenu.module.css";
 
 export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", className = "", ...rest }) {
@@ -2004,15 +2038,23 @@ export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", cla
 
 ```jsx
 // ui/src/components/primitives/Field.jsx
+import { cloneElement } from "react";
 import styles from "./Field.module.css";
 
+// The control stays the caller's element, so its props must survive: cloneElement is
+// how the id and the describedby reach it without rewriting the child by hand.
 export function Field({ label, inputId, error = "", help = "", children, className = "" }) {
+  const errorId = `${inputId}-error`;
   const helpId = `${inputId}-help`;
+  const describedBy = [error ? errorId : "", !error && help ? helpId : ""].filter(Boolean).join(" ");
+  const control = describedBy
+    ? cloneElement(children, { ...children.props, id: inputId, "aria-describedby": describedBy })
+    : children;
   return (
     <div className={`${styles.field} ${className}`}>
       <label className={styles.label} htmlFor={inputId}>{label}</label>
-      <div className={styles.control}>{children}</div>
-      {error ? <span role="status" className={styles.error}>{error}</span> : null}
+      <div className={styles.control}>{control}</div>
+      {error ? <span id={errorId} role="status" className={styles.error}>{error}</span> : null}
       {!error && help ? (
         <span id={helpId} className={styles.help}>{help}</span>
       ) : null}
@@ -2037,18 +2079,30 @@ import styles from "./StudioDialog.module.css";
 
 export function StudioDialog({ title, onClose, children, footer = null }) {
   const ref = useRef(null);
+  const shown = useRef(false);
   const titleId = useRef(`dialog-${Math.random().toString(36).slice(2, 8)}`).current;
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
-    if (!node.open) node.showModal();
-    node.querySelector("input, select, textarea, button:not([data-close])")?.focus({ preventScroll: true });
-    const cancel = (event) => { event.preventDefault(); onClose(); };
-    node.addEventListener("cancel", cancel);
-    return () => node.removeEventListener("cancel", cancel);
+    // jsdom 26 ships HTMLDialogElement.open but no showModal(): opening by attribute
+    // keeps the element in the accessibility tree, so the mount contract stays
+    // testable while the browser keeps the real top-layer path.
+    const native = typeof node.showModal === "function";
+    if (!shown.current) {
+      shown.current = true;
+      if (native) { if (!node.open) node.showModal(); } else node.open = true;
+      node.querySelector("input, select, textarea, button:not([data-close])")?.focus({ preventScroll: true });
+    }
+    // One Escape path only: a real browser fires keydown *and* cancel for the same press.
+    const onEscape = native
+      ? (event) => { event.preventDefault(); onClose(); }
+      : (event) => { if (event.key === "Escape") onClose(); };
+    const type = native ? "cancel" : "keydown";
+    node.addEventListener(type, onEscape);
+    return () => node.removeEventListener(type, onEscape);
   }, [onClose]);
   return (
-    <dialog ref={ref} className={styles.dialog} aria-labelledby={titleId} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
+    <dialog ref={ref} className={styles.dialog} aria-labelledby={titleId}>
       <header className={styles.header}>
         <h2 id={titleId} className={styles.title}>{title}</h2>
         <button type="button" data-close className={styles.close} aria-label="Cerrar" onClick={onClose}>✕</button>
@@ -2072,7 +2126,7 @@ export function StudioDialog({ title, onClose, children, footer = null }) {
   color: var(--swr-text);
   box-shadow: var(--swr-shadow-2);
 }
-.dialog::backdrop { background: rgba(5, 7, 13, 0.7); backdrop-filter: blur(3px); }
+.dialog::backdrop { background: color-mix(in srgb, var(--swr-bg-deep) 70%, transparent); backdrop-filter: blur(3px); }
 .header { display: flex; align-items: center; gap: var(--swr-sp-2); padding: var(--swr-sp-3) var(--swr-sp-4); border-bottom: 1px solid var(--swr-line); }
 .title { flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--swr-text-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .close { flex: 0 0 auto; border: 0; background: transparent; color: var(--swr-text-dim); font-size: var(--swr-text-md); cursor: pointer; }
@@ -2082,8 +2136,13 @@ export function StudioDialog({ title, onClose, children, footer = null }) {
 
 - [ ] **Step 4: Verificar**
 
-Run: `npm -C ui test -- tests/primitives-container.test.jsx && npm -C ui test`
-Expected: 7 tests PASS en el fichero nuevo y el suite completo en verde (19 tests acumulados).
+Run: `npm -C ui test -- tests/primitives-container.test.jsx && npm -C ui test && node scripts/build-ui.mjs`
+Expected: 8 tests PASS en el fichero nuevo; el suite completo en verde — tras la Task 6 había 26, así que
+se esperan 34, no los 19 que este plan prometía antes de que las primitivas llegaran (mismo defecto de
+aritmética que la Task 5: se reporta el número medido, no se añade relleno). El build sigue escribiendo
+solo `js/` y `css/` con los mismos nombres de chunk, y `ui/tests/tokens.test.jsx` sigue verde: si un
+`var(--swr-*)` de estos `.module.css` está mal escrito, es ese test el que lo detecta porque exige
+`usados ⊆ declarados` sobre los 46 tokens del contrato.
 
 - [ ] **Step 5: Commit**
 
