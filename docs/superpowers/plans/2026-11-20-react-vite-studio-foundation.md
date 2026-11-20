@@ -1684,7 +1684,7 @@ git commit -m "feat(ui): add overflow-safe text and command primitives"
 
 ```jsx
 // ui/tests/primitives-container.test.jsx
-import { test, expect, afterEach } from "vitest";
+import { test, expect, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1758,7 +1758,7 @@ test("Field wires label, error and help to the control", () => {
 });
 
 test("StudioDialog opens modally, is labelled and closes on Escape", async () => {
-  const onClose = () => {};
+  const onClose = vi.fn();
   render(
     <StudioDialog title="Ajustes de fuente" onClose={onClose}>
       <button type="button">Guardar</button>
