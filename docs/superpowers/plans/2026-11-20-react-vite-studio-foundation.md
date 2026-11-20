@@ -1139,7 +1139,7 @@ test("scene commands delegate to the engine, not to the DOM", async () => {
 
 - [ ] **Step 3: Verificar que fallan**
 
-Run: `npm -C ui test -- tests/bridge.test.jsx ui/tests/actions.test.jsx`
+Run: `npm -C ui test -- tests/bridge.test.jsx tests/actions.test.jsx`
 Expected: FAIL —«Failed to resolve import "../src/bridge/snapshot.js"».
 
 - [ ] **Step 4: Implementar las cuatro capas**
@@ -1288,7 +1288,7 @@ export function createFixtureEngine(initial = nextStudioFixture) {
 
 - [ ] **Step 5: Verificar y commit**
 
-Run: `npm -C ui test -- tests/bridge.test.jsx ui/tests/actions.test.jsx`
+Run: `npm -C ui test -- tests/bridge.test.jsx tests/actions.test.jsx`
 Expected: 8 tests PASS.
 
 ```bash
