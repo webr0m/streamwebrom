@@ -76,3 +76,15 @@ test("every static /js/ and /css/ entry the worker precaches exists on disk", as
   }
   if (absent.length) assert.fail(`install would reject on ${absent.join(", ")}: no such file under web/`);
 });
+
+test("the built asset list carries the chunks the mode switch imports lazily", async () => {
+  // boot-legacy.js is behind an import() in main.jsx, so nothing but this list
+  // puts it in the precache; a build that drops it makes ?ui=legacy unbootable
+  // offline while every online test keeps passing.
+  const raw = await readFile(join(root, "web/js/sw-assets.json"), "utf8");
+  const listed = JSON.parse(raw);
+  for (const name of ["boot-legacy", "studio"]) {
+    const chunk = new RegExp(`^js/${name}-[A-Za-z0-9_-]{8}\\.js$`);
+    assert.ok(listed.some((file) => chunk.test(file)), `${raw} has no js/${name}-<hash>.js chunk`);
+  }
+});
