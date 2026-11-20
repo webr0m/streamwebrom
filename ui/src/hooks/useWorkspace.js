@@ -12,11 +12,18 @@ function flag(saved, modern, legacy, invert = false) {
 
 function read() {
   let saved = {};
-  try { saved = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch {}
+  try { Object.assign(saved, JSON.parse(localStorage.getItem(KEY) || "{}") || {}); } catch {}
+  return saved;
+}
+
+// The contract is exactly these three fields plus the two legacy mirrors, so a
+// patch carrying anything else — or a blob holding unrelated keys — cannot
+// reach the React chrome's view nor the key the legacy Studio shares.
+function project(workspace) {
   return {
-    scenesCollapsed: flag(saved, "scenesCollapsed", "scenes", true),
-    panelOpen: flag(saved, "panelOpen", "panel"),
-    activeTab: typeof saved.activeTab === "string" ? saved.activeTab : DEFAULTS.activeTab,
+    scenesCollapsed: flag(workspace, "scenesCollapsed", "scenes", true),
+    panelOpen: flag(workspace, "panelOpen", "panel"),
+    activeTab: typeof workspace.activeTab === "string" ? workspace.activeTab : DEFAULTS.activeTab,
   };
 }
 
@@ -27,12 +34,23 @@ function legacyMirror(workspace) {
   return { scenes: !workspace.scenesCollapsed, panel: workspace.panelOpen };
 }
 
+// Only the contract fields are ever persisted, so nothing outside them can be
+// smuggled into the key the legacy chrome shares through an accidental spread.
+function persist(workspace) {
+  return {
+    scenesCollapsed: workspace.scenesCollapsed,
+    panelOpen: workspace.panelOpen,
+    activeTab: workspace.activeTab,
+    ...legacyMirror(workspace),
+  };
+}
+
 export function useWorkspace() {
-  const [workspace, setWorkspace] = useState(read);
+  const [workspace, setWorkspace] = useState(() => project(read()));
   const update = useCallback((patch) => {
     setWorkspace((current) => {
-      const next = { ...current, ...patch };
-      try { localStorage.setItem(KEY, JSON.stringify({ ...next, ...legacyMirror(next) })); } catch {}
+      const next = project({ ...current, ...patch });
+      try { localStorage.setItem(KEY, JSON.stringify(persist(next))); } catch {}
       return next;
     });
   }, []);

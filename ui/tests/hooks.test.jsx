@@ -33,6 +33,58 @@ test("an unreadable workspace falls back to the defaults", () => {
   expect(result.current[0].scenesCollapsed).toBe(false);
 });
 
+test("a workspace holding JSON that is not a plain object falls back to the defaults", () => {
+  // JSON.parse accepts all of these: null, numbers and strings would throw or
+  // leak fields if read as a saved object, and an array survives typeof
+  // "object" while carrying only numeric keys.
+  for (const blob of ["null", "42", '"chat"', "[1,2]"]) {
+    localStorage.setItem("swr.workspace", blob);
+    const { result } = renderHook(() => useWorkspace());
+    expect(result.current[0]).toEqual({ scenesCollapsed: false, panelOpen: true, activeTab: "chat" });
+    cleanup();
+  }
+});
+
+test("a write after any non-object blob stores exactly the contract fields", () => {
+  // Arrays and iterables must not be spread into the state: their indices or
+  // characters land under numeric keys and are then written to the shared key.
+  const clean = { scenesCollapsed: false, panelOpen: true, activeTab: "output", scenes: true, panel: true };
+  for (const blob of ['["scenes","panel"]', '"ab"', "null", "42"]) {
+    localStorage.setItem("swr.workspace", blob);
+    const { result } = renderHook(() => useWorkspace());
+    act(() => result.current[1]({ activeTab: "output" }));
+    expect(JSON.parse(localStorage.getItem("swr.workspace"))).toEqual(clean);
+    cleanup();
+  }
+});
+
+test("neither an unrelated patch key nor an unrelated saved key reaches the state or storage", () => {
+  // The store's whole surface is the three contract fields plus the legacy
+  // mirrors; anything else a caller patches in or a previous chrome stored has
+  // to be dropped on both sides, not just hidden from the render.
+  localStorage.setItem("swr.workspace", '{"volume":11,"0":"x","activeTab":"chat"}');
+  const { result } = renderHook(() => useWorkspace());
+  expect(result.current[0]).toEqual({ scenesCollapsed: false, panelOpen: true, activeTab: "chat" });
+  act(() => result.current[1]({ volume: 99, scenesCollapsed: true }));
+  expect(result.current[0]).toEqual({ scenesCollapsed: true, panelOpen: true, activeTab: "chat" });
+  expect(JSON.parse(localStorage.getItem("swr.workspace"))).toEqual({
+    scenesCollapsed: true, panelOpen: true, activeTab: "chat", scenes: false, panel: true,
+  });
+});
+
+test("the saved workspace is narrowed to the contract on read", () => {
+  // The hook's state and every write are exactly the three contract fields
+  // plus the two legacy mirrors, so a blob carrying unrelated keys cannot
+  // smuggle them into the React chrome's view or back into storage.
+  localStorage.setItem("swr.workspace", '{"0":"x","volume":11,"activeTab":"chat"}');
+  const { result } = renderHook(() => useWorkspace());
+  expect(result.current[0]).toEqual({ scenesCollapsed: false, panelOpen: true, activeTab: "chat" });
+  act(() => result.current[1]({ activeTab: "output" }));
+  expect(JSON.parse(localStorage.getItem("swr.workspace"))).toEqual({
+    scenesCollapsed: false, panelOpen: true, activeTab: "output", scenes: true, panel: true,
+  });
+});
+
 test("the snapshot hook re-renders on bridge and language publications", () => {
   const engine = createFixtureEngine(nextStudioFixture);
   const bridge = createStudioBridge({ engine });
