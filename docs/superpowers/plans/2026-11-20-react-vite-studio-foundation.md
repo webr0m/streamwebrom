@@ -4342,8 +4342,8 @@ git commit -m "feat(ui): add toast queue and per-domain error reporting"
 
 **Files:**
 - Create: `scripts/overflow-smoke.py`, `docs/OVERFLOW-GATE.md`
-- Modify: `ui/src/styles/layout.css` (la corrección de causa raíz del Step 1), `ui/tests/shell.test.jsx`
-  (un ancla de texto CSS, en prosa: ver Step 2), `.github/workflows/ci.yml` (job `browser`, paso nuevo
+- Modify: `ui/src/styles/layout.css` (las tres correcciones de causa raíz del Step 1), `ui/tests/shell.test.jsx`
+  (tres anclas de texto CSS, en prosa: ver Step 2), `.github/workflows/ci.yml` (job `browser`, paso nuevo
   tras el de `interface-smoke`, línea 111; job `test`, paso de la doc junto al `node --test` de la
   línea 46), `Makefile` (target `overflow` y su entrada en `.PHONY`)
 
@@ -4351,34 +4351,51 @@ git commit -m "feat(ui): add toast queue and per-domain error reporting"
 - Consumes: `/studio?ui=next` con `nextStudioFixture` (Tasks 4-11), un servidor Go con el `web/`
   recién construido, y un Chromium real.
 - Produces: `python scripts/overflow-smoke.py [--url http://localhost:18443] [--browser RUTA]` con
-  código 0 si no hay desbordamiento y 1 con la lista de culpables. Viewports: `1440x900`, `1120x800`,
-  `820x900`, `390x640`.
+  código 0 si no hay desbordamiento y 1 con la lista de culpables. Cuatro viewports —`1440x900`,
+  `1120x800`, `820x900`, `390x640`— medidos en cada una de las cuatro combinaciones de colapso de
+  las barras laterales: abiertas, solo rail, solo panel, y las dos. Dieciséis combinaciones.
 
 **Pre-vuelo medido** (2026-11-20, Chrome del sistema conducido por Playwright 1.64.0 contra el
-binario de este worktree sirviendo `js/studio-BPvmb7Zy.js`). Esta tarea existía para encontrar
-defectos de maqueta que jsdom no puede ver; los encontró antes de existir el gate, y cambia el
-alcance: no es solo escribir la puerta, es arreglar lo que la puerta denuncia.
+binario de este worktree. Esta tarea existía para encontrar defectos de maqueta que jsdom no puede
+ver; los encontró antes de existir el gate, y cambia el alcance: no es solo escribir la puerta, es
+arreglar lo que la puerta denuncia. Las cifras de abajo son de la puerta ya escrita, ejecutada con
+las reglas del Step 1 desactivadas sobre el mismo binario).
 
-| Ancho | Antes (sin esperar el montaje: `.studio-root` = 0) | Antes, tras el montaje | Con la regla del Step 1 |
-|---|---|---|---|
-| 1440x900 | — | `top` 9px, `rail` 17px, `stage` 0x0, `dock` 9px; 9 elementos desbordando | `top` 57, `rail` 753, `stage` 626, `tray` 120, `dock` 57; 0 desbordes; doc 900/900 |
-| 1120x800 | — | igual que 1440 | 0 desbordes; doc 800/800 |
-| 820x900 | — | documento 1662px (scroll vertical) | 0 desbordes; doc 900/900 |
-| 390x640 | — | documento 2814px | 0 desbordes; doc 640/640 |
+| Ancho | Sin las tres reglas | Con (1) | Con (1)+(2) | Con (1)+(2)+(3) |
+|---|---|---|---|---|
+| 1440x900 | `top` 572x9, `rail` 216x17, `stage` 0x0, `dock` 572x9; 9 elementos desbordando | doc 900/900, pero el slot `stage` desborda en alto: 661px de contenido en 626 → el gate da 1 | estado abierto limpio; `both collapsed` sigue dando 1 por la causa (3) | 0 desbordes en las cuatro combinaciones; `top` 57, `rail` 753, `stage` 626, `tray` 120, `dock` 57; lienzo 852x591 dentro de 626 (591 + hueco 8 + LayoutBar 27 = 626) |
+| 1120x800 | igual que 1440 | slot `stage` 561/526 → da 1 | idem | 0 desbordes; doc 800/800 |
+| 820x900 | documento **1569px** de alto (scroll vertical) | slot `stage` 535/500 → da 1 | `both collapsed`: cinco regiones de 48px de ancho (barra superior, 237px de contenido en 48), panel `0x0` | 0 desbordes; doc 900/900; con todo colapsado `top` 804x57, `rail` 804x119, `stage` 804x500, `tray` 804x119, `dock` 804x57 |
+| 390x640 | documento **2540px** de alto | slot `stage` 139/106 → da 1 | igual que 820 | 0 desbordes; doc 640/640; `top` 374x56, `stage` 374x106 |
 
-La causa es una sola: `web/css/app.css:108` declara `.studio { display: grid; ... }` con
-`grid-template-areas: "top top top" "scenes main side"`, y el div donde monta React **lleva esa
-clase** (`web/studio.html:12`: `<div class="studio" id="studioRoot">`). El shell React era un ítem
-más de la rejilla heredada, alojado en la celda `top` de 68px. Añadido: `app.css:284` le pone
-`height: auto; min-height: 100%` por debajo de 1001px, que es lo que dejaba crecer el documento en
-móvil incluso con la rejilla anulada.
+La columna «Con (1)» es la que desmiente la versión original de este pre-vuelo: medida solo en
+horizontal, esa fila parecía limpia («0 desbordes»), y no lo estaba. La puerta existía ya para
+medir en los dos ejes, y fue ella —no yo— la que sacó la causa (2).
+
+Las causas son tres, y la primera es la que explica el cuadro grande: `web/css/app.css:108` declara
+`.studio { display: grid; ... }` con `grid-template-areas: "top top top" "scenes main side"`, y el div
+donde monta React **lleva esa clase** (`web/studio.html:12`: `<div class="studio" id="studioRoot">`).
+El shell React era un ítem más de la rejilla heredada, alojado en la celda `top` de 68px. Añadido:
+`app.css:284` le pone `height: auto; min-height: 100%` por debajo de 1001px, que es lo que dejaba
+crecer el documento en móvil incluso con la rejilla anulada. La causa (2) es el `min-height: 0`
+global del módulo del shell contra el `--stage-height` medido sobre el contenedor; la (3), que la
+lista de selectores del `@media (max-width: 820px)` se olvidaba de la combinación `.scenes-collapsed.panel-collapsed`.
 
 - [ ] **Step 1: Quitar la causa raíz, solo en modo next**
 
 La Enmienda A1 congela el Studio legacy, así que `app.css` no se toca: el desmontaje se hace desde
-la hoja propia de React, que solo carga el modo next, anclada al `data-ui-mode` que `mountNext()` ya
-pone en el contenedor. El bloque es el fichero COMPLETO resultante (se añaden la regla y su comentario
-al final de lo que ya embarcó Task 9):
+la hoja propia de React, que solo carga el modo next. Son TRES desmontajes, no uno, y el segundo se
+midió después del primero y el tercero después de la barrida de estados; los números van en la tabla
+de arriba. (1) Anclar al `data-ui-mode` que `mountNext()` ya pone en el contenedor para neutralizar
+la rejilla legacy de `app.css`; sin eso el shell vive en la celda `top` de 68px. (2) Devolver el suelo
+de tamaño al slot de escenario: `.swr-shell > *` (`StudioShell.module.css:3`) deja el alto de la celda
+a merced del contenido y `--stage-height` mide el contenedor sin descontar el hueco ni la LayoutBar,
+así que la celda desbordaba en alto en los cuatro anchos incluso con (1) aplicado. (3) Añadir
+`.scenes-collapsed.panel-collapsed .swr-shell` a la lista de selectores del `@media (max-width: 820px)`:
+la regla global tiene (0,3,0) y el bloque del medio query (0,2,0), así que al colapsar las dos barras
+por debajo de 820px las columnas sobrevivían a un `grid-template-areas` de una sola columna. El bloque
+es el fichero COMPLETO resultante (los tres desmontajes van añadidos al final de lo que ya embarcó
+Task 9; el (3) re-pina un bloque que Task 9 ya había escrito):
 
 ```css
 /* ui/src/styles/layout.css */
@@ -4420,10 +4437,17 @@ al final de lo que ya embarcó Task 9):
   .scenes-collapsed .swr-shell { grid-template-columns: 168px minmax(0, 1fr) 300px; }
 }
 
+/* Tercera causa, medida solo por la barrida de estados de la puerta: la lista de selectores del
+   bloque dejaba fuera `.scenes-collapsed.panel-collapsed .swr-shell` (0,3,0), que sigue vigente por
+   encima de 820px. Al colapsar las dos barras en un móvil, las áreas pasaban a ser una columna pero
+   las columnas se quedaban en `48px 688px 52px`: las cinco regiones medían 48px de ancho —la barra
+   superior, 237px de contenido en 48— y el panel, `0x0`. Se añade el selector combinado; las
+   demás combinaciones ya estaban cubiertas. */
 @media (max-width: 820px) {
   .swr-shell,
   .scenes-collapsed .swr-shell,
-  .panel-collapsed .swr-shell {
+  .panel-collapsed .swr-shell,
+  .scenes-collapsed.panel-collapsed .swr-shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1fr) auto auto;
     grid-template-areas: "top" "rail" "stage" "tray" "dock";
@@ -4447,18 +4471,36 @@ al final de lo que ya embarcó Task 9):
   height: 100dvh;
   min-height: 0;
 }
+
+/* Segundo desmontaje, medido tras el primero: anulada la rejilla legacy, la celda `stage` sigue
+   desbordando en ALTO — 661px de contenido en 626px a 1440x900, 561/526 a 1120x800, 535/500 a
+   820x900 y 139/106 a 390x640 — y la puerta lo denuncia en los cuatro anchos. El culpable es
+   `ui/src/components/StudioShell.module.css:3`, que pone `min-height: 0` a todo hijo del shell:
+   con ese suelo, el alto de la celda queda a merced del contenido y `.canvas`
+   (`ProgramStage.module.css:3`) mide `var(--stage-height)`, o sea el alto COMPLETO de su propio
+   contenedor, mientras `useStageHeight.js` observa `[data-region="stage-inner"]` sin descontar el
+   hueco de 8px ni las dos líneas de LayoutBar (27px). Se re-pina desde aquí con `#studioRoot` delante:
+   sin él, `.swr-shell > [data-region="stage"]` (0,2,0) empata con el `.swr-shell > *` del módulo y
+   gana el orden de hoja —el módulo se inyecta después—, así que el prefijo (1,2,0) no es adorno sino
+   la razón de que no haga falta `!important`. El `calc` solo se aplica al slot de escenario:
+   las demás regiones ya caben, y tocarlas movería altores que Task 10 ancló en sus tests. */
+#studioRoot[data-ui-mode="next"] .swr-shell > [data-region="stage"] { min-block-size: 100%; }
+#studioRoot[data-ui-mode="next"] .swr-shell > [data-region="stage"] > [data-region="stage-inner"] { block-size: calc(100% - var(--swr-sp-2)); min-block-size: 0; }
 ```
 
 El bloque es el fichero completo que hay que embarcar: `parity-check.mjs` lo compara byte a byte con
 `ui/src/styles/layout.css`, así que la regla va al final, con su comentario, y lo demás se queda tal
-cual lo dejó Task 9.
+cual lo dejó Task 9. Nota para quien ejecute la paridad: el plan guarda DOS bloques que nombran
+`ui/src/styles/layout.css` —el de Task 9 y este—, y `parity-check.mjs` imprime
+`DIFFERS … [0/2]` / `IDENTICAL … [1/2 LAST]`. Es el comportamiento esperado (gana el último bloque
+por ruta; el de Task 9 es una foto histórica que no hay que reescribir).
 
-- [ ] **Step 2: Anclar la corrección en vitest**
+- [ ] **Step 2: Anclar las tres correcciones en vitest**
 
-El gate la comprueba en Chromium, pero `make test` no lo tiene: borrar la regla del Step 1 tiene que
-poner rojo un test de la suite normal. `ui/tests/shell.test.jsx` ya lee CSS desde disco con
-`resolve(dirname(fileURLToPath(import.meta.url)), ...)`, así que se le añade un caso siguiendo ese
-mismo estilo —añadir, no reescribir el fichero—:
+El gate las comprueba en Chromium, pero `make test` no lo tiene: borrar cualquiera de las tres reglas
+tiene que poner rojo un test de la suite normal. `ui/tests/shell.test.jsx` ya lee CSS desde disco con
+`resolve(dirname(fileURLToPath(import.meta.url)), ...)`, así que se le añaden tres casos siguiendo ese
+mismo estilo —añadir, no reescribir el fichero—, uno por causa. El de la causa (1):
 
 ```jsx
 test("the next shell outranks the legacy studio grid", () => {
@@ -4472,10 +4514,44 @@ test("the next shell outranks the legacy studio grid", () => {
 });
 ```
 
-Este bloque NO lleva comentario de ruta en la línea 1 a propósito: `parity-check.mjs` solo recolecta
-los bloques cuya primera línea nombra un fichero, y la ancla vive en un fichero que este plan no
-reproduce entero (R37). El test se escribe en rojo primero: quitar la regla de `layout.css`, ver el
-fallo, devolverla.
+El de la causa (2):
+
+```jsx
+test("the stage slot outranks the shell's blanket min-height", () => {
+  const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "..", "src/styles/layout.css"), "utf8");
+  const stage = css.match(/#studioRoot\[data-ui-mode="next"\] \.swr-shell > \[data-region="stage"\] \{([^}]*)\}/);
+  expect(stage, "el escenario tiene que recuperar un suelo de tamaño o desborda en alto").not.toBeNull();
+  expect(stage[1]).toMatch(/min-block-size: 100%/);
+  const inner = css.match(/#studioRoot\[data-ui-mode="next"\] \.swr-shell > \[data-region="stage"\] > \[data-region="stage-inner"\] \{([^}]*)\}/);
+  expect(inner, "el interior del escenario tiene que descontar el hueco del slot").not.toBeNull();
+  expect(inner[1]).toMatch(/block-size: calc\(100% - var\(--swr-sp-2\)\)/);
+});
+```
+
+Y el de la causa (3), que es el único que puede escribirse como lista de selectores en vez de como
+regla, porque lo que falta no es una declaración sino una mención:
+
+```jsx
+test("the mobile grid covers every collapse combination", () => {
+  const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "..", "src/styles/layout.css"), "utf8");
+  const block = css.match(/@media \(max-width: 820px\) \{([\s\S]*?)\n\}/);
+  expect(block, "el bloque de móvil tiene que seguir existiendo").not.toBeNull();
+  const selectors = block[1].slice(0, block[1].indexOf("{")).split(",").map((s) => s.trim().replace(/\s+/g, " "));
+  for (const want of [".swr-shell", ".scenes-collapsed .swr-shell", ".panel-collapsed .swr-shell", ".scenes-collapsed.panel-collapsed .swr-shell"]) {
+    expect(selectors, `el bloque de móvil tiene que re-pinar ${want}`).toContain(want);
+  }
+});
+```
+
+Estos bloques NO llevan comentario de ruta en la línea 1 a propósito: `parity-check.mjs` solo recolecta
+los bloques cuya primera línea nombra un fichero, y las anclas viven en un fichero que este plan no
+reproduce entero (R37). Cada test se escribe en rojo primero: quitar su regla de `layout.css`, ver el
+fallo, devolverla. Verificado el 2026-11-20 quitando solo el selector combinado:
+
+```
+ FAIL  tests/shell.test.jsx > the mobile grid covers every collapse combination
+      Tests  1 failed | 93 passed (94)
+```
 
 - [ ] **Step 3: Escribir el smoke**
 
@@ -4518,6 +4594,29 @@ PROBE = """
 }
 """
 
+COLLAPSE = """
+(sides) => {
+  for (const region of ["scenesRail", "studioPanes"]) {
+    const toggle = document.querySelector('.studio-root [data-region="top"] [aria-controls="' + region + '"]');
+    const want = sides.includes(region) ? "false" : "true";
+    if (toggle && toggle.getAttribute("aria-expanded") !== want) toggle.click();
+  }
+}
+"""
+
+# Las cuatro pasadas no son un capricho: `scenes-collapsed` y `panel-collapsed` redefinen columnas y,
+# por debajo de 820px, llegan hasta `display: none` sobre la propia región. Un fallo de rejilla en un
+# estado colapsado es invisible para una puerta que solo mira el estado abierto — y lo fue: la
+# combinación de las dos colapsadas se quedó con tres columnas dentro de un área de una sola, 48px
+# de ancho para las cinco regiones. Medido el 2026-11-20; con la corrección, las dieciséis
+# combinaciones (cuatro estados x cuatro anchos) salen sin recorte ni scroll.
+LAYOUTS = [
+    ("expanded", []),
+    ("scenes collapsed", ["scenesRail"]),
+    ("panel collapsed", ["studioPanes"]),
+    ("both collapsed", ["scenesRail", "studioPanes"]),
+]
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--url", default="http://localhost:18443")
 parser.add_argument("--browser")
@@ -4537,23 +4636,26 @@ with sync_playwright() as pw:
     # devuelve 0 y el gate daría verde sobre una página vacía.
     page.wait_for_selector("[data-region='top']")
     failures = []
-    for width, height in VIEWPORTS:
-        page.set_viewport_size({"width": width, "height": height})
-        page.wait_for_timeout(350)
-        report = page.evaluate(PROBE)
-        size = f"{width}x{height}"
-        if errors:
-            failures.append(f"{size}: page errors {errors}")
-        if report["documentScroll"]:
-            failures.append(f"{size}: the document itself scrolls")
-        if report["clipped"]:
-            failures.append(f"{size}: clipped {json.dumps(report['clipped'][:6], ensure_ascii=False)}")
-        if report["emptyButtons"]:
-            failures.append(f"{size}: nameless controls {json.dumps(report['emptyButtons'], ensure_ascii=False)}")
-        if not report["primary"]:
-            failures.append(f"{size}: the primary action [data-action=live] is gone")
-        elif not report["primary"]["visible"] or report["primary"]["labelLength"] < 4 or report["primary"]["clipped"]:
-            failures.append(f"{size}: the primary action lost its label or clipped ({json.dumps(report['primary'])})")
+    for label, sides in LAYOUTS:
+        page.evaluate(COLLAPSE, sides)
+        page.wait_for_timeout(250)
+        for width, height in VIEWPORTS:
+            page.set_viewport_size({"width": width, "height": height})
+            page.wait_for_timeout(350)
+            report = page.evaluate(PROBE)
+            size = f"{label} @ {width}x{height}"
+            if errors:
+                failures.append(f"{size}: page errors {errors}")
+            if report["documentScroll"]:
+                failures.append(f"{size}: the document itself scrolls")
+            if report["clipped"]:
+                failures.append(f"{size}: clipped {json.dumps(report['clipped'][:6], ensure_ascii=False)}")
+            if report["emptyButtons"]:
+                failures.append(f"{size}: nameless controls {json.dumps(report['emptyButtons'], ensure_ascii=False)}")
+            if not report["primary"]:
+                failures.append(f"{size}: the primary action [data-action=live] is gone")
+            elif not report["primary"]["visible"] or report["primary"]["labelLength"] < 4 or report["primary"]["clipped"]:
+                failures.append(f"{size}: the primary action lost its label or clipped ({json.dumps(report['primary'])})")
     browser.close()
 
 if failures:
@@ -4577,31 +4679,75 @@ Diferencias con el borrador inicial de esta tarea, cada una medida:
 3. `sys.stdout.reconfigure(...)`: sin él, el gate no informa, revienta.
 4. El fallo de la primaria distingue «no existe» de «existe pero se quedó sin etiqueta», que el
    borrador mezclaba.
+5. Cada ancho se mide en las cuatro combinaciones de colapso (`LAYOUTS`), cambiando el estado con los
+   propios botones de la barra superior. Sin esta barrida la causa (3) era invisible: el estado abierto
+   estaba limpio en los cuatro anchos y aun así, con las dos barras plegadas, el estudio entero cabía
+   en una tira de 48px. Es la diferencia que más rinde por línea escrita —añadirla fue lo que encontró
+   el defecto, no lo contrario.
 
 - [ ] **Step 4: Ejecutarlo y ver el estado real**
 
 Ruta del owner (Windows conduciendo Chrome instalado, servidor Go en WSL) — verificada el 2026-11-20
-y de descarga cero:
+y de descarga cero. Un binario y un puerto por estado medido, porque el `web/` va embebido en el
+binario y cambiar `layout.css` exige reconstruir las dos cosas:
 
 ```bash
 node scripts/build-ui.mjs
-wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && go build -o /tmp/swr-gate ./cmd/streamwebrom && (nohup /tmp/swr-gate -addr 127.0.0.1:18455 -stun= -data /tmp/swr-overflow >/tmp/swr-overflow.log 2>&1 & sleep 2; curl -fsS http://localhost:18455/api/health; curl -fsS http://localhost:18455/studio | grep -o 'studio-[A-Za-z0-9_-]*\.js')"
-.superpowers/venv-win/Scripts/python.exe scripts/overflow-smoke.py --url http://localhost:18455 --browser "C:/Program Files/Google/Chrome/Application/chrome.exe"
+wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && \
+  go build -o /tmp/swr-green ./cmd/streamwebrom && \
+  (nohup /tmp/swr-green -addr 127.0.0.1:18493 -stun= -data /tmp/swr-green-data >/tmp/swr-green.log 2>&1 &); \
+  sleep 2; curl -s http://localhost:18493/api/health; \
+  curl -s http://localhost:18493/studio | grep -oE 'studio-[A-Za-z0-9_-]*\.(js|css)'"
+.superpowers/venv-win/Scripts/python.exe scripts/overflow-smoke.py \
+  --url http://localhost:18493 --browser "C:/Program Files/Google/Chrome/Application/chrome.exe"
 ```
 
-Expect: `overflow gate ok`, con el bundle servido siendo el de esta ronda (`studio-<hash>.js` igual
-al de `web/studio.html`).
+Expect: `overflow gate ok`, con `uptime` de pocos segundos y el hash servido igual al de
+`web/studio.html`. Medido tal cual:
 
-Expect además, y es el motivo de este paso: **con el Step 1 sin aplicar, el gate da 1 y la lista
-imprime los nueve culpables de 1440 y el scroll de 820/390**. Se ejecuta primero rojo, luego verde;
-un `ok` sin haber visto el rojo no prueba nada.
+```
+{"ok":true,"uptime":2,"version":"dev"} → studio-Ca2SwZcV.js → overflow gate ok   (exit 0)
+```
+
+Expect además, y es el motivo de este paso: **con las reglas del Step 1 desactivadas el gate da 1**.
+Se ejecuta primero rojo, luego verde; un `ok` sin haber visto el rojo no prueba nada. El rojo medido
+en esta tarea, desactivando las tres reglas de golpe (un solo token: `[data-ui-mode="next"]` →
+`[data-ui-mode="next"][data-red]`, que desenchufa las tres a la vez) sobre el binario
+`studio-DrisEECE.js`:
+
+```
+OVERFLOW GATE FAILED
+ - expanded @ 1440x900: clipped [{"path": "section._slot_1eof0_3", "box": [572, 572, 57, 9], "text": "◫Ocultar escenasSala de demostraciónconectadoRel"}, …
+ - expanded @ 1120x800: clipped [{"path": "section._slot_1eof0_3", "box": [484, 484, 57, 9], …
+ - expanded @ 820x900: the document itself scrolls
+ - expanded @ 390x640: the document itself scrolls
+ … una línea o dos por cada una de las dieciséis combinaciones: las cuatro abiertas y colapsadas
+ como arriba, `scenes collapsed` (1440 y 1120 con recorte, 820 y 390 con scroll), `panel collapsed`
+ (ídem, con el slot en `[515, 284, 57, 9]` y `[298, 284, 57, 9]`) y `both collapsed`, que además de
+ lo propio añade en 820 y 390 la firma de la causa (3): `[237, 48, 57, 57]` y `[229, 48, 56, 56]`.
+ Dieciocho líneas en total, exit 1.
+```
+
+Y el rojo de cada causa aislada, que es lo que demuestra que la puerta la vigila:
+
+- Causa (3) sola: quitar únicamente `.scenes-collapsed.panel-collapsed .swr-shell` de la lista del
+  `@media (max-width: 820px)` del build verde → `both collapsed @ 820x900` y
+  `both collapsed @ 390x640` con la barra superior en `[237, 48, 57, 57]`; nada en 1440/1120, donde
+  tres columnas sí son el diseño.
+- Causa (2) sola: el slot `stage` con 661px de contenido en 626 en los cuatro anchos (medido al
+  aplicar (1) y aún no (2)).
 
 Mediciones que hay que respetar al montar el servidor:
 
 - `18443` puede estar ocupado por una instancia vieja (medido: `/tmp/streamwebrom -data /tmp/swr-ui`
   con 25041s de vida, sirviendo un `web/` embebido de horas antes). Un verde sobre ese servidor es
   falso. Comprobar `uptime` en `/api/health` y el hash que realmente sirve `/studio`, o usar un
-  puerto propio como arriba.
+  puerto propio como arriba. El bind fallido NO corta el intento: el `curl` contesta igual, desde
+  el proceso ajeno. Medido dos veces en esta tarea —un `/tmp/swr-gate` con 2307s de vida tapando el
+  18455, y cinco instancias de sondeo viejas tapando del 18456 al 18461—; en ambas el hash servido
+  delataba al impostor.
+- `-data` no puede ser la misma ruta que `-o`: `mkdir /tmp/swr-g1: not a directory` y el servidor no
+  arranca. Nombres distintos (`/tmp/swr-green` y `/tmp/swr-green-data`).
 - WSL no tiene `playwright`, y `playwright==1.64.0` pide `chromium-1248` mientras la caché del owner
   guarda `chromium-1255`: la ruta WSL exigiría bajar un navegador (~170 MB). La ruta de arriba usa el
   Chrome ya instalado, que es la convención `SWR_TEST_CHROME` que CI lleva usando tiempo
@@ -4615,8 +4761,9 @@ Mediciones que hay que respetar al montar el servidor:
 Crear `docs/OVERFLOW-GATE.md` con: qué abre y a qué anchos; los cuatro criterios (desbordes
 horizontales **y verticales** en elementos sin recorte intencional, scroll del documento en ambos
 ejes —que la spec sí prohíbe en móvil, líneas 12 y 25—, botones sin nombre, y la primaria
-`[data-action="live"]` visible, con etiqueta y sin corte); que es bloqueante en el job `browser` de
-CI; la ruta local de Step 4; y las dos cosas que el gate **no** cubre, medidas hoy:
+`[data-action="live"]` visible, con etiqueta y sin corte); la barrida de los cuatro estados de
+colapso y por qué existe; que es bloqueante en el job `browser` de CI; la ruta local de Step 4; y lo
+que el gate **no** cubre, medido hoy:
 
 - El despegue del aviso sobre el dock. En modo next ninguna acción del fixture lanza un error
   (`ui/src/bridge/actions.js:27` registra los handlers precisamente para que `command()` no tire),
@@ -4626,6 +4773,13 @@ CI; la ruta local de Step 4; y las dos cosas que el gate **no** cubre, medidas h
   820x900 cae 1px dentro del dock y a 390x640 lo toca exacto. Va a la revisión final de rama con
   estos números, no a un test que no puede disparar el aviso.
 - El modo legacy: lo vigila `scripts/interface-smoke.py`.
+- El tamaño del objetivo táctil, medido en la propia barrida: por debajo de 1120px los botones de
+  colapso de la barra superior se quedan en **18x29** —alcanzables, pero lejos de los 24-44px
+  habituales—. Va a la revisión final de rama.
+- Que una región abierta tenga contenido: `panelOpen` renderiza hoy
+  `<Slot region="panel" id="studioPanes">{null}</Slot>`, y en móvil ese slot mide 2px (solo el
+  borde). La puerta afirma que no desborda, no que la región tenga algo que ver.
+- Anchos entre los cuatro breakpoints, zoom, tipografía agrandada y tema claro.
 
 El doc se escribe a mano, no como bloque del plan: lleva fences anidados y `parity-check.mjs` no
 recolecta bloques `markdown`. La prueba de paridad para el doc es que lo que afirma sea cierto en el
@@ -4656,17 +4810,30 @@ y en el job `test`, junto al paso `node --test` (línea 46), para que el doc no 
         run: test -s docs/OVERFLOW-GATE.md
 ```
 
+No hay paso de artefacto del Studio en el job `browser` (comprobado con `grep -n "Upload Studio
+artifact" .github/workflows/ci.yml`, cero coincidencias), así que la puerta no compite con ninguna
+publicación: si da 1, el job falla y no se sube nada.
+
 - [ ] **Step 7: Verificar y commit**
 
-Run: `npm -C ui test && node --test tests/*.test.mjs`
-Expected: todo en verde, uno más que antes (el ancla del Step 2). La puerta no cubre el modo legacy.
+Run: `npm -C ui test && node --test tests/*.test.mjs && node --check web/js/studio.js`, más el
+`go test ./internal/server/` de siempre (aquí, en WSL: no hay Go en Windows).
+Expected medido: **94 passed** en vitest (13 ficheros) —tres más que los 91 de Task 11, uno por
+ancla—, 84/84 en `node --test`, `ok github.com/webr0m/streamwebrom/internal/server`. Y la puerta,
+ejecutada roja primero y verde después. La puerta no cubre el modo legacy.
 
-Comprobar con `parity-check.mjs` que `ui/src/styles/layout.css` y `scripts/overflow-smoke.py` salen
-IDENTICAL; `ui/tests/shell.test.jsx`, `docs/OVERFLOW-GATE.md`, `Makefile` y `ci.yml` no son rutas
-paralizables por el tool (bloques sin comentario de ruta) y se revisan leyendo el diff.
+Comprobar con `parity-check.mjs` que `ui/src/styles/layout.css` (último bloque) y
+`scripts/overflow-smoke.py` salen IDENTICAL; `ui/tests/shell.test.jsx`, `docs/OVERFLOW-GATE.md`,
+`Makefile` y `ci.yml` no son rutas paralizables por el tool (bloques sin comentario de ruta) y se
+revisan leyendo el diff. `web/studio.html` sí va en el commit: es tracked y el hash del bundle se
+moven con esta hoja (`js/studio-Ca2SwZcV.js`, `css/mount-next-0XHIzscc.css` al cerrar la tarea).
+
+Ojo con los finales de línea al tocar el plan desde Python: `parity-check.mjs` casa los fences con
+`^```…\n` y un fichero convertido a CRLF hace que reporte `NO BLOCK` para todas las rutas y que el
+diff del plan se infle a miles de líneas. Escribir con `newline="\n"`.
 
 ```bash
-git add ui/src/styles/layout.css ui/tests/shell.test.jsx scripts/overflow-smoke.py docs/OVERFLOW-GATE.md Makefile .github/workflows/ci.yml
+git add ui/src/styles/layout.css ui/tests/shell.test.jsx scripts/overflow-smoke.py docs/OVERFLOW-GATE.md Makefile .github/workflows/ci.yml web/studio.html
 git commit -m "test(ui): block layout overflow and nameless controls in the studio shell"
 ```
 
