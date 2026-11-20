@@ -4,4 +4,6 @@
 // file re-exports the engine (Task 5 adds whatever else components need).
 // tests/ui-artifacts.test.mjs asserts each name below is really exported by the
 // engine and that nothing here declares its own dictionary.
-export { t, installI18n, onLangChange, setLang, LANGS, LANG_LABELS } from "../../web/js/i18n.js";
+// `lang` joins the list because a React store needs to read the current language
+// without copying it.
+export { t, installI18n, onLangChange, setLang, lang, LANGS, LANG_LABELS } from "../../web/js/i18n.js";
