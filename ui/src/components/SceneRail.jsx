@@ -9,11 +9,6 @@ export function SceneRail({ production, command, collapsed = false, onExpand }) 
     return (
       <div className={styles.collapsed}>
         <IconButton icon="◫" data-action="expand-scenes" label={t("studio.showScenes")} onClick={onExpand} />
-        {production.scenes.map((scene) => (
-          <button key={scene.name} type="button" className={styles.mini} aria-current={scene.name === production.editScene ? "true" : undefined} onClick={() => command("scene.select", { name: scene.name })}>
-            {scene.name}
-          </button>
-        ))}
       </div>
     );
   }

@@ -107,6 +107,48 @@ test('every key used by browser modules exists', async () => {
   assert.deepEqual([...missing], []);
 });
 
+// The React sibling of the browser-modules test above: t() echoes an unknown
+// key as text instead of failing, so a reverted studiojs.layout* or a retyped
+// studio.* renders as visible strings with every vitest still green. This
+// walks ui/src and asserts each scanned key really is in the dictionary.
+// Comments go first: prose naming a nonexistent key (the LayoutBar note about
+// studio.layoutSolo) must not become a false positive.
+test('every key used by the React sources exists', async () => {
+  const sources = await jsFilesUnder('../ui/src');
+  const missing = [];
+  for (const { file, source: raw } of sources) {
+    const source = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const keys = [
+      ...[...source.matchAll(/(?<![\w.])t\(\s*"([a-z][a-zA-Z]*\.[a-zA-Z0-9]+)"/g)].map((match) => match[1]),
+      ...[...source.matchAll(/["'](studio(?:js)?\.[a-zA-Z0-9]+)["']/g)].map((match) => match[1]),
+    ];
+    for (const key of new Set(keys)) {
+      if (!hasIn(es, key)) missing.push(`${file}: ${key}`);
+    }
+  }
+  assert.deepEqual(missing, []);
+});
+
+async function jsFilesUnder(urlPath) {
+  const dir = new URL(urlPath + '/', import.meta.url);
+  const found = [];
+  async function walk(at) {
+    for (const entry of await readdir(at, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (entry.name !== '__tests__') await walk(new URL(entry.name + '/', at));
+        continue;
+      }
+      if (!/\.(?:js|jsx)$/.test(entry.name)) continue;
+      const file = new URL(entry.name, at);
+      const rel = decodeURIComponent(file.pathname).replace(/\\/g, '/').split('/');
+      const marker = rel.lastIndexOf('ui');
+      found.push({ file: rel.slice(marker === -1 ? 0 : marker).join('/'), source: await readFile(file, 'utf8') });
+    }
+  }
+  await walk(dir);
+  return found;
+}
+
 function hasIn(dict, key) {
   return Object.prototype.hasOwnProperty.call(dict, key);
 }

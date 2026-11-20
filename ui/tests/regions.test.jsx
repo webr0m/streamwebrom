@@ -35,10 +35,22 @@ test("a collapsed rail still exposes an expand control with a name", () => {
   expect(document.querySelector('[data-action="expand-scenes"]')).toBeInTheDocument();
 });
 
+// La rama colapsada del Studio legacy esconde la lista de escenas y deja un
+// único restaurar (`#restoreScenes`, web/studio.html:53); nunca muestra chips
+// por escena. Controles en vez de píxeles: jsdom no maqueta, así que medir el
+// desbordamiento le corresponde a la puerta de Playwright de la Task 12.
+test("collapsing the rail leaves one control, as the legacy page does", () => {
+  const { container } = render(<SceneRail production={production} command={() => {}} collapsed onExpand={() => {}} />);
+  expect(container.querySelectorAll("button")).toHaveLength(1);
+});
+
 test("LayoutBar presses exactly one layout", async () => {
   const command = vi.fn();
-  render(<LayoutBar layout="grid" featured="" sources={media.sources} command={command} />);
+  render(<LayoutBar layout="grid" command={command} />);
   expect(document.querySelectorAll("[data-layout]")).toHaveLength(8);
+  const pressed = document.querySelectorAll('[data-layout][aria-pressed="true"]');
+  expect(pressed).toHaveLength(1);
+  expect(pressed[0]).toHaveAttribute("data-layout", "grid");
   await userEvent.click(document.querySelector('[data-layout="pip"]'));
   expect(command).toHaveBeenCalledWith("scene.setLayout", { layout: "pip" });
 });
@@ -72,12 +84,14 @@ test("an errored source states its problem without blocking the tray", () => {
   expect(document.querySelector('[data-source="media-loop"] [role="status"]')).toBeInTheDocument();
 });
 
-test("ProductionDock renders the seven dock actions", () => {
+test("ProductionDock renders the seven dock actions", async () => {
   const command = vi.fn();
   render(<ProductionDock snapshot={{ production, media, room }} command={command} />);
   for (const id of ["monitor", "camera", "screen", "media", "vdo", "settings", "invite"]) {
     expect(document.querySelector('[data-action="' + id + '"]')).toBeInTheDocument();
   }
+  await userEvent.click(document.querySelector('[data-action="camera"]'));
+  expect(command).toHaveBeenCalledWith("device.camera", expect.objectContaining({}));
 });
 
 test("dock actions that do not fit collapse into the menu, never into an empty pill", () => {
@@ -86,6 +100,20 @@ test("dock actions that do not fit collapse into the menu, never into an empty p
   const menu = document.querySelector('[data-action="dock-more"]');
   fireEvent.click(menu);
   expect(screen.getAllByRole("menuitem").length).toBe(2);
+});
+
+test("the mounted regions render no echoed i18n key", () => {
+  const { container } = render(<StudioRoot bridge={createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) })} />);
+  // aria-label and title carry the labels too, and an unkeyed `t()` echo lands
+  // in exactly those attributes: the layout group's accessible name is one.
+  const attrs = [...container.querySelectorAll("[aria-label], [title]")]
+    .map((node) => `${node.getAttribute("aria-label") ?? ""}|${node.getAttribute("title") ?? ""}`)
+    .filter((value) => /(^|\|)studio(?:js)?\.[a-zA-Z]/.test(value));
+  const echoes = [...container.querySelectorAll("*")]
+    .filter((node) => !node.children.length)
+    .map((node) => node.textContent?.trim() ?? "")
+    .filter((text) => /^studio(?:js)?\.[a-zA-Z]/.test(text));
+  expect([...attrs, ...echoes]).toEqual([]);
 });
 
 // El `id` del rail es del shell, no del rail: la barra señala `scenesRail` con

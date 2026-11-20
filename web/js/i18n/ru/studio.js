@@ -170,6 +170,7 @@ export const ru = {
   "studio.closeCameraOptions": "Закрыть параметры камеры",
   "studio.externalCamera": "Внешняя камера · VDO.Ninja",
   "studio.closeVdo": "Закрыть VDO.Ninja",
+  "studio.vdo": "VDO.Ninja",
   "studio.vdoIntro": "Подключение через официальное ",
   "studio.vdoTermsBefore": ". При создании или подключении камеры загружается внешний сервис, подчиняющийся его ",
   "studio.vdoTerms": "условиям",

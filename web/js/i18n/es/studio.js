@@ -170,6 +170,7 @@ export const es = {
   "studio.closeCameraOptions": "Cerrar opciones de la cámara",
   "studio.externalCamera": "Cámara externa · VDO.Ninja",
   "studio.closeVdo": "Cerrar VDO.Ninja",
+  "studio.vdo": "VDO.Ninja",
   "studio.vdoIntro": "Conecta mediante la aplicación oficial de ",
   "studio.vdoTermsBefore": ". Al crear o conectar una cámara se carga su servicio externo, sujeto a sus ",
   "studio.vdoTerms": "condiciones",

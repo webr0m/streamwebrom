@@ -35,7 +35,7 @@ export function StudioRoot({ bridge }) {
         </Slot>
         <Slot region="stage">
           <ProgramStage production={snapshot.production} media={snapshot.media} />
-          <LayoutBar layout={snapshot.production.layout} featured={snapshot.production.featured} sources={snapshot.media.sources} command={command} />
+          <LayoutBar layout={snapshot.production.layout} command={command} />
         </Slot>
         <Slot region="tray"><SourceTray sources={snapshot.media.sources} command={command} /></Slot>
         <Slot region="dock"><ProductionDock snapshot={snapshot} command={command} /></Slot>

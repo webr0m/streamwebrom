@@ -13,7 +13,7 @@ const LAYOUTS = [
   ["screen", "studiojs.layoutScreen"], ["news", "studiojs.layoutNews"],
 ];
 
-export function LayoutBar({ layout, command, sources = [], featured = "" }) {
+export function LayoutBar({ layout, command }) {
   return (
     <div className={styles.bar} role="group" aria-label={t("studio.layouts")}>
       {LAYOUTS.map(([id, key]) => (

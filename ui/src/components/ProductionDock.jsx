@@ -9,7 +9,7 @@ const ACTIONS = [
   { id: "camera", icon: "◉", label: () => t("studio.camera"), hint: () => t("studio.cameraHint"), command: "device.camera" },
   { id: "screen", icon: "▣", label: () => t("studio.screen"), hint: () => t("studio.screenHint"), command: "device.screen" },
   { id: "media", icon: "▶", label: () => t("studio.media"), hint: () => t("studio.mediaHint"), command: "device.media" },
-  { id: "vdo", icon: "⌁", label: () => "VDO" /* i18n-lint-ignore nombre propio */, hint: () => t("studio.vdoHint"), command: "device.vdo" },
+  { id: "vdo", icon: "⌁", label: () => t("studio.vdo"), hint: () => t("studio.vdoHint"), command: "device.vdo" },
   { id: "settings", icon: "⚙", label: () => t("studio.settings"), hint: () => t("studio.settingsHint"), command: "room.settings" },
   { id: "invite", icon: "＋", label: () => t("studio.invite"), hint: () => t("studio.inviteHint"), command: "room.invite" },
 ];
