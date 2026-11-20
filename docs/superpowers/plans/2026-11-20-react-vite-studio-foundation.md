@@ -1,0 +1,3598 @@
+# Studio React + Vite — Fundaciones y sistema de diseño (etapas 1–2) Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Dejar montado el pipeline Vite → `web/` integrado con el versionado de assets de Go, el sistema de diseño Control Room Pro (tokens + primitivas anti-desbordamiento) y el shell React del Studio funcionando sobre datos simulados tras un interruptor `?ui=next`, sin alterar el Studio legacy ni el motor WebRTC.
+
+**Architecture:** `ui/` es un proyecto Vite/React propio que emite sus bundles dentro de `web/js/` y `web/css/`, que es el único par de rutas que el servidor Go sirve versionadas e inmutables. El futuro motor real se comunicará con React a través de `StudioBridge` (`subscribe`/`getSnapshot`/`command`/`destroy`); en este plan el bridge se implementa contra un *fixture engine* determinista, de modo que todo el sistema visual y su contrato de datos quedan probados antes de tocar WebRTC.
+
+**Tech Stack:** Node 24, Vite 7 + `@vitejs/plugin-react`, React 19 (solo `react`/`react-dom`), CSS Modules + design tokens, Vitest + `@testing-library/react` + `jsdom`, Python Playwright 1.64 (smokes existentes), Go 1.27 (CI) con `testing/fstest`.
+
+**Spec:** [docs/superpowers/specs/2026-11-20-react-vite-studio-ui-design.md](../../specs/2026-11-20-react-vite-studio-ui-design.md)
+
+## Corrección de alcance detectada al planificar (Amendment A1)
+
+La especificación aprobada (§10) suponía que el Studio se moderniza en el propio `/studio` con React y
+el chrome legacy conviviendo en el mismo DOM. Al descomponerlo en tareas eso obliga a que cada etapa
+borre partes de `web/js/studio.js` mientras otras siguen dependiendo de ellas: cada paso pondría en
+riesgo la página real del usuario y ninguna etapa intermedia sería verificable de forma aislada.
+
+Este plan aplica la variante segura del mismo puente incremental:
+
+- El HTML servido en `/studio` carga el arranque React, que elige el modo por `?ui=` (query) o
+  `localStorage["swr.ui"]`. **`legacy` es el modo por defecto** y es byte a byte lo de hoy.
+- `?ui=next` monta la interfaz React. En este plan React se alimenta de un **fixture engine**, así que
+  `/studio?ui=next` es navegable y evaluable visualmente, pero aún no funcional.
+- El plan 2 porta el motor real (Signal, estado, fuentes, compositor) al bridge; el plan 3 acaba
+  paneles/diálogos/móvil y voltea el modo por defecto, eliminando `web/js/studio.js`.
+
+Consecuencias: cero regresión para los usuarios durante las etapas 1–3 del rediseño, rollback instantáneo
+y cada etapa verificable por sí misma. El plan 1 no toca ninguna lógica de media ni el protocolo de
+señalización: el interruptor vive en el bundle de arranque (`ui/src/main.jsx`) y el modo legacy se carga
+en tiempo de ejecución con `import("/js/studio.js")`, exactamente con el código de hoy.
+
+**Entregables de los planes siguientes** (fuera de este plan, listados para que el lector sepa qué no
+buscará aquí): plan 2 = porta del motor + `SceneRail`/`ProgramStage`/`LayoutBar`/`SourceTray`/
+`ProductionDock` reales + escenario de escenas 2–8; plan 3 = siete paneles contextuales, diálogos
+(sala, relé, fuente, VDO), responsive móvil fino, volcado de modo por defecto y retirada de
+`web/js/studio.js` y `web/js/workspace.js`.
+
+## Global Constraints
+
+- No reescribir `web/js/rtc.js`, `compositor.js`, `devices.js`, `room-audio.js`, `i18n.js`, `appearance.js`, los canvas ni los Web Workers (spec §3).
+- No migrar `/guest`, `/view`, `/diagnostics`, `/vdo` ni `/index` (spec §3).
+- Prohibidos Tailwind, shadcn, Radix, styled-components y stores globales (Redux/Zustand/Jotai) (spec §2, §3).
+- JavaScript ESM + JSX con anotaciones JSDoc; **sin** compilación TypeScript (spec §4.1).
+- Toda salida de Vite va a `web/js/*.js` o `web/css/*.css`: `internal/server/server.go:236` solo sirve rutas prefijadas que empiecen por `js/`+`.js` o `css/`+`.css`.
+- `web/embed.go` conserva sus patrones `*.html *.webmanifest sw.js css js img vendor`; no se añaden patrones.
+- Paleta Control Room Pro: fondo `#05070d → #0b1020`, marca `#7c5cff`, glassmorphism discreto (spec §2).
+- Duraciones de movimiento entre 120 ms y 220 ms; todo movimiento respeta `prefers-reduced-motion` (spec §2).
+- Anti-desbordamiento obligatorio y bloqueante en 1440, 1120, 820 y 390 px de ancho (spec §8).
+- Ningún texto visible literal en JSX: solo `t()` con claves `studio.*` o `studiojs.*` presentes en es/en/ru (spec §7).
+- Las claves de destino jamás salen del navegador; el snapshot entrega solo valores enmascarados (spec §6).
+- `make test` actual (vet + go test + `node --check` de `web/js/*.js` + `jslint.py` + `node --test tests/*.test.mjs`) sigue en verde en cada tarea.
+- Entorno del propietario: Node 24 está en PATH de Windows; `go` y `make` se ejecutan en WSL Ubuntu (`wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && make test"`).
+- Nunca escribir `git push`, desplegar ni subir credenciales: este plan termina en commits locales.
+
+---
+
+## Estructura de ficheros
+
+```
+ui/
+  package.json                     # deps React/Vite/Vitest; sin librerías de UI
+  vite.config.js                   # root ui, outDir ../web, nombres js/ y css/
+  studio.html                      # plantilla Vite → web/studio.html (markup legacy + arranque React)
+  src/
+    main.jsx                       # decide modo legacy|next; nunca monta ambos
+    boot-legacy.js                 # importa "./js/studio.js" tal cual hoy
+    bridge/
+      snapshot.js                  # store inmutable get/set/subscribe
+      studio-bridge.js             # única frontera React ↔ motor
+      actions.js                   # registro action -> función; errores por dominio
+      fixture-engine.js            # motor simulado determinista para el modo next
+    fixtures/
+      next-studio.js               # snapshot canónico usado por tests y por el fixture
+    components/
+      StudioShell.jsx  Topbar.jsx  SceneRail.jsx  ProgramStage.jsx  LayoutBar.jsx
+      SourceTray.jsx  ProductionDock.jsx  ToastLayer.jsx
+      primitives/{TruncatedText,StatusPill,IconButton,CommandButton,Switch,PanelTabs,OverflowMenu,Field,StudioDialog,LevelMeter}.jsx
+    hooks/
+      useStudioSnapshot.js  useWorkspace.js  useStageHeight.js  useReducedMotion.js  useToasts.js
+    lib/
+      snapshot.js  toasts.js                    # cola de avisos y store sin React
+    i18n.js                                    # re-export de web/js/i18n.js
+    mode.js  mount-next.jsx                    # interruptor de modo y arranque React
+    styles/
+      tokens.css  motion.css  layout.css
+      <cada component>.module.css
+  tests/
+    setup.js                       # jest-dom + installI18n() para todos los tests
+    <unidad>.test.jsx              # Vitest; el nombre describe la unidad que cubre
+scripts/
+  build-ui.mjs                     # npm ci + vite build + web/js/sw-assets.json
+  overflow-smoke.py                # puerta anti-desbordamiento (Playwright, 4 viewports)
+web/
+  studio.html                      # generado por Vite (antes: a mano)
+  js/i18n/{es,en,ru}/studio.js     # +8 claves nuevas (Task 9 Step 3)
+  js/studio-<hash>.js  css/studio-<hash>.css   # bundles
+  js/sw-assets.json                # lista de assets versionados consumida por sw.js
+internal/server/assets.go          # inyección de __SWR_SHELL__
+docs/INTERFAZ.md  CHANGELOG.md
+```
+
+Propiedad de cada fichero: `tokens.css` es la única fuente de colores/escalas; `layout.css` es la única
+que declara el grid del shell; cada `*.module.css` solo estiliza su componente; `actions.js` es la única
+lista de comandos válidos; `snapshot.js` es el único lugar que construye objetos de estado.
+
+---
+
+### Task 1: Pipeline Vite → `web/` y manifiesto de assets
+
+**Files:**
+- Create: `ui/package.json`, `ui/vite.config.js`, `ui/tests/setup.js`, `ui/src/main.jsx`, `ui/src/styles/bootstrap.css`, `scripts/build-ui.mjs`, `tests/ui-artifacts.test.mjs`
+- Modify: `Makefile` (nuevo target `ui` + `test`), `scripts/build.ps1`, `Dockerfile`, `.github/workflows/ci.yml` (job `test` y job `browser`), `.gitignore`
+
+**Interfaces:**
+- Consumes: nada (primera tarea).
+- Produces: `web/js/studio-<hash>.js`, `web/css/studio-<hash>.css`, `web/js/sw-assets.json` con el contenido `["css/studio-<hash>.css","js/studio-<hash>.js"]` (rutas **sin** barra inicial, ordenadas alfabéticamente). `scripts/build-ui.mjs` se invoca como `node scripts/build-ui.mjs` desde cualquier cwd del repo y sale con código 0 o lanza con mensaje que incluye `node scripts/build-ui.mjs`.
+
+- [ ] **Step 1: Escribir el test que falla**
+
+```js
+// tests/ui-artifacts.test.mjs
+import { execFile } from "node:child_process";
+import { access, readdir, readFile } from "node:fs/promises";
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { promisify } from "node:util";
+
+const run = promisify(execFile);
+const root = new URL("..", import.meta.url).pathname;
+
+async function build() {
+  try { await access(`${root}web/js/sw-assets.json`); }
+  catch { await run("node", ["scripts/build-ui.mjs"], { cwd: `${root}` }); }
+}
+
+test("the UI build emits only js/ and css/ paths", async () => {
+  await build();
+  const list = JSON.parse(await readFile(`${root}web/js/sw-assets.json`, "utf8"));
+  assert.ok(Array.isArray(list) && list.length, "sw-assets.json must list the built assets");
+  for (const file of list) {
+    assert.match(file, /^(js|css)\/[A-Za-z0-9._-]+$/, `${file} must live under js/ or css/`);
+    await access(`${root}web/${file}`);
+  }
+  assert.deepEqual([...list].sort(), list, "asset list must be sorted");
+});
+
+test("no build output uses the /assets/ directory the Go shell owns", async () => {
+  await build();
+  const js = await readdir(`${root}web/js`);
+  assert.ok(js.every((name) => !name.endsWith(".map")), "sourcemaps stay off: the Go shell would not list them");
+  await assert.rejects(access(`${root}web/assets`), "Vite must not emit an assets/ folder the Go shell refuses to serve");
+});
+```
+
+- [ ] **Step 2: Verificar que falla**
+
+Run: `node --test tests/ui-artifacts.test.mjs`
+Expected: FAIL — «Cannot find module scripts/build-ui.mjs» o `ENOENT web/js/sw-assets.json`.
+
+- [ ] **Step 3: Crear el proyecto `ui/`**
+
+```json
+{
+  "name": "streamwebrom-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "10.4.0",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "@vitejs/plugin-react": "4.6.0",
+    "jsdom": "26.1.0",
+    "vite": "7.0.5",
+    "vitest": "3.2.4"
+  }
+}
+```
+
+```js
+// ui/vite.config.js
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+// The Go server only serves versioned files from js/ and css/, so every Vite
+// artifact has to land in one of those two folders.
+export default defineConfig({
+  // Absolute so every path below means the same thing from the repo root, from ui/
+  // and from scripts/build-ui.mjs.
+  root: fileURLToPath(new URL(".", import.meta.url)),
+  base: "/",
+  build: {
+    outDir: "../web",
+    emptyOutDir: false,
+    manifest: true,
+    sourcemap: false,
+    rollupOptions: {
+      input: { studio: "src/main.jsx" },
+      output: {
+        entryFileNames: "js/[name]-[hash].js",
+        chunkFileNames: "js/[name]-[hash].js",
+        assetFileNames: "css/[name]-[hash][extname]",
+      },
+    },
+  },
+  server: {
+    port: 5173,
+    proxy: Object.fromEntries(
+      ["/ws", "/api", "/whip", "/whep", "/recordings", "/metrics"].map((path) => [
+        path,
+        { target: process.env.SWR_ORIGIN || "http://localhost:8443", changeOrigin: true, secure: false, ws: path === "/ws" },
+      ]),
+    ),
+  },
+  test: {
+    environment: "jsdom",
+    globals: false,
+    setupFiles: ["tests/setup.js"],
+    include: ["tests/**/*.test.jsx"],
+  },
+});
+```
+
+```js
+// ui/tests/setup.js
+import "@testing-library/jest-dom/vitest";
+import { installI18n } from "../src/i18n.js";
+
+// Component tests assert the Spanish source strings, so the dictionaries have to be loaded
+// before the first render.
+installI18n();
+```
+
+```css
+/* ui/src/styles/bootstrap.css */
+:root { --swr-bg-deep: #05070d; --swr-bg-raise: #0b1020; --swr-brand: #7c5cff; }
+```
+
+```jsx
+// ui/src/main.jsx
+import "./styles/bootstrap.css";
+
+// Placeholder entry: Task 4 replaces it with the mode switch. It must stay
+// importable so the build pipeline itself is testable before any UI exists.
+export const UI_BUILD = "next";
+```
+
+- [ ] **Step 4: Escribir `scripts/build-ui.mjs`**
+
+```js
+// Builds the React Studio shell into web/js and web/css, then publishes the
+// versioned asset list the service worker reads through Go's __SWR_SHELL__.
+import { execFileSync } from "node:child_process";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ui = resolve(root, "ui");
+const web = resolve(root, "web");
+
+if (!existsSync(resolve(ui, "node_modules"))) {
+  execFileSync("npm", ["ci", "--prefix", ui, "--no-audit", "--no-fund"], { cwd: root, stdio: "inherit" });
+}
+execFileSync("npm", ["run", "build", "--prefix", ui], { cwd: root, stdio: "inherit" });
+
+const manifest = JSON.parse(await readFile(resolve(web, ".vite/manifest.json"), "utf8"));
+const files = new Set();
+for (const entry of Object.values(manifest)) {
+  for (const file of [entry.file, ...(Object.values(entry.assets ?? {}))]) {
+    if (/^(?:js|css)\//.test(file)) files.add(file);
+  }
+}
+if (!files.size) throw new Error("vite emitted no js/ or css/ asset: check ui/vite.config.js output names");
+const list = [...files].sort();
+await writeFile(resolve(web, "js/sw-assets.json"), JSON.stringify(list) + "\n", "utf8");
+await rm(resolve(web, ".vite"), { recursive: true, force: true });
+console.log(`swr ui build → ${list.join(", ")}`);
+```
+
+- [ ] **Step 5: Conectar el pipeline con Go, CI y Docker**
+
+`Makefile` — añadir después del bloque `run:` y encadenar en `test`, `build` y `all`:
+
+```make
+ui:
+	node scripts/build-ui.mjs
+
+test: ui
+```
+
+```make
+build: ui
+launcher: ui
+all: ui
+```
+
+`scripts/build.ps1` — como primera línea dentro del `try` (antes del bucle de plataformas):
+
+```powershell
+    node scripts/build-ui.mjs
+    if ($LASTEXITCODE) { throw 'UI build failed' }
+```
+
+`Dockerfile` — etapa Node previa a la de Go y copiado del `web/` ya construido:
+
+```dockerfile
+FROM node:24-alpine AS ui
+WORKDIR /src
+COPY package*.json ui/package*.json ./
+RUN npm ci --prefix ui --no-audit --no-fund
+COPY ui ui
+COPY web web
+COPY scripts scripts
+RUN node scripts/build-ui.mjs
+
+FROM golang:1.27-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=ui /src/web web
+ARG VERSION=docker
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /streamwebrom ./cmd/streamwebrom
+```
+
+`.github/workflows/ci.yml` — en el job `test`, después de `actions/setup-node@v4` (Linux), y antes de
+`node --test tests/*.test.mjs`:
+
+```yaml
+      - name: build the React studio shell
+        if: runner.os == 'Linux'
+        run: node scripts/build-ui.mjs
+      - name: ui bundle tests
+        if: runner.os == 'Linux'
+        run: npm --prefix ui test
+```
+
+y en el job `browser`, antes de `go build -o /tmp/streamwebrom ./cmd/streamwebrom`:
+
+```yaml
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: node scripts/build-ui.mjs
+```
+
+`.gitignore` — añadir:
+
+```
+ui/node_modules/
+web/.vite/
+web/js/studio-*.js
+web/css/studio-*.css
+web/js/sw-assets.json
+```
+
+`web/studio.html` **no** se ignora: sigue controlado por git aunque desde la Task 4 lo genere Vite,
+así `go test ./internal/server/` y el `//go:embed` tienen siempre una página aunque nadie haya
+ejecutado el build de la UI.
+
+- [ ] **Step 6: Verificar build y tests**
+
+Run: `node scripts/build-ui.mjs && node --test tests/ui-artifacts.test.mjs && npm --prefix ui test --silent`
+Expected: `swr ui build → css/studio-….css, js/studio-….js`, `pass 2`, y Vitest sin tests todavía (exit 0 con «No test files found, exiting with code 1» → añadir `--passWithNoTests` al script `test` de `ui/package.json` y repetir hasta `pass 0`).
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go build ./... && go test -count=1 ./..."`
+Expected: `ok github.com/webr0m/streamwebrom/internal/server` sin cambios funcionales.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add ui scripts/build-ui.mjs tests/ui-artifacts.test.mjs Makefile scripts/build.ps1 Dockerfile .github/workflows/ci.yml .gitignore
+git commit -m "build(ui): add Vite pipeline emitting hashed assets into the embedded web tree"
+```
+
+---
+
+### Task 2: Go inyecta la lista de assets en el service worker
+
+**Files:**
+- Modify: `internal/server/assets.go` (función nueva + rama `sw.js` en `serveShell`)
+- Modify: `web/sw.js` (usa `__SWR_SHELL__` y añade los bundles a la caché)
+- Test: `internal/server/assets_test.go`
+
+**Interfaces:**
+- Consumes: `web/js/sw-assets.json` de la Task 1 (array JSON de rutas `js/…`/`css/…`).
+- Produces: `shellAssets(fs.FS) []byte` que devuelve `[]` cuando el fichero no existe, y un `sw.js` servido donde `__SWR_SHELL__` ya no aparece. Contrato para `web/sw.js`: `const SHELL_ASSETS = __SWR_SHELL__;` en la misma línea que el resto de constantes, y las rutas se resuelven como `ASSET_PREFIX + "/" + file`.
+
+- [ ] **Step 1: Escribir el test que falla**
+
+```go
+func TestShellAssetsReachTheServiceWorker(t *testing.T) {
+	files := fstest.MapFS{
+		"studio.html":     {Data: []byte(`<script type="module" src="/js/studio-abc.js"></script><link rel="stylesheet" href="/css/studio-abc.css">`)},
+		"js/studio-abc.js": {Data: []byte(`console.log("shell")`)},
+		"css/studio-abc.css": {Data: []byte(`body{color:red}`)},
+		"js/sw-assets.json":  {Data: []byte(`["css/studio-abc.css","js/studio-abc.js"]`)},
+		"sw.js":              {Data: []byte(`const SHELL_ASSETS = __SWR_SHELL__;const prefix="__SWR_ASSET_PREFIX__";`)},
+	}
+	s := New(config.Default(), nil, files, slog.Default())
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sw.js?build=x", nil))
+	body := w.Body.String()
+	if w.Code != http.StatusOK {
+		t.Fatalf("sw.js: %d", w.Code)
+	}
+	for _, want := range []string{`["css/studio-abc.css","js/studio-abc.js"]`, s.assetPrefix} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("sw.js must contain %q, got %s", want, body)
+		}
+	}
+	if strings.Contains(body, "__SWR_SHELL__") {
+		t.Fatal("service worker kept the unexpanded shell placeholder")
+	}
+}
+
+func TestMissingAssetListDoesNotBreakTheShell(t *testing.T) {
+	files := fstest.MapFS{"sw.js": {Data: []byte(`const SHELL_ASSETS = __SWR_SHELL__;`)}}
+	s := New(config.Default(), nil, files, slog.Default())
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sw.js", nil))
+	if !strings.Contains(w.Body.String(), "= [];") {
+		t.Fatalf("missing sw-assets.json must degrade to an empty list, got %s", w.Body.String())
+	}
+}
+```
+
+- [ ] **Step 2: Verificar que falla**
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 -run 'ShellAssets|MissingAssetList' ./internal/server/"`
+Expected: FAIL — «sw.js must contain …» y «missing sw-assets.json must degrade …».
+
+- [ ] **Step 3: Implementar la sustitución en Go**
+
+En `internal/server/assets.go`, junto a `shellPrefix`:
+
+```go
+// The Vite build publishes the hashed bundle list; the offline shell must
+// precache exactly those URLs, never a hand-maintained one.
+func shellAssets(files fs.FS) []byte {
+	data, err := fs.ReadFile(files, "js/sw-assets.json")
+	if err != nil || len(bytes.TrimSpace(data)) == 0 {
+		return []byte("[]")
+	}
+	return bytes.TrimSpace(data)
+}
+```
+
+y dentro del `case ".js":` de `serveShell`:
+
+```go
+	case ".js":
+		if name == "sw.js" {
+			data = bytes.ReplaceAll(data, []byte("__SWR_ASSET_PREFIX__"), []byte(s.assetPrefix))
+			data = bytes.ReplaceAll(data, []byte("__SWR_SHELL__"), shellAssets(s.static))
+		}
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+```
+
+- [ ] **Step 4: Consumir la lista desde `web/sw.js`**
+
+Sustituir la constante `SHELL` por dos listas separadas:
+
+```js
+const ASSET_PREFIX = "__SWR_ASSET_PREFIX__";
+const SHELL_ASSETS = __SWR_SHELL__;
+const CACHE = "swr-v14-" + ASSET_PREFIX;
+const PAGES = ["/", "/studio", "/guest", "/view", "/diagnostics", "/vdo", "/manifest.webmanifest"];
+const CLASSIC = ["/js/rtc.js", "/js/compositor.js", "/js/devices.js", "/js/room-audio.js", "/js/guest.js", "/js/view.js", "/js/vdo.js", "/js/vdo-room.js", "/js/index.js", "/js/diagnostics.js", "/js/appearance.js", "/js/workspace.js", "/js/telemetry.js", "/js/immersive.js", "/js/output-quality.js", "/js/effect-budget.js", "/js/segmentation-client.js", "/js/segment-worker.js", "/js/studio.js", "/js/network.js", "/js/call-grid.js", "/js/connection-health.js", "/js/bandwidth.js", "/js/relay-status.js", "/js/pwa.js", "/js/screen-share.js", "/js/native-audio.js", "/js/native-audio-worklet.js", "/js/effects.js", "/js/ticker.js", "/js/remote.js", "/js/chat.js", "/js/stickers.js", "/js/i18n.js", "/css/app.css", "/img/logo.svg"];
+const SHELL = [...PAGES, ...CLASSIC.map((p) => ASSET_PREFIX + p), ...SHELL_ASSETS.map((p) => ASSET_PREFIX + "/" + p)];
+```
+
+Mantener intactos `install`, `activate` y `fetch` (la lista ya alimenta `c.addAll(SHELL)` y el filtro
+`SHELL.includes(u.pathname)`). Verificar en el navegador que los diccionarios `js/i18n/*` que hoy
+enumera `sw.js` quedan cubiertos: la Task 12 añade una prueba que compara `SHELL` con el contenido real
+de `web/` para que ninguna ruta se pierda al pasar de una lista a otra.
+
+- [ ] **Step 5: Verificar**
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/ && node --check web/sw.js"`
+Expected: `ok …internal/server` y `node --check` sin salida (sintaxis válida).
+
+Run: `node scripts/build-ui.mjs && wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go run ./cmd/streamwebrom -addr 127.0.0.1:18443 -stun= -data /tmp/swr-ui &"` luego `curl -s http://localhost:18443/sw.js | grep -c "studio-"`
+Expected: `1` o más — el sw servido contiene el bundle versionado y ningún `__SWR_SHELL__`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/server/assets.go internal/server/assets_test.go web/sw.js
+git commit -m "feat(server): precache the Vite bundle list in the offline shell"
+```
+
+<!-- CONTINUACION-PLAN -->
+---
+
+### Task 3: Tokens de diseño Control Room Pro
+
+**Files:**
+- Create: `ui/src/styles/tokens.css`, `ui/src/styles/motion.css`, `ui/tests/tokens.test.jsx`
+- Rename: `ui/src/styles/bootstrap.css` (Task 1) pasa a `ui/src/styles/tokens.css` con el contenido completo de esta tarea
+- Modify: `ui/src/main.jsx` (importa `styles/tokens.css` y `styles/motion.css`)
+
+**Interfaces:**
+- Consumes: los artefactos de la Task 1.
+- Produces: la familia de variables `--swr-*` que todo CSS Module puede usar. Names exactos:
+  color `--swr-bg-deep --swr-bg-raise --swr-bg-panel --swr-bg-glass --swr-line --swr-line-strong
+  --swr-text --swr-text-dim --swr-text-faint --swr-brand --swr-brand-soft --swr-ok --swr-warn
+  --swr-err --swr-live`; tipografía `--swr-font-ui --swr-font-mono --swr-text-2xs --swr-text-xs
+  --swr-text-sm --swr-text-md --swr-text-lg --swr-text-xl`; espaciado `--swr-sp-1 … --swr-sp-6`;
+  radio `--swr-r-sm --swr-r-md --swr-r-pill`; sombra `--swr-shadow-1 --swr-shadow-2`; glass
+  `--swr-blur`; movimiento `--swr-fast --swr-base --swr-slow --swr-ease`; z `--swr-z-stage
+  --swr-z-panel --swr-z-dock --swr-z-dialog --swr-z-toast`.
+
+- [ ] **Step 1: Escribir el test que falla**
+
+```jsx
+// ui/tests/tokens.test.jsx
+import { test, expect } from "vitest";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+function cssFiles(dir) {
+  return readdirSync(dir).flatMap((name) => {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) return cssFiles(full);
+    return name.endsWith(".css") ? [full] : [];
+  });
+}
+
+const sources = cssFiles("ui/src").map((file) => [file, readFileSync(file, "utf8")]);
+const declared = new Set(
+  (readFileSync("ui/src/styles/tokens.css", "utf8").match(/--swr-[a-z0-9-]+(?=\s*:)/g) || []),
+);
+
+test("every --swr variable used is declared in tokens.css", () => {
+  const used = new Set();
+  for (const [, css] of sources) for (const m of css.matchAll(/var\((--swr-[a-z0-9-]+)/g)) used.add(m[1]);
+  expect([...used].filter((name) => !declared.has(name))).toEqual([]);
+  expect(used.size).toBeGreaterThan(25);
+});
+
+test("the palette matches the approved Control Room Pro direction", () => {
+  const tokens = readFileSync("ui/src/styles/tokens.css", "utf8");
+  expect(tokens).toMatch(/--swr-bg-deep:\s*#05070d/);
+  expect(tokens).toMatch(/--swr-bg-raise:\s*#0b1020/);
+  expect(tokens).toMatch(/--swr-brand:\s*#7c5cff/);
+});
+
+test("motion durations stay inside the broadcast band", () => {
+  const tokens = readFileSync("ui/src/styles/tokens.css", "utf8");
+  const ms = [...tokens.matchAll(/--swr-(?:fast|base|slow):\s*(\d+)ms/g)].map((m) => Number(m[1]));
+  expect(ms).toEqual([120, 160, 220]);
+});
+
+test("no CSS module hardcodes a hex colour", () => {
+  const offenders = sources
+    .filter(([file]) => file.endsWith(".module.css"))
+    .filter(([, css]) => /#[0-9a-fA-F]{3,8}\b/.test(css));
+  expect(offenders.map(([file]) => file)).toEqual([]);
+});
+```
+
+- [ ] **Step 2: Verificar que falla**
+
+Run: `npm --prefix ui test -- tests/tokens.test.jsx`
+Expected: FAIL —«ENOENT: no such file or directory, open 'ui/src/styles/tokens.css'».
+
+- [ ] **Step 3: Escribir los tokens**
+
+```css
+/* ui/src/styles/tokens.css */
+:root {
+  color-scheme: dark;
+  --swr-bg-deep: #05070d;
+  --swr-bg-raise: #0b1020;
+  --swr-bg-panel: #0e1526;
+  --swr-bg-glass: rgba(14, 21, 38, 0.72);
+  --swr-line: rgba(124, 92, 255, 0.16);
+  --swr-line-strong: rgba(124, 92, 255, 0.38);
+  --swr-text: #e8ecf8;
+  --swr-text-dim: #a6b0c8;
+  --swr-text-faint: #6f7a94;
+  --swr-brand: #7c5cff;
+  --swr-brand-soft: rgba(124, 92, 255, 0.18);
+  --swr-ok: #34d399;
+  --swr-warn: #fbbf24;
+  --swr-err: #fb7185;
+  --swr-live: #ff3b52;
+
+  --swr-font-ui: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --swr-font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+  --swr-text-2xs: clamp(0.66rem, 0.62rem + 0.2vw, 0.74rem);
+  --swr-text-xs: clamp(0.74rem, 0.7rem + 0.25vw, 0.84rem);
+  --swr-text-sm: clamp(0.82rem, 0.78rem + 0.3vw, 0.92rem);
+  --swr-text-md: clamp(0.94rem, 0.9rem + 0.35vw, 1.06rem);
+  --swr-text-lg: clamp(1.08rem, 1rem + 0.5vw, 1.3rem);
+  --swr-text-xl: clamp(1.3rem, 1.15rem + 0.9vw, 1.8rem);
+
+  --swr-sp-1: 4px; --swr-sp-2: 8px; --swr-sp-3: 12px;
+  --swr-sp-4: 16px; --swr-sp-5: 24px; --swr-sp-6: 32px;
+
+  --swr-r-sm: 6px; --swr-r-md: 10px; --swr-r-pill: 999px;
+  --swr-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --swr-shadow-2: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --swr-blur: 14px;
+
+  --swr-fast: 120ms; --swr-base: 160ms; --swr-slow: 220ms;
+  --swr-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  --swr-z-stage: 1; --swr-z-panel: 2; --swr-z-dock: 3;
+  --swr-z-dialog: 4; --swr-z-toast: 5;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --swr-bg-deep: #eef1f8;
+  --swr-bg-raise: #f7f9ff;
+  --swr-bg-panel: #ffffff;
+  --swr-bg-glass: rgba(255, 255, 255, 0.8);
+  --swr-line: rgba(93, 66, 214, 0.18);
+  --swr-line-strong: rgba(93, 66, 214, 0.42);
+  --swr-text: #131a2b;
+  --swr-text-dim: #43506b;
+  --swr-text-faint: #6b7791;
+  --swr-brand: #5d42d6;
+  --swr-brand-soft: rgba(93, 66, 214, 0.14);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --swr-fast: 0ms; --swr-base: 0ms; --swr-slow: 0ms; }
+}
+```
+
+```css
+/* ui/src/styles/motion.css */
+.swr-live-dot {
+  animation: swr-pulse 2s var(--swr-ease) infinite;
+}
+@keyframes swr-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 82, 0.55); }
+  60% { box-shadow: 0 0 0 8px rgba(255, 59, 82, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .swr-live-dot { animation: none; }
+}
+```
+
+Renombrar `ui/src/styles/bootstrap.css` a `ui/src/styles/tokens.css` con `git mv` y cambiar el import de `ui/src/main.jsx` a:
+
+```jsx
+import "./styles/tokens.css";
+import "./styles/motion.css";
+```
+
+- [ ] **Step 4: Verificar**
+
+Run: `npm --prefix ui test -- tests/tokens.test.jsx && node scripts/build-ui.mjs`
+Expected: 4 tests PASS y build sin errores (el test «no CSS module hardcodes a hex colour» está en verde
+porque todavía no hay módulos CSS de componente).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ui/src/styles ui/src/main.jsx ui/tests/tokens.test.jsx
+git commit -m "style(ui): add Control Room Pro design tokens"
+```
+
+---
+
+### Task 4: Plantilla `ui/studio.html` e interruptor de modo
+
+**Files:**
+- Create: `ui/studio.html` (copia literal de `web/studio.html` actual con los cambios de este paso), `ui/src/mode.js`, `ui/src/boot-legacy.js`, `ui/tests/mode.test.jsx`
+- Modify: `ui/vite.config.js` (`input` pasa a ser el HTML), `ui/src/main.jsx`
+- Test: `internal/server/assets_test.go` (una aserción nueva sobre el HTML generado)
+
+**Interfaces:**
+- Consumes: el pipeline de la Task 1 y los tokens de la Task 3.
+- Produces: `uiMode(params: URLSearchParams, stored: string|null): "legacy"|"next"` — pureza exigida
+  para poder probarla sin DOM; `UI_MODES = ["legacy","next"]`. Contrato del arranque: en modo `legacy`
+  se ejecuta `await import("/js/studio.js")` y **no** se monta React; en modo `next` se monta
+  `<StudioRoot>` en `#studioRoot` y nunca se importa `studio.js`.
+
+- [ ] **Step 1: Escribir los tests que fallan**
+
+```jsx
+// ui/tests/mode.test.jsx
+import { test, expect } from "vitest";
+import { uiMode, UI_MODES } from "../src/mode.js";
+
+const q = (search) => new URLSearchParams(search);
+
+test("legacy is the default so /studio behaves exactly as today", () => {
+  expect(uiMode(q(""), null)).toBe("legacy");
+});
+
+test("the query wins over storage, and both accept only known modes", () => {
+  expect(uiMode(q("ui=next"), "legacy")).toBe("next");
+  expect(uiMode(q("ui=legacy"), "next")).toBe("legacy");
+  expect(uiMode(q("ui=meme"), "next")).toBe("next");
+  expect(uiMode(q(""), "next")).toBe("next");
+  expect(uiMode(q(""), "meme")).toBe("legacy");
+});
+
+test("only two modes exist", () => {
+  expect(UI_MODES).toEqual(["legacy", "next"]);
+});
+```
+
+```go
+// internal/server/assets_test.go — añadir al final del fichero
+func TestStudioHtmlLinksTheVersionedReactShellAndKeepsLegacyIdle(t *testing.T) {
+	legacy, err := fs.ReadFile(embedded(), "studio.html") // helper del embebido real
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{`id="program"`, `id="scenesRail"`, `id="backstage"`, `id="studioPanes"`} {
+		if !strings.Contains(string(legacy), marker) {
+			t.Fatalf("studio.html must keep the %s container for the legacy mode", marker)
+		}
+	}
+	if strings.Contains(string(legacy), `src="/js/studio.js"`) {
+		t.Fatal("the page must not load the legacy studio module eagerly: the boot switch owns it")
+	}
+}
+```
+
+`embedded()` es una función nueva del paquete `server` que devuelve `web.Files` recortado a la raíz:
+
+```go
+func embedded() fs.FS {
+	sub, err := fs.Sub(web.Files, ".")
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}
+```
+
+con `import "github.com/webr0m/streamwebrom/web"` en la cabecera del test.
+
+- [ ] **Step 2: Verificar que fallan**
+
+Run: `npm --prefix ui test -- tests/mode.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/mode.js"».
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 -run TestStudioHtml ./internal/server/"`
+Expected: FAIL —«the page must not load the legacy studio module eagerly» (todavía carga `studio.js`).
+
+- [ ] **Step 3: Crear el HTML y el interruptor**
+
+Copiar `web/studio.html` a `ui/studio.html` y aplicar exactamente tres cambios:
+
+```html
+    <!-- 1. se BORRA esta línea del pie del body -->
+    <script type="module" src="/js/studio.js"></script>
+    <script type="module" src="/js/pwa.js"></script>
+
+    <!-- 2. se AÑADE el arranque React (Vite lo reemplaza por el bundle versionado) -->
+    <script type="module" src="/src/main.jsx"></script>
+
+    <!-- 3. el contenedor raíz pasa a ser el punto de montaje de ambos modos -->
+    <div id="studioRoot" class="studio-root" data-i18n-root>…contenido intacto…</div>
+```
+
+`/js/pwa.js` se deja importado desde `boot-legacy.js` y `main.jsx` para no perder el registro
+del service worker en ninguno de los dos modos.
+
+```js
+// ui/src/mode.js
+export const UI_MODES = ["legacy", "next"];
+const KEY = "swr.ui";
+
+export function uiMode(params, stored) {
+  const fromQuery = params.get("ui");
+  if (UI_MODES.includes(fromQuery)) return fromQuery;
+  return UI_MODES.includes(stored) ? stored : "legacy";
+}
+
+export function storedMode() {
+  try { return localStorage.getItem(KEY); } catch { return null; }
+}
+```
+
+```js
+// ui/src/boot-legacy.js
+// The untouched Studio: no React, no bridge, same modules as today.
+export async function bootLegacy() {
+  await import("/js/pwa.js");
+  await import("/js/studio.js");
+}
+```
+
+```jsx
+// ui/src/main.jsx
+import "./styles/tokens.css";
+import "./styles/motion.css";
+import { uiMode, storedMode } from "./mode.js";
+
+const mode = uiMode(new URLSearchParams(location.search), storedMode());
+if (mode === "legacy") {
+  const { bootLegacy } = await import("./boot-legacy.js");
+  await bootLegacy();
+} else {
+  const [{ StudioRoot }, { mountNext }] = await Promise.all([import("./components/StudioShell.jsx"), import("./mount-next.jsx")]);
+  await mountNext(StudioRoot);
+}
+
+export { mode };
+```
+
+`ui/src/mount-next.jsx` se crea en este paso como mínimo funcional para que el modo `next` no reviente
+antes de la Task 9:
+
+```jsx
+// ui/src/mount-next.jsx
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { createStudioBridge } from "./bridge/studio-bridge.js";
+import { createFixtureEngine } from "./bridge/fixture-engine.js";
+import { nextStudioFixture } from "./fixtures/next-studio.js";
+
+export async function mountNext(StudioRoot) {
+  const root = document.querySelector("#studioRoot");
+  root.replaceChildren();
+  const engine = createFixtureEngine(nextStudioFixture);
+  const bridge = createStudioBridge({ engine });
+  root.dataset.uiMode = "next";
+  createRoot(root).render(
+    <StrictMode>
+      <StudioRoot bridge={bridge} />
+    </StrictMode>,
+  );
+  return bridge;
+}
+```
+
+`ui/vite.config.js`: `input: { studio: "studio.html" }`.
+
+- [ ] **Step 4: Verificar**
+
+Run: `node scripts/build-ui.mjs && npm --prefix ui test -- tests/mode.test.jsx`
+Expected: build escribe `web/studio.html` y `js/studio-<hash>.js`; 3 tests PASS.
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
+Expected: `ok`.
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && /tmp/streamwebrom -addr 127.0.0.1:18443 -stun= -data /tmp/swr-ui & sleep 2; python scripts/interface-smoke.py --url http://localhost:18443"`
+Expected: PASS — el modo por defecto sigue siendo el Studio de hoy.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ui/studio.html ui/src/mode.js ui/src/boot-legacy.js ui/src/mount-next.jsx ui/src/main.jsx ui/vite.config.js ui/tests/mode.test.jsx internal/server/assets_test.go web/studio.html
+git commit -m "feat(ui): serve the studio page from Vite behind a legacy/next mode switch"
+```
+
+---
+
+### Task 5: Snapshot, `StudioBridge` y motor de juguete
+
+**Files:**
+- Create: `ui/src/bridge/snapshot.js`, `ui/src/bridge/studio-bridge.js`, `ui/src/bridge/actions.js`, `ui/src/bridge/fixture-engine.js`, `ui/src/fixtures/next-studio.js`, `ui/tests/bridge.test.jsx`, `ui/tests/actions.test.jsx`
+
+**Interfaces:**
+- Consumes: nada (capa de datos pura).
+- Produces:
+  - `createSnapshotStore(initial) → { get(): object; set(patch: object): void; subscribe(fn): () => void }`
+  - `createStudioBridge({ engine, actions? }) → { subscribe, getSnapshot, command(action, payload), destroy }`
+  - `createActions(engine) → Record<string, (payload, engine) => Promise<void>|void>`
+  - `ERROR_DOMAINS = ["media","broadcast","room","network"]` y `domainOf(action): ERROR_DOMAINS[number]`
+  - `createFixtureEngine(snapshot) → { snapshot(); subscribe(fn); emit(patch); apply(action, payload); destroy() }`
+  - `nextStudioFixture` — el snapshot canónico de la forma de spec §6.1, usado por tests y por el modo `next`.
+
+- [ ] **Step 1: Escribir el fixture canónico**
+
+```js
+// ui/src/fixtures/next-studio.js
+// Shape of the data the production bridge will deliver in plan 2. Keeping it
+// here means the whole visual layer is testable before WebRTC is ported.
+export const nextStudioFixture = {
+  room: { id: "demo", title: "Sala de demostración", connected: true, persistent: true, myId: "host-1", isHost: true, reconnecting: false, lastSyncAt: 0 },
+  production: {
+    editScene: "1",
+    scenes: [
+      { name: "1", label: "Programa", count: 3, isProgram: true },
+      { name: "2", label: "Escena 2", count: 1, isProgram: false },
+      { name: "3", label: "Escena 3", count: 0, isProgram: false },
+      { name: "4", label: "Escena 4", count: 0, isProgram: false },
+      { name: "5", label: "Escena 5", count: 2, isProgram: false },
+      { name: "6", label: "Escena 6", count: 0, isProgram: false },
+      { name: "7", label: "Escena 7", count: 0, isProgram: false },
+      { name: "8", label: "Escena 8", count: 0, isProgram: false },
+    ],
+    stage: ["cam-main", "screen-1", "guest-ana"],
+    layout: "grid",
+    featured: "cam-main",
+    live: false,
+    recording: false,
+    muteStage: false,
+    countdown: 0,
+    clearScreen: false,
+  },
+  people: { host: { id: "host-1", name: "Anfitrión" }, peers: [], knocks: [], hands: [] },
+  media: {
+    sources: [
+      { id: "cam-main", name: "Cámara principal — Anfitrión con un nombre muy largo para probar el corte", kind: "camera", owner: "host-1", level: -12, muted: false, hidden: false, live: true, status: "active", quality: "hd", error: "" },
+      { id: "screen-1", name: "Pantalla", kind: "screen", owner: "host-1", level: -60, muted: true, hidden: false, live: true, status: "active", quality: "fhd", error: "" },
+      { id: "guest-ana", name: "Ana", kind: "camera", owner: "peer-2", level: -20, muted: false, hidden: false, live: true, status: "pending", quality: "hd", error: "" },
+      { id: "media-loop", name: "Bucle de vídeo", kind: "media", owner: "host-1", level: -30, muted: false, hidden: true, live: false, status: "error", quality: "hd", error: "studiojs.captureStopped" },
+    ],
+  },
+  broadcast: {
+    relay: { active: true, mode: "local", usage: 1.8, bitrate: 2400, ping: 24 },
+    destinations: [
+      { id: "yt", name: "YouTube", url: "rtmps://live.youtube.com/app/", key: "••••••••", active: true, status: "ok", error: "" },
+      { id: "tg", name: "Telegram", url: "https://t.me/stream", key: "••••••••", active: false, status: "idle", error: "" },
+    ],
+    restream: { startedAt: 0, bytesOut: 0, dropped: 0 },
+  },
+  branding: { color: "#7c5cff", background: "studio", logo: "", overlay: "", lowerThird: "", banners: [], title: "Directo de demostración" },
+  workspace: { scenesCollapsed: false, panelOpen: true, activeTab: "dest", stageHeight: 0, theme: "dark", lang: "es" },
+  errors: { media: "", broadcast: "", room: "", network: "" },
+  pending: {},
+  toasts: { items: [] },
+};
+```
+
+- [ ] **Step 2: Escribir los tests que fallan**
+
+```jsx
+// ui/tests/bridge.test.jsx
+import { test, expect, vi } from "vitest";
+import { createSnapshotStore } from "../src/bridge/snapshot.js";
+import { createStudioBridge } from "../src/bridge/studio-bridge.js";
+import { createFixtureEngine } from "../src/bridge/fixture-engine.js";
+import { nextStudioFixture } from "../src/fixtures/next-studio.js";
+
+test("the store keeps referential stability when nothing changed", () => {
+  const store = createSnapshotStore({ a: 1 });
+  const first = store.get();
+  store.set({});
+  expect(store.get()).toBe(first);
+  store.set({ a: 2 });
+  expect(store.get()).not.toBe(first);
+  expect(store.get().a).toBe(2);
+});
+
+test("listeners see every published snapshot and unsubscribe works", () => {
+  const store = createSnapshotStore({ a: 1 });
+  const seen = [];
+  const off = store.subscribe(() => seen.push(store.get().a));
+  store.set({ a: 2 });
+  store.set({ a: 3 });
+  off();
+  store.set({ a: 4 });
+  expect(seen).toEqual([2, 3]);
+});
+
+test("a command runs on the engine and reports the domain that failed", async () => {
+  const engine = createFixtureEngine(nextStudioFixture);
+  const bridge = createStudioBridge({ engine });
+  await bridge.command("scene.select", { name: "5" });
+  expect(bridge.getSnapshot().production.editScene).toBe("5");
+
+  engine.failNext = new Error("boom");
+  await expect(bridge.command("live.start", {})).rejects.toThrow("boom");
+  const snap = bridge.getSnapshot();
+  expect(snap.errors.broadcast).toBe("boom");
+  expect(snap.pending["live.start"]).toBeFalsy();
+});
+
+test("an unknown action is rejected without touching the snapshot", async () => {
+  const bridge = createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) });
+  const before = bridge.getSnapshot();
+  await expect(bridge.command("nope.nope", {})).rejects.toThrow("unknown action nope.nope");
+  expect(bridge.getSnapshot()).toBe(before);
+});
+
+test("the bridge mirrors engine publications into the snapshot", () => {
+  const engine = createFixtureEngine(nextStudioFixture);
+  const bridge = createStudioBridge({ engine });
+  const spy = vi.fn();
+  bridge.subscribe(spy);
+  engine.emit({ production: { ...engine.snapshot().production, live: true } });
+  expect(spy).toHaveBeenCalledTimes(1);
+  expect(bridge.getSnapshot().production.live).toBe(true);
+  bridge.destroy();
+  engine.emit({ production: { ...engine.snapshot().production, live: false } });
+  expect(spy).toHaveBeenCalledTimes(1);
+});
+```
+
+```jsx
+// ui/tests/actions.test.jsx
+import { test, expect } from "vitest";
+import { createActions, domainOf, ERROR_DOMAINS } from "../src/bridge/actions.js";
+import { createFixtureEngine } from "../src/bridge/fixture-engine.js";
+import { nextStudioFixture } from "../src/fixtures/next-studio.js";
+
+test("every documented action exists and lands in one of four domains", () => {
+  const engine = createFixtureEngine(nextStudioFixture);
+  const actions = createActions(engine);
+  const names = [
+    "scene.select", "scene.addSource", "scene.removeSource", "scene.setLayout", "scene.setFeatured",
+    "scene.rename", "scene.copyObsLink", "program.setClearScreen", "program.countdown",
+    "live.start", "live.stop", "record.toggle", "relay.retry", "relay.setProvider",
+    "dest.add", "dest.update", "dest.remove", "dest.toggle",
+    "source.mute", "source.hide", "source.remove", "source.setQuality", "device.camera", "device.screen", "device.media",
+    "room.save", "room.forget", "brand.apply", "banner.set", "chat.send", "people.admit", "people.deny", "people.mute",
+    "network.retry",
+  ];
+  for (const name of names) expect(typeof actions[name], name).toBe("function");
+  expect(ERROR_DOMAINS).toEqual(["media", "broadcast", "room", "network"]);
+  expect(domainOf("source.mute")).toBe("media");
+  expect(domainOf("live.start")).toBe("broadcast");
+  expect(domainOf("scene.select")).toBe("room");
+  expect(domainOf("network.retry")).toBe("network");
+});
+
+test("scene commands delegate to the engine, not to the DOM", async () => {
+  const engine = createFixtureEngine(nextStudioFixture);
+  const actions = createActions(engine);
+  await actions["scene.setLayout"]({ layout: "pip" }, engine);
+  expect(engine.calls.at(-1)).toEqual(["scene.setLayout", { layout: "pip" }]);
+  await actions["dest.toggle"]({ id: "yt", active: false }, engine);
+  expect(engine.calls.at(-1)[0]).toBe("dest.toggle");
+});
+```
+
+- [ ] **Step 3: Verificar que fallan**
+
+Run: `npm --prefix ui test -- tests/bridge.test.jsx ui/tests/actions.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/bridge/snapshot.js"».
+
+- [ ] **Step 4: Implementar las cuatro capas**
+
+```js
+// ui/src/bridge/snapshot.js
+export function createSnapshotStore(initial) {
+  let snapshot = structuredClone(initial);
+  const listeners = new Set();
+  return {
+    get: () => snapshot,
+    set(patch) {
+      const next = { ...snapshot };
+      let changed = false;
+      for (const [key, value] of Object.entries(patch || {})) {
+        if (snapshot[key] !== value) { next[key] = value; changed = true; }
+      }
+      if (!changed) return;
+      snapshot = next;
+      for (const listener of [...listeners]) listener();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+```
+
+```js
+// ui/src/bridge/actions.js
+export const ERROR_DOMAINS = ["media", "broadcast", "room", "network"];
+
+const DOMAIN_BY_PREFIX = [
+  [/^(source|device)\./, "media"],
+  [/^(live|record|relay|dest)\./, "broadcast"],
+  [/^network\./, "network"],
+];
+
+export function domainOf(action) {
+  for (const [pattern, domain] of DOMAIN_BY_PREFIX) if (pattern.test(action)) return domain;
+  return "room";
+}
+
+// Every command is a thin delegate: the engine owns the effect, the UI owns no
+// state of its own. Plan 2 swaps createFixtureEngine for the real WebRTC one.
+export function createActions(engine) {
+  const run = (name) => async (payload) => { await engine.apply(name, payload ?? {}); };
+  return Object.fromEntries(
+    [
+      "scene.select", "scene.addSource", "scene.removeSource", "scene.setLayout", "scene.setFeatured",
+      "scene.rename", "scene.copyObsLink", "program.setClearScreen", "program.countdown",
+      "live.start", "live.stop", "record.toggle", "relay.retry", "relay.setProvider",
+      "dest.add", "dest.update", "dest.remove", "dest.toggle",
+      "source.mute", "source.hide", "source.remove", "source.setQuality", "device.camera", "device.screen", "device.media",
+      "room.save", "room.forget", "brand.apply", "banner.set", "chat.send", "people.admit", "people.deny", "people.mute",
+      "network.retry",
+    ].map((name) => [name, run(name)]),
+  );
+}
+```
+
+```js
+// ui/src/bridge/studio-bridge.js
+import { createSnapshotStore } from "./snapshot.js";
+import { createActions, domainOf } from "./actions.js";
+
+export function createStudioBridge({ engine, actions = createActions(engine) }) {
+  const store = createSnapshotStore(engine.snapshot());
+  const stop = engine.subscribe(() => store.set(engine.snapshot()));
+
+  async function command(action, payload) {
+    const run = actions[action];
+    if (!run) throw new Error(`unknown action ${action}`);
+    const key = action;
+    store.set({ pending: { ...store.get().pending, [key]: true } });
+    try {
+      await run(payload, engine);
+      const domain = domainOf(action);
+      if (store.get().errors[domain]) store.set({ errors: { ...store.get().errors, [domain]: "" } });
+    } catch (error) {
+      const domain = domainOf(action);
+      store.set({ errors: { ...store.get().errors, [domain]: error?.message || String(error) } });
+      throw error;
+    } finally {
+      const pending = { ...store.get().pending };
+      delete pending[key];
+      store.set({ pending });
+    }
+  }
+
+  return {
+    subscribe: store.subscribe,
+    getSnapshot: store.get,
+    command,
+    destroy() {
+      stop();
+      engine.destroy?.();
+    },
+  };
+}
+```
+
+```js
+// ui/src/bridge/fixture-engine.js
+import { nextStudioFixture } from "../fixtures/next-studio.js";
+
+export function createFixtureEngine(initial = nextStudioFixture) {
+  let snapshot = structuredClone(initial);
+  const listeners = new Set();
+  const engine = {
+    calls: [],
+    failNext: null,
+    snapshot: () => snapshot,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    emit(patch) {
+      snapshot = { ...snapshot, ...patch };
+      for (const listener of [...listeners]) listener();
+    },
+    async apply(action, payload) {
+      engine.calls.push([action, payload]);
+      if (engine.failNext) {
+        const error = engine.failNext;
+        engine.failNext = null;
+        throw error;
+      }
+      const production = { ...snapshot.production };
+      if (action === "scene.select") production.editScene = payload.name;
+      if (action === "scene.setLayout") production.layout = payload.layout;
+      if (action === "scene.setFeatured") production.featured = payload.id;
+      if (action === "live.start") production.live = true;
+      if (action === "live.stop") production.live = false;
+      if (action === "record.toggle") production.recording = !production.recording;
+      engine.emit({ production });
+    },
+    destroy() {
+      listeners.clear();
+    },
+  };
+  return engine;
+}
+```
+
+- [ ] **Step 5: Verificar y commit**
+
+Run: `npm --prefix ui test -- tests/bridge.test.jsx ui/tests/actions.test.jsx`
+Expected: 8 tests PASS.
+
+```bash
+git add ui/src/bridge ui/src/fixtures ui/tests/bridge.test.jsx ui/tests/actions.test.jsx
+git commit -m "feat(ui): define the bridge snapshot contract with a fixture engine"
+```
+
+---
+
+### Task 6: Primitivas de texto y estado sin desbordamiento
+
+**Files:**
+- Create: `ui/src/components/primitives/TruncatedText.jsx` + `.module.css`, `StatusPill.jsx` + `.module.css`, `IconButton.jsx` + `.module.css`, `CommandButton.jsx` + `.module.css`, `ui/src/hooks/useOverflow.js`
+- Test: `ui/tests/primitives-text.test.jsx`
+
+**Interfaces:**
+- Consumes: tokens de la Task 3.
+- Produces:
+  - `<TruncatedText as="span" title={string} className?>{children}</TruncatedText>` — añade `title` solo cuando detecta corte real; `data-truncated="true|false"`.
+  - `<StatusPill tone="ok|warn|err|idle|live" label={string} dot?: boolean>` — `role="status"`, texto traducido obligatorio por caller.
+  - `<IconButton icon={string} label={string} onClick size?>` — lanza si falta `label`.
+  - `<CommandButton status="idle|pending|active|error" icon={string} label={string} onClick title? error? collapsible? primary?>` — en `pending` queda `disabled` + `aria-busy`; en `error` publica `role="status"` con `error`; si `collapsible`, conserva el icono cuando la etiqueta se oculta por CSS.
+
+- [ ] **Step 1: Escribir el test que falla**
+
+```jsx
+// ui/tests/primitives-text.test.jsx
+import { test, expect, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { TruncatedText } from "../src/components/primitives/TruncatedText.jsx";
+import { StatusPill } from "../src/components/primitives/StatusPill.jsx";
+import { IconButton } from "../src/components/primitives/IconButton.jsx";
+import { CommandButton } from "../src/components/primitives/CommandButton.jsx";
+
+afterEach(cleanup);
+
+test("TruncatedText exposes the full string only when it really clipped", () => {
+  render(<TruncatedText className="clip">un nombre muy larguísimo</TruncatedText>);
+  const node = screen.getByText("un nombre muy larguísimo");
+  // jsdom reports zero metrics, so the hook must treat "no overflow" as false.
+  expect(node).toHaveAttribute("data-truncated", "false");
+  expect(node).not.toHaveAttribute("title");
+});
+
+test("StatusPill announces its tone and never overflows the box", () => {
+  render(<StatusPill tone="live" label="En directo" dot />);
+  const pill = screen.getByRole("status");
+  expect(pill).toHaveTextContent("En directo");
+  expect(pill.className).toContain("live");
+});
+
+test("IconButton cannot exist without an accessible name", () => {
+  expect(() => render(<IconButton icon="⚙" onClick={() => {}} />)).toThrow(/accessible name/);
+});
+
+test("CommandButton walks idle → pending → error and keeps its icon", async () => {
+  const onClick = () => {};
+  const { rerender } = render(<CommandButton status="idle" icon="▲" label="Transmitir" onClick={onClick} />);
+  expect(screen.getByRole("button", { name: "Transmitir" })).toHaveAttribute("aria-pressed", "false");
+
+  rerender(<CommandButton status="pending" icon="▲" label="Transmitir" onClick={onClick} />);
+  expect(screen.getByRole("button", { name: "Transmitir" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Transmitir" })).toHaveAttribute("aria-busy", "true");
+
+  rerender(<CommandButton status="error" icon="▲" label="Transmitir" onClick={onClick} error="no fue" collapsible />);
+  const button = screen.getByRole("button", { name: "Transmitir" });
+  expect(button).toHaveAttribute("data-status", "error");
+  expect(button.querySelector("[data-icon]").textContent).toBe("▲");
+  await userEvent.click(button);
+  expect(screen.getByText("no fue")).toBeInTheDocument();
+});
+
+test("the primary command reserves its own width", () => {
+  render(<CommandButton status="active" icon="▲" label="Transmitir" onClick={() => {}} primary />);
+  expect(screen.getByRole("button", { name: "Transmitir" })).toHaveClass("primary");
+});
+```
+
+- [ ] **Step 2: Verificar que falla**
+
+Run: `npm --prefix ui test -- tests/primitives-text.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/components/primitives/TruncatedText.jsx"».
+
+- [ ] **Step 3: Implementar las primitivas**
+
+```js
+// ui/src/hooks/useOverflow.js
+import { useCallback, useEffect, useRef, useState } from "react";
+
+// A single ResizeObserver per node: "clipped" is measured, never guessed, so a
+// tooltip only appears when the text really lost characters.
+export function useOverflow() {
+  const ref = useRef(null);
+  const [clipped, setClipped] = useState(false);
+  const measure = useCallback(() => {
+    const node = ref.current;
+    if (!node) return;
+    setClipped(node.scrollWidth - node.clientWidth > 1);
+  }, []);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof ResizeObserver === "undefined") {
+      measure();
+      return;
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    measure();
+    return () => observer.disconnect();
+  }, [measure]);
+  return [ref, clipped];
+}
+```
+
+```jsx
+// ui/src/components/primitives/TruncatedText.jsx
+import styles from "./TruncatedText.module.css";
+import { useOverflow } from "../../hooks/useOverflow.js";
+
+export function TruncatedText({ as: Tag = "span", title, className = "", children, ...rest }) {
+  const [ref, clipped] = useOverflow();
+  const text = typeof children === "string" ? children : "";
+  return (
+    <Tag
+      ref={ref}
+      className={`${styles.clip} ${className}`}
+      data-truncated={String(clipped)}
+      title={clipped ? (title ?? text) : title}
+      {...rest}
+    >
+      {children}
+    </Tag>
+  );
+}
+```
+
+```css
+/* ui/src/components/primitives/TruncatedText.module.css */
+.clip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+```
+
+```jsx
+// ui/src/components/primitives/StatusPill.jsx
+import styles from "./StatusPill.module.css";
+
+export function StatusPill({ tone = "idle", label, dot = false, className = "" }) {
+  return (
+    <span role="status" className={`${styles.pill} ${styles[tone]} ${className}`} data-tone={tone}>
+      {dot ? <i className={styles.dot} aria-hidden="true" /> : null}
+      <span className={styles.text}>{label}</span>
+    </span>
+  );
+}
+```
+
+```css
+/* ui/src/components/primitives/StatusPill.module.css */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--swr-sp-1);
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px var(--swr-sp-2);
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-pill);
+  background: var(--swr-bg-glass);
+  color: var(--swr-text-dim);
+  font-size: var(--swr-text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { inline-size: 8px; block-size: 8px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.ok { color: var(--swr-ok); border-color: var(--swr-line-strong); }
+.err { color: var(--swr-err); }
+.warn { color: var(--swr-warn); }
+.idle { color: var(--swr-text-faint); }
+.live { color: var(--swr-live); border-color: var(--swr-live); }
+.live .dot { box-shadow: 0 0 12px 2px rgba(255, 59, 82, 0.45); }
+.live .dot { animation: none; }
+```
+
+```jsx
+// ui/src/components/primitives/IconButton.jsx
+import styles from "./IconButton.module.css";
+
+export function IconButton({ icon, label, onClick, size = "sm", className = "", ...rest }) {
+  if (!label) throw new Error("IconButton needs an accessible name (label)");
+  return (
+    <button type="button" className={`${styles.button} ${styles[size]} ${className}`} onClick={onClick} aria-label={label} title={label} {...rest}>
+      <span data-icon aria-hidden="true">{icon}</span>
+    </button>
+  );
+}
+```
+
+```css
+/* ui/src/components/primitives/IconButton.module.css */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-sm);
+  background: var(--swr-bg-panel);
+  color: var(--swr-text-dim);
+  transition: color var(--swr-fast) var(--swr-ease), border-color var(--swr-fast) var(--swr-ease), background var(--swr-fast) var(--swr-ease);
+}
+.button:hover { color: var(--swr-text); border-color: var(--swr-line-strong); }
+.button:focus-visible { outline: 2px solid var(--swr-brand); outline-offset: 1px; }
+.sm { inline-size: 30px; block-size: 30px; }
+.md { inline-size: 36px; block-size: 36px; }
+```
+
+```jsx
+// ui/src/components/primitives/CommandButton.jsx
+import styles from "./CommandButton.module.css";
+
+export function CommandButton({
+  status = "idle", icon, label, onClick, title, error = "",
+  collapsible = false, primary = false, className = "", ...rest
+}) {
+  const pending = status === "pending";
+  return (
+    <span className={`${styles.slot} ${collapsible ? styles.collapsible : ""} ${className}`}>
+      <button
+        type="button"
+        className={`${styles.button} ${styles[status]} ${primary ? styles.primary : ""}`}
+        onClick={onClick}
+        disabled={pending}
+        aria-busy={pending}
+        aria-pressed={status === "active" ? "true" : "false"}
+        aria-disabled={status === "error" ? "false" : undefined}
+        title={title ?? label}
+        data-status={status}
+        {...rest}
+      >
+        <span data-icon aria-hidden="true">{icon}</span>
+        <span className={styles.label}>{label}</span>
+      </button>
+      {error ? <span role="status" className={styles.error}>{error}</span> : null}
+    </span>
+  );
+}
+```
+
+```css
+/* ui/src/components/primitives/CommandButton.module.css */
+.slot { display: inline-flex; flex-direction: column; gap: 2px; min-width: 0; max-width: 100%; }
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--swr-sp-2);
+  min-width: 0;
+  padding: var(--swr-sp-2) var(--swr-sp-3);
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-md);
+  background: linear-gradient(180deg, var(--swr-bg-panel), var(--swr-bg-raise));
+  color: var(--swr-text);
+  font-size: var(--swr-text-sm);
+  cursor: pointer;
+  transition: border-color var(--swr-fast) var(--swr-ease), box-shadow var(--swr-fast) var(--swr-ease), transform var(--swr-fast) var(--swr-ease);
+}
+.button:hover { border-color: var(--swr-line-strong); }
+.button:focus-visible { outline: 2px solid var(--swr-brand); outline-offset: 1px; }
+.button:active { transform: translateY(1px); }
+.button[disabled] { opacity: 0.6; cursor: progress; }
+.label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-icon] { flex: 0 0 auto; }
+.active { border-color: var(--swr-brand); box-shadow: 0 0 0 1px var(--swr-brand-soft) inset; }
+.error { border-color: var(--swr-err); color: var(--swr-err); }
+.pending { color: var(--swr-text-dim); }
+.primary {
+  flex: 0 0 auto;
+  max-width: none;
+  border-color: var(--swr-brand);
+  background: linear-gradient(180deg, var(--swr-brand), #4f2fd6);
+  color: #fff;
+  font-weight: 650;
+}
+.live { border-color: var(--swr-live); color: var(--swr-live); }
+/* Below the tablet line a collapsible action keeps only its glyph. */
+@media (max-width: 1100px) {
+  .collapsible .label { display: none; }
+  .collapsible .button { padding: var(--swr-sp-2); }
+}
+```
+
+- [ ] **Step 4: Verificar**
+
+Run: `npm --prefix ui test -- tests/primitives-text.test.jsx && node scripts/build-ui.mjs`
+Expected: 5 tests PASS; el build sigue escribiendo solo `js/` y `css/`; el test de tokens de la Task 3
+sigue en verde (ningún `.module.css` usa hex fuera de `tokens.css` — el `rgba(255,59,82,.45)` de
+`StatusPill` es la única excepción permitida porque `--swr-live` no admite alpha; si el test de tokens
+lo detecta, sustituirlo por `color-mix(in srgb, var(--swr-live) 45%, transparent)`).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ui/src/hooks ui/src/components/primitives ui/tests/primitives-text.test.jsx
+git commit -m "feat(ui): add overflow-safe text and command primitives"
+```
+
+---
+
+### Task 7: Primitivas de contenedor, pestañas y diálogo
+
+**Files:**
+- Create: `ui/src/components/primitives/Switch.jsx` + `.module.css`, `PanelTabs.jsx` + `.module.css`, `OverflowMenu.jsx` + `.module.css`, `Field.jsx` + `.module.css`, `StudioDialog.jsx` + `.module.css`
+- Test: `ui/tests/primitives-container.test.jsx`
+
+**Interfaces:**
+- Consumes: `IconButton` (Task 6) y tokens (Task 3).
+- Produces:
+  - `<Switch label checked onChange disabled?>` — `role="switch"` + `aria-checked`.
+  - `<PanelTabs tabs={[{id,label,badge?}]} active onSelect>` — `role="tablist"`, cada tab `role="tab"`
+    con `aria-selected`, navegación por flechas, etiqueta oculta al colapsar a icono cuando `icon` existe.
+  - `<OverflowMenu label items={[{id,label,onClick,danger?}]}>` — botón `⋯` accesible, cierra con Escape
+    y con clic fuera, `aria-expanded`.
+  - `<Field label inputId error help>` — etiqueta ligada por `htmlFor`, error con `role="status"`,
+    `aria-describedby` cuando hay ayuda.
+  - `<StudioDialog title onClose children footer?>` — `<dialog>` nativo con `showModal()` en el mount,
+    cierre por Escape que llama `onClose`, foco inicial en el primer control, `aria-labelledby`.
+
+- [ ] **Step 1: Escribir el test que falla**
+
+```jsx
+// ui/tests/primitives-container.test.jsx
+import { test, expect, afterEach } from "vitest";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Switch } from "../src/components/primitives/Switch.jsx";
+import { PanelTabs } from "../src/components/primitives/PanelTabs.jsx";
+import { OverflowMenu } from "../src/components/primitives/OverflowMenu.jsx";
+import { Field } from "../src/components/primitives/Field.jsx";
+import { StudioDialog } from "../src/components/primitives/StudioDialog.jsx";
+
+afterEach(cleanup);
+
+const TABS = [
+  { id: "chat", label: "Chat", icon: "💬" },
+  { id: "people", label: "Gente", icon: "👥", badge: 3 },
+  { id: "dest", label: "Destinos", icon: "📡" },
+];
+
+test("Switch is a real switch with its label as the name", () => {
+  render(<Switch label="Ocultar escena" checked onChange={() => {}} />);
+  const node = screen.getByRole("switch", { name: "Ocultar escena" });
+  expect(node).toHaveAttribute("aria-checked", "true");
+});
+
+test("PanelTabs exposes selection and arrow navigation", () => {
+  const onSelect = () => {};
+  render(<PanelTabs tabs={TABS} active="people" onSelect={onSelect} />);
+  const tabs = screen.getAllByRole("tab");
+  expect(tabs).toHaveLength(3);
+  expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+  expect(tabs[1]).toHaveTextContent("3");
+  fireEvent.keyDown(tabs[1], { key: "ArrowRight" });
+  expect(tabs[2]).toHaveFocus();
+});
+
+test("PanelTabs keeps an accessible name when the label collapses", () => {
+  render(<PanelTabs tabs={TABS} active="chat" onSelect={() => {}} collapsed />);
+  expect(screen.getByRole("tab", { name: /Gente/ })).toBeInTheDocument();
+});
+
+test("OverflowMenu groups the actions that no longer fit", async () => {
+  const onClick = () => {};
+  render(<OverflowMenu label="Más acciones" items={[{ id: "kick", label: "Expulsar", onClick, danger: true }]} />);
+  const trigger = screen.getByRole("button", { name: "Más acciones" });
+  expect(trigger).toHaveAttribute("aria-expanded", "false");
+  await userEvent.click(trigger);
+  expect(trigger).toHaveAttribute("aria-expanded", "true");
+  const item = screen.getByRole("menuitem", { name: "Expulsar" });
+  await userEvent.click(item);
+  expect(screen.queryByRole("menuitem")).toBeNull();
+});
+
+test("OverflowMenu closes on Escape", async () => {
+  render(<OverflowMenu label="Más" items={[{ id: "a", label: "Uno", onClick: () => {} }]} />);
+  await userEvent.click(screen.getByRole("button", { name: "Más" }));
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  expect(screen.queryByRole("menu")).toBeNull();
+});
+
+test("Field wires label, error and help to the control", () => {
+  render(
+    <div>
+      <Field label="URL del destino" inputId="destURL" error="URL no permitida" help="rtmp, rtmps o srt">
+        <input id="destURL" />
+      </Field>
+    </div>,
+  );
+  expect(screen.getByLabelText("URL del destino")).toHaveAttribute("aria-describedby");
+  expect(screen.getByRole("status")).toHaveTextContent("URL no permitida");
+});
+
+test("StudioDialog opens modally, is labelled and closes on Escape", async () => {
+  const onClose = () => {};
+  render(
+    <StudioDialog title="Ajustes de fuente" onClose={onClose}>
+      <button type="button">Guardar</button>
+    </StudioDialog>,
+  );
+  const dialog = screen.getByRole("dialog");
+  expect(dialog).toHaveAttribute("aria-labelledby");
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+```
+
+- [ ] **Step 2: Verificar que falla**
+
+Run: `npm --prefix ui test -- tests/primitives-container.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/components/primitives/Switch.jsx"».
+
+- [ ] **Step 3: Implementar**
+
+```jsx
+// ui/src/components/primitives/Switch.jsx
+import styles from "./Switch.module.css";
+
+export function Switch({ label, checked, onChange, disabled = false, className = "" }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={String(Boolean(checked))}
+      aria-label={label}
+      disabled={disabled}
+      className={`${styles.switch} ${checked ? styles.on : ""} ${className}`}
+      onClick={() => onChange?.(!checked)}
+    >
+      <span className={styles.knob} aria-hidden="true" />
+    </button>
+  );
+}
+```
+
+```css
+/* ui/src/components/primitives/Switch.module.css */
+.switch {
+  flex: 0 0 auto;
+  inline-size: 40px;
+  block-size: 22px;
+  padding: 2px;
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-pill);
+  background: var(--swr-bg-raise);
+  cursor: pointer;
+  transition: border-color var(--swr-base) var(--swr-ease), background var(--swr-base) var(--swr-ease);
+}
+.on { border-color: var(--swr-brand); background: var(--swr-brand-soft); }
+.knob {
+  display: block;
+  inline-size: 16px;
+  block-size: 16px;
+  border-radius: 50%;
+  background: var(--swr-text-dim);
+  transition: transform var(--swr-base) var(--swr-ease), background var(--swr-base) var(--swr-ease);
+}
+.on .knob { transform: translateX(18px); background: var(--swr-brand); }
+.switch:focus-visible { outline: 2px solid var(--swr-brand); outline-offset: 2px; }
+.switch:disabled { opacity: 0.5; cursor: not-allowed; }
+```
+
+```jsx
+// ui/src/components/primitives/PanelTabs.jsx
+import { useRef } from "react";
+import styles from "./PanelTabs.module.css";
+
+export function PanelTabs({ tabs, active, onSelect, collapsed = false, ariaLabel = "Paneles del estudio", className = "" }) {
+  const refs = useRef(new Map());
+  const move = (index, delta) => {
+    const next = (index + delta + tabs.length) % tabs.length;
+    refs.current.get(tabs[next].id)?.focus();
+  };
+  return (
+    <div role="tablist" aria-label={ariaLabel} className={`${styles.tabs} ${collapsed ? styles.collapsed : ""} ${className}`}>
+      {tabs.map((tab, index) => (
+        <button
+          key={tab.id}
+          role="tab"
+          type="button"
+          id={`tab-${tab.id}`}
+          aria-selected={String(tab.id === active)}
+          aria-label={`${tab.icon ?? ""} ${tab.label}`.trim()}
+          ref={(node) => { if (node) refs.current.set(tab.id, node); else refs.current.delete(tab.id); }}
+          className={styles.tab}
+          onClick={() => onSelect(tab.id)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowRight") { event.preventDefault(); move(index, 1); }
+            if (event.key === "ArrowLeft") { event.preventDefault(); move(index, -1); }
+          }}
+        >
+          {tab.icon ? <span data-icon aria-hidden="true">{tab.icon}</span> : null}
+          <span className={styles.label}>{tab.label}</span>
+          {tab.badge ? <span className={styles.badge}>{tab.badge}</span> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+```
+
+```css
+/* ui/src/components/primitives/PanelTabs.module.css */
+.tabs {
+  display: flex;
+  gap: var(--swr-sp-1);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding: var(--swr-sp-1);
+  border-bottom: 1px solid var(--swr-line);
+  background: var(--swr-bg-raise);
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--swr-sp-1);
+  min-width: 0;
+  padding: var(--swr-sp-1) var(--swr-sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--swr-r-sm);
+  background: transparent;
+  color: var(--swr-text-dim);
+  font-size: var(--swr-text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--swr-fast) var(--swr-ease), background var(--swr-fast) var(--swr-ease);
+}
+.tab:hover { color: var(--swr-text); }
+.tab[aria-selected="true"] { color: var(--swr-text); background: var(--swr-brand-soft); border-color: var(--swr-line-strong); }
+.tab:focus-visible { outline: 2px solid var(--swr-brand); outline-offset: 1px; }
+.label { overflow: hidden; text-overflow: ellipsis; }
+.badge { flex: 0 0 auto; min-width: 16px; padding: 0 4px; border-radius: var(--swr-r-pill); background: var(--swr-brand); color: #fff; font-size: var(--swr-text-2xs); text-align: center; }
+@media (max-width: 820px) {
+  .collapsed .label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
+}
+```
+
+```jsx
+// ui/src/components/primitives/OverflowMenu.jsx
+import { useEffect, useRef, useState } from "react";
+import styles from "./OverflowMenu.module.css";
+
+export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", className = "", ...rest }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef(null);
+  const trigger = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event) => { if (!root.current?.contains(event.target)) setOpen(false); };
+    const onKey = (event) => {
+      if (event.key === "Escape") { setOpen(false); trigger.current?.focus(); }
+    };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return (
+    <span ref={root} className={`${styles.slot} ${className}`}>
+      <button
+        type="button"
+        ref={trigger}
+        className={styles.trigger}
+        aria-expanded={String(open)}
+        aria-haspopup="menu"
+        aria-label={label}
+        title={label}
+        onClick={() => setOpen((value) => !value)}
+        {...rest}
+      >
+        <span data-icon aria-hidden="true">{icon}</span>
+      </button>
+      {open ? (
+        <span role="menu" className={styles.menu}>
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="menuitem"
+              className={item.danger ? `${styles.item} ${styles.danger}` : styles.item}
+              onClick={() => { setOpen(false); item.onClick?.(); }}
+            >
+              {item.icon ? <span data-icon aria-hidden="true">{item.icon}</span> : null}
+              <span className={styles.itemLabel}>{item.label}</span>
+            </button>
+          ))}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+```
+
+```css
+/* ui/src/components/primitives/OverflowMenu.module.css */
+.slot { position: relative; display: inline-flex; flex: 0 0 auto; }
+.trigger {
+  inline-size: 30px;
+  block-size: 30px;
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-sm);
+  background: var(--swr-bg-panel);
+  color: var(--swr-text-dim);
+  cursor: pointer;
+}
+.trigger:hover { color: var(--swr-text); border-color: var(--swr-line-strong); }
+.menu {
+  position: absolute;
+  inset-block-start: calc(100% + var(--swr-sp-1));
+  inset-inline-end: 0;
+  z-index: var(--swr-z-panel);
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 168px;
+  max-inline-size: 240px;
+  padding: var(--swr-sp-1);
+  border: 1px solid var(--swr-line-strong);
+  border-radius: var(--swr-r-md);
+  background: var(--swr-bg-glass);
+  backdrop-filter: blur(var(--swr-blur));
+  box-shadow: var(--swr-shadow-2);
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--swr-sp-2);
+  min-width: 0;
+  padding: var(--swr-sp-2);
+  border: 0;
+  border-radius: var(--swr-r-sm);
+  background: transparent;
+  color: var(--swr-text);
+  font: inherit;
+  font-size: var(--swr-text-sm);
+  text-align: start;
+  cursor: pointer;
+}
+.item:hover { background: var(--swr-brand-soft); }
+.itemLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.danger { color: var(--swr-err); }
+```
+
+```jsx
+// ui/src/components/primitives/Field.jsx
+import styles from "./Field.module.css";
+
+export function Field({ label, inputId, error = "", help = "", children, className = "" }) {
+  const helpId = `${inputId}-help`;
+  return (
+    <div className={`${styles.field} ${className}`}>
+      <label className={styles.label} htmlFor={inputId}>{label}</label>
+      <div className={styles.control}>{children}</div>
+      {error ? <span role="status" className={styles.error}>{error}</span> : null}
+      {!error && help ? (
+        <span id={helpId} className={styles.help}>{help}</span>
+      ) : null}
+    </div>
+  );
+}
+```
+
+```css
+/* ui/src/components/primitives/Field.module.css */
+.field { display: flex; flex-direction: column; gap: var(--swr-sp-1); min-width: 0; }
+.label { color: var(--swr-text-dim); font-size: var(--swr-text-xs); letter-spacing: 0.03em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.control { min-width: 0; }
+.error { color: var(--swr-err); font-size: var(--swr-text-xs); overflow-wrap: anywhere; }
+.help { color: var(--swr-text-faint); font-size: var(--swr-text-2xs); overflow-wrap: anywhere; }
+```
+
+```jsx
+// ui/src/components/primitives/StudioDialog.jsx
+import { useEffect, useRef } from "react";
+import styles from "./StudioDialog.module.css";
+
+export function StudioDialog({ title, onClose, children, footer = null }) {
+  const ref = useRef(null);
+  const titleId = useRef(`dialog-${Math.random().toString(36).slice(2, 8)}`).current;
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    if (!node.open) node.showModal();
+    node.querySelector("input, select, textarea, button:not([data-close])")?.focus({ preventScroll: true });
+    const cancel = (event) => { event.preventDefault(); onClose(); };
+    node.addEventListener("cancel", cancel);
+    return () => node.removeEventListener("cancel", cancel);
+  }, [onClose]);
+  return (
+    <dialog ref={ref} className={styles.dialog} aria-labelledby={titleId} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
+      <header className={styles.header}>
+        <h2 id={titleId} className={styles.title}>{title}</h2>
+        <button type="button" data-close className={styles.close} aria-label="Cerrar" onClick={onClose}>✕</button>
+      </header>
+      <div className={styles.body}>{children}</div>
+      {footer ? <footer className={styles.footer}>{footer}</footer> : null}
+    </dialog>
+  );
+}
+```
+
+```css
+/* ui/src/components/primitives/StudioDialog.module.css */
+.dialog {
+  inline-size: min(560px, calc(100vw - 2 * var(--swr-sp-4)));
+  max-block-size: calc(100vh - 2 * var(--swr-sp-4));
+  padding: 0;
+  border: 1px solid var(--swr-line-strong);
+  border-radius: var(--swr-r-md);
+  background: var(--swr-bg-panel);
+  color: var(--swr-text);
+  box-shadow: var(--swr-shadow-2);
+}
+.dialog::backdrop { background: rgba(5, 7, 13, 0.7); backdrop-filter: blur(3px); }
+.header { display: flex; align-items: center; gap: var(--swr-sp-2); padding: var(--swr-sp-3) var(--swr-sp-4); border-bottom: 1px solid var(--swr-line); }
+.title { flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--swr-text-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.close { flex: 0 0 auto; border: 0; background: transparent; color: var(--swr-text-dim); font-size: var(--swr-text-md); cursor: pointer; }
+.body { padding: var(--swr-sp-4); overflow: auto; overscroll-behavior: contain; }
+.footer { display: flex; justify-content: flex-end; gap: var(--swr-sp-2); padding: var(--swr-sp-3) var(--swr-sp-4); border-top: 1px solid var(--swr-line); }
+```
+
+- [ ] **Step 4: Verificar**
+
+Run: `npm --prefix ui test -- tests/primitives-container.test.jsx && npm --prefix ui test`
+Expected: 7 tests PASS en el fichero nuevo y el suite completo en verde (19 tests acumulados).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ui/src/components/primitives ui/tests/primitives-container.test.jsx
+git commit -m "feat(ui): add tabs, switch, overflow menu, field and dialog primitives"
+```
+
+---
+
+### Task 8: Hooks del bridge, workspace local y medidor de audio
+
+**Files:**
+- Create: `ui/src/hooks/useStudioSnapshot.js`, `ui/src/hooks/useWorkspace.js`, `ui/src/hooks/useStageHeight.js`, `ui/src/hooks/useReducedMotion.js`, `ui/src/lib/throttle.js`, `ui/src/components/primitives/LevelMeter.jsx`, `ui/src/components/primitives/LevelMeter.module.css`
+- Test: `ui/tests/hooks.test.jsx`, `ui/tests/meter.test.jsx`
+
+**Interfaces:**
+- Consumes: `createStudioBridge` (Task 5) y `i18n.js` del repo a través de `ui/src/i18n.js`.
+- Produces:
+  - `useStudioSnapshot(bridge) → snapshot` — re-renderiza además cuando cambia `swr:lang`.
+  - `useWorkspace() → [workspace, updateWorkspace(patch)]` con `workspace = { scenesCollapsed, panelOpen, activeTab }` persistido en `localStorage["swr.workspace"]` (misma clave y mismos significados que `web/js/workspace.js`).
+  - `useStageHeight(ref) → number` — escribe `--stage-height` en el elemento observado, igual que el `ResizeObserver` legacy.
+  - `useReducedMotion() → boolean`.
+  - `throttle(fn, { hz = 10, now, later }) → { run(value), cancel() }` con llamada final garantizada.
+  - `<LevelMeter value={0..1} label />` — `role="meter"`, `aria-valuenow` en porcentaje, `--swr-level` como
+    longitud de la barra, `data-reduced="true"` cuando no hay animación.
+  - `ui/src/i18n.js`: re-exporta `t`, `installI18n`, `onLangChange`, `setLang`, `LANGS`, `LANG_LABELS` desde `../../web/js/i18n.js`, única vía para leer textos.
+
+- [ ] **Step 1: Escribir el re-export y los tests que fallan**
+
+```js
+// ui/src/i18n.js
+// The dictionaries stay in the repo's own module: React must not own a second
+// copy of the strings, so this file only re-exports the engine's translator.
+export { t, installI18n, onLangChange, setLang, LANGS, LANG_LABELS } from "../../web/js/i18n.js";
+```
+
+```jsx
+// ui/tests/hooks.test.jsx
+import { test, expect, vi, afterEach } from "vitest";
+import { renderHook, act, cleanup } from "@testing-library/react";
+import { useWorkspace } from "../src/hooks/useWorkspace.js";
+import { useStudioSnapshot } from "../src/hooks/useStudioSnapshot.js";
+import { useReducedMotion } from "../src/hooks/useReducedMotion.js";
+import { createStudioBridge } from "../src/bridge/studio-bridge.js";
+import { createFixtureEngine } from "../src/bridge/fixture-engine.js";
+import { nextStudioFixture } from "../src/fixtures/next-studio.js";
+
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
+
+test("workspace persists the same key and shape as the legacy chrome", () => {
+  const { result } = renderHook(() => useWorkspace());
+  expect(result.current[0]).toEqual({ scenesCollapsed: false, panelOpen: true, activeTab: "chat" });
+  act(() => result.current[1]({ scenesCollapsed: true }));
+  expect(JSON.parse(localStorage.getItem("swr.workspace"))).toEqual({
+    scenesCollapsed: true, panelOpen: true, activeTab: "chat",
+  });
+});
+
+test("an unreadable workspace falls back to the defaults", () => {
+  localStorage.setItem("swr.workspace", "{broken");
+  const { result } = renderHook(() => useWorkspace());
+  expect(result.current[0].scenesCollapsed).toBe(false);
+});
+
+test("the snapshot hook re-renders on bridge and language publications", () => {
+  const engine = createFixtureEngine(nextStudioFixture);
+  const bridge = createStudioBridge({ engine });
+  const { result } = renderHook(() => useStudioSnapshot(bridge));
+  expect(result.current.production.live).toBe(false);
+  act(() => {
+    engine.emit({ production: { ...engine.snapshot().production, live: true } });
+  });
+  expect(result.current.production.live).toBe(true);
+  act(() => document.dispatchEvent(new CustomEvent("swr:lang", { detail: { lang: "en" } })));
+  expect(result.current).toBeTruthy();
+});
+
+test("useReducedMotion follows the media query", () => {
+  const match = vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true, addEventListener() {}, removeEventListener() {} });
+  const { result } = renderHook(() => useReducedMotion());
+  expect(result.current).toBe(true);
+  match.mockReturnValue({ matches: false, addEventListener() {}, removeEventListener() {} });
+  const { result: second } = renderHook(() => useReducedMotion());
+  expect(second.current).toBe(false);
+});
+```
+
+```jsx
+// ui/tests/meter.test.jsx
+import { test, expect, vi } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+import { throttle } from "../src/lib/throttle.js";
+import { LevelMeter } from "../src/components/primitives/LevelMeter.jsx";
+
+afterEach(() => { cleanup(); vi.useRealTimers(); });
+
+test("the meter throttles to ten updates per second and keeps the last value", () => {
+  vi.useFakeTimers();
+  const seen = [];
+  const meter = throttle((value) => seen.push(value), { hz: 10, later: (fn) => setTimeout(fn, 30) });
+  for (let i = 0; i < 50; i += 1) meter.run(i);
+  expect(seen.length).toBeLessThanOrEqual(2);
+  meter.run(999);
+  vi.advanceTimersByTime(120);
+  expect(seen.at(-1)).toBe(999);
+});
+
+test("cancel drops a pending trailing value", () => {
+  vi.useFakeTimers();
+  const seen = [];
+  const meter = throttle((value) => seen.push(value), { hz: 10, later: (fn) => setTimeout(fn, 30) });
+  meter.run(1);
+  meter.cancel();
+  vi.advanceTimersByTime(200);
+  expect(seen.filter((value) => value !== 1)).toEqual([]);
+});
+
+test("LevelMeter reports its value accessibly and honours reduced motion", () => {
+  render(<LevelMeter value={0.72} label="Nivel de Cámara principal" />);
+  const meter = screen.getByRole("meter", { name: "Nivel de Cámara principal" });
+  expect(meter).toHaveAttribute("aria-valuenow", "72");
+  expect(meter).toHaveAttribute("aria-valuemin", "0");
+  expect(meter.style.getPropertyValue("--swr-level")).toBe("72%");
+  cleanup();
+  render(<LevelMeter value={0.4} label="Nivel" reduced />);
+  expect(screen.getByRole("meter")).toHaveAttribute("data-reduced", "true");
+});
+```
+
+- [ ] **Step 2: Verificar que fallan**
+
+Run: `npm --prefix ui test -- tests/hooks.test.jsx ui/tests/meter.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/hooks/useWorkspace.js"».
+
+- [ ] **Step 3: Implementar los hooks y el medidor**
+
+```js
+// ui/src/hooks/useWorkspace.js
+import { useCallback, useState } from "react";
+
+const KEY = "swr.workspace";
+const DEFAULTS = { scenesCollapsed: false, panelOpen: true, activeTab: "chat" };
+
+function read() {
+  try { return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(KEY) || "{}") || {}) }; }
+  catch { return { ...DEFAULTS }; }
+}
+
+export function useWorkspace() {
+  const [workspace, setWorkspace] = useState(read);
+  const update = useCallback((patch) => {
+    setWorkspace((current) => {
+      const next = { ...current, ...patch };
+      try { localStorage.setItem(KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+  return [workspace, update];
+}
+```
+
+```js
+// ui/src/hooks/useStudioSnapshot.js
+import { useCallback, useSyncExternalStore } from "react";
+import { onLangChange } from "../i18n.js";
+
+// Labels live in the engine's dictionaries, so a language switch is just
+// another store publication for React.
+export function useStudioSnapshot(bridge) {
+  const subscribe = useCallback((onChange) => {
+    const offBridge = bridge.subscribe(onChange);
+    const offLang = onLangChange(onChange);
+    return () => { offBridge(); offLang(); };
+  }, [bridge]);
+  return useSyncExternalStore(subscribe, bridge.getSnapshot, bridge.getSnapshot);
+}
+```
+
+```js
+// ui/src/hooks/useStageHeight.js
+import { useEffect, useState } from "react";
+
+export function useStageHeight(ref) {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const next = Math.round(entry.contentRect.height);
+      if (next > 0) { node.style.setProperty("--stage-height", `${next}px`); setHeight(next); }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [ref]);
+  return height;
+}
+```
+
+```js
+// ui/src/hooks/useReducedMotion.js
+import { useEffect, useState } from "react";
+
+const QUERY = "(prefers-reduced-motion: reduce)";
+
+export function useReducedMotion() {
+  const [reduced, setReduced] = useState(() => window.matchMedia(QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(QUERY);
+    const onChange = (event) => setReduced(event.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return reduced;
+}
+```
+
+```js
+// ui/src/lib/throttle.js
+// Meters and bitrate readouts must not re-render the tree 60 times a second;
+// the trailing value is kept so the bar never freezes on an old peak.
+export function throttle(fn, { hz = 10, now = () => Date.now(), later = (callback) => setTimeout(callback, 1000 / hz) } = {}) {
+  const interval = 1000 / hz;
+  let last = 0, timer = null, pending;
+  const flush = () => {
+    timer = null;
+    if (pending === undefined) return;
+    const value = pending;
+    pending = undefined;
+    last = now();
+    fn(value);
+  };
+  return {
+    run(value) {
+      if (now() - last >= interval) { last = now(); fn(value); return; }
+      pending = value;
+      if (!timer) timer = later(flush);
+    },
+    cancel() { pending = undefined; },
+  };
+}
+```
+
+```jsx
+// ui/src/components/primitives/LevelMeter.jsx
+import styles from "./LevelMeter.module.css";
+
+export function LevelMeter({ value = 0, label, reduced = false, className = "" }) {
+  const percent = Math.round(Math.min(1, Math.max(0, Number(value) || 0)) * 100);
+  return (
+    <span
+      role="meter"
+      aria-label={label}
+      aria-valuenow={percent}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      data-reduced={String(reduced)}
+      className={`${styles.meter} ${className}`}
+      style={{ "--swr-level": `${percent}%` }}
+    >
+      <span className={styles.fill} aria-hidden="true" />
+    </span>
+  );
+}
+```
+
+```css
+/* ui/src/components/primitives/LevelMeter.module.css */
+.meter {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  inline-size: 100%;
+  max-inline-size: 96px;
+  block-size: 4px;
+  border-radius: var(--swr-r-pill);
+  background: var(--swr-bg-raise);
+  box-shadow: inset 0 0 0 1px var(--swr-line);
+  overflow: hidden;
+}
+.fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--swr-level, 0%);
+  background: linear-gradient(90deg, var(--swr-ok), var(--swr-warn) 78%, var(--swr-err));
+  transition: inline-size var(--swr-fast) linear;
+}
+[data-reduced="true"] .fill { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .fill { transition: none; }
+}
+```
+
+- [ ] **Step 4: Verificar**
+
+Run: `npm --prefix ui test -- tests/hooks.test.jsx ui/tests/meter.test.jsx && node scripts/build-ui.mjs`
+Expected: 8 tests PASS y build sin errores.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ui/src/hooks ui/src/lib ui/src/i18n.js ui/tests/hooks.test.jsx ui/tests/meter.test.jsx
+git commit -m "feat(ui): add bridge hooks, local workspace store and audio meter"
+```
+
+---
+
+### Task 9: Shell, grid del estudio y barra superior
+
+**Files:**
+- Create: `ui/src/styles/layout.css`, `ui/src/components/StudioShell.jsx`, `ui/src/components/StudioShell.module.css`, `ui/src/components/Topbar.jsx`, `ui/src/components/Topbar.module.css`
+- Modify: `ui/src/main.jsx` (importa `styles/layout.css`), `ui/src/mount-next.jsx` (llama `installI18n()` antes de montar), `web/js/i18n/es/studio.js`, `web/js/i18n/en/studio.js`, `web/js/i18n/ru/studio.js` (las ocho claves de Step 3)
+- Test: `ui/tests/shell.test.jsx`, `ui/tests/topbar.test.jsx`
+
+**Interfaces:**
+- Consumes: `useStudioSnapshot`, `useWorkspace`, primitivas de las Tasks 6–8, `nextStudioFixture`.
+- Produces:
+  - `StudioRoot({ bridge })` — export nombrado que `main.jsx` ya importa. Reparte `{ snapshot, command, workspace, updateWorkspace }` a las regiones y aplica las clases `scenes-collapsed` / `panel-collapsed` (mismos nombres que el CSS legacy de `workspace.js`).
+  - `<Topbar snapshot command workspace onToggleScenes onTogglePanel />` — `role="banner"`, píldora de
+    conexión, píldora LIVE, `CommandButton` de grabar y transmitir, menú Ver con las dos acciones de
+    colapso.
+  - Regiones con `data-region`: `rail`, `stage`, `tray`, `dock`, `panel`. Las tareas 10 y 11 sustituyen
+    los `slot` vacíos por sus componentes.
+
+- [ ] **Step 1: Escribir los tests que fallan**
+
+```jsx
+// ui/tests/shell.test.jsx
+import { test, expect, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { StudioRoot } from "../src/components/StudioShell.jsx";
+import { createStudioBridge } from "../src/bridge/studio-bridge.js";
+import { createFixtureEngine } from "../src/bridge/fixture-engine.js";
+import { nextStudioFixture } from "../src/fixtures/next-studio.js";
+
+afterEach(cleanup);
+const setup = () => {
+  const engine = createFixtureEngine(nextStudioFixture);
+  const bridge = createStudioBridge({ engine });
+  const view = render(<StudioRoot bridge={bridge} />);
+  return { ...view, engine, bridge };
+};
+
+test("the shell renders the five production regions", () => {
+  render(<StudioRoot bridge={createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) })} />);
+  for (const region of ["rail", "stage", "tray", "dock", "panel"]) {
+    expect(document.querySelector(`[data-region="${region}"]`)).toBeInTheDocument();
+  }
+});
+
+test("collapsing scenes is announced and remembered", async () => {
+  const { container } = setup();
+  const toggle = screen.getByRole("button", { name: /escenas/i });
+  await userEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(container.querySelector(".studio-root")).toHaveClass("scenes-collapsed");
+  expect(JSON.parse(localStorage.getItem("swr.workspace")).scenesCollapsed).toBe(true);
+});
+
+test("the panel toggle mirrors the legacy class contract", async () => {
+  const { container } = setup();
+  await userEvent.click(screen.getByRole("button", { name: /panel/i }));
+  expect(container.querySelector(".studio-root")).toHaveClass("panel-collapsed");
+});
+```
+
+```jsx
+// ui/tests/topbar.test.jsx
+import { test, expect, vi, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Topbar } from "../src/components/Topbar.jsx";
+import { nextStudioFixture } from "../src/fixtures/next-studio.js";
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+const base = { ...nextStudioFixture, workspace: { scenesCollapsed: false, panelOpen: true, activeTab: "chat" } };
+
+test("the room and broadcast states are visible at once", () => {
+  render(<Topbar snapshot={base} command={() => {}} workspace={base.workspace} onToggleScenes={() => {}} onTogglePanel={() => {}} />);
+  expect(screen.getByRole("banner")).toBeInTheDocument();
+  expect(screen.getByText("Sala de demostración")).toBeInTheDocument();
+  expect(screen.getAllByRole("status").length).toBeGreaterThan(1);
+});
+
+test("going live is the reserved primary action and sends the command", async () => {
+  const command = vi.fn();
+  render(<Topbar snapshot={base} command={command} workspace={base.workspace} onToggleScenes={() => {}} onTogglePanel={() => {}} />);
+  const live = screen.getByRole("button", { name: /Transmitir/i });
+  await userEvent.click(live);
+  expect(command).toHaveBeenCalledWith("live.start", {});
+  expect(live.className).toContain("primary");
+});
+
+test("the live state swaps the primary label and stops first", async () => {
+  const command = vi.fn();
+  const snapshot = { ...base, production: { ...base.production, live: true } };
+  render(<Topbar snapshot={snapshot} command={command} workspace={base.workspace} onToggleScenes={() => {}} onTogglePanel={() => {}} />);
+  await userEvent.click(screen.getByRole("button", { name: /directo|Transmitir/i }));
+  expect(command).toHaveBeenCalledWith("live.stop", {});
+  expect(screen.getByText(/En directo/i) || screen.getAllByRole("status").length).toBeTruthy();
+});
+
+test("the room title clips instead of overflowing", () => {
+  const snapshot = { ...base, room: { ...base.room, title: "Sala con un nombre exageradamente largo de demostración" } };
+  render(<Topbar snapshot={snapshot} command={() => {}} workspace={base.workspace} onToggleScenes={() => {}} onTogglePanel={() => {}} />);
+  const title = screen.getByText(snapshot.room.title);
+  expect(title).toHaveAttribute("data-truncated");
+});
+```
+
+- [ ] **Step 2: Verificar que fallan**
+
+Run: `npm --prefix ui test -- tests/shell.test.jsx ui/tests/topbar.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/components/StudioShell.jsx"».
+
+- [ ] **Step 3: Añadir las claves de idioma y escribir el grid y el shell**
+
+Ocho claves nuevas, una línea plana por clave al final del objeto de `web/js/i18n/es/studio.js`,
+`en/studio.js` y `ru/studio.js`, en el mismo orden en los tres idiomas. Las usan Topbar (esta tarea),
+SourceTray (Task 10) y ToastLayer (Task 11); `tests/ui-i18n.test.mjs` (Task 13) falla si falta alguna.
+
+| clave | es | en | ru |
+| --- | --- | --- | --- |
+| `studio.showPanel` | `"Panel de ajustes"` | `"Settings panel"` | `"Панель настроек"` |
+| `studio.showSource` | `"Mostrar fuente"` | `"Show source"` | `"Показать источник"` |
+| `studio.hideSource` | `"Ocultar fuente"` | `"Hide source"` | `"Скрыть источник"` |
+| `studio.removeSource` | `"Quitar fuente"` | `"Remove source"` | `"Удалить источник"` |
+| `studio.qualityHd` | `"Calidad HD"` | `"HD quality"` | `"Качество HD"` |
+| `studio.qualityFullHd` | `"Calidad Full HD"` | `"Full HD quality"` | `"Качество Full HD"` |
+| `studio.notifications` | `"Avisos del estudio"` | `"Studio notices"` | `"Уведомления студии"` |
+| `studio.closeNotification` | `"Cerrar aviso"` | `"Close notice"` | `"Закрыть уведомление"` |
+
+Ejemplo de la primera línea, con el formato del fichero:
+
+```js
+  "studio.showPanel": "Panel de ajustes",
+```
+
+```css
+/* ui/src/styles/layout.css */
+/* Balanced density: rail 216px, stage absorbs the rest, panel 340px. */
+.swr-shell {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr) 340px;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "top  top   top"
+    "rail stage panel"
+    "rail tray  panel"
+    "dock dock  dock";
+  gap: var(--swr-sp-2);
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 0;
+  padding: var(--swr-sp-2);
+  background: radial-gradient(120% 120% at 12% 0%, var(--swr-bg-raise), var(--swr-bg-deep) 62%);
+  color: var(--swr-text);
+  font-family: var(--swr-font-ui);
+  font-size: var(--swr-text-sm);
+  overflow: hidden;
+}
+.swr-shell > * { min-width: 0; min-height: 0; }
+[data-region="top"] { grid-area: top; }
+[data-region="rail"] { grid-area: rail; }
+[data-region="stage"] { grid-area: stage; }
+[data-region="tray"] { grid-area: tray; }
+[data-region="dock"] { grid-area: dock; }
+[data-region="panel"] { grid-area: panel; background: var(--swr-bg-glass); backdrop-filter: blur(var(--swr-blur)); border: 1px solid var(--swr-line); border-radius: var(--swr-r-md); }
+
+.scenes-collapsed .swr-shell { grid-template-columns: 48px minmax(0, 1fr) 340px; }
+.panel-collapsed .swr-shell { grid-template-columns: 216px minmax(0, 1fr) 52px; }
+.scenes-collapsed.panel-collapsed .swr-shell { grid-template-columns: 48px minmax(0, 1fr) 52px; }
+
+@media (max-width: 1120px) {
+  .swr-shell,
+  .scenes-collapsed .swr-shell { grid-template-columns: 168px minmax(0, 1fr) 300px; }
+}
+
+@media (max-width: 820px) {
+  .swr-shell,
+  .scenes-collapsed .swr-shell,
+  .panel-collapsed .swr-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "top" "rail" "stage" "tray" "dock";
+    overflow: auto;
+  }
+  [data-region="panel"] { position: fixed; inset: auto 0 0 0; max-block-size: 62vh; z-index: var(--swr-z-panel); border-radius: var(--swr-r-md) var(--swr-r-md) 0 0; }
+  .panel-collapsed [data-region="panel"] { display: none; }
+}
+```
+
+```jsx
+// ui/src/components/StudioShell.jsx
+import { useCallback } from "react";
+import { useStudioSnapshot } from "../hooks/useStudioSnapshot.js";
+import { useWorkspace } from "../hooks/useWorkspace.js";
+import { Topbar } from "./Topbar.jsx";
+import { ToastLayer } from "./ToastLayer.jsx";
+import styles from "./StudioShell.module.css";
+
+function Slot({ region, children }) {
+  return <section data-region={region} className={styles.slot}>{children}</section>;
+}
+
+export function StudioRoot({ bridge }) {
+  const snapshot = useStudioSnapshot(bridge);
+  const [workspace, updateWorkspace] = useWorkspace();
+  const command = useCallback((action, payload) => bridge.command(action, payload).catch(() => {}), [bridge]);
+  const toggleScenes = useCallback(() => updateWorkspace({ scenesCollapsed: !workspace.scenesCollapsed }), [updateWorkspace, workspace.scenesCollapsed]);
+  const togglePanel = useCallback(() => updateWorkspace({ panelOpen: !workspace.panelOpen }), [updateWorkspace, workspace.panelOpen]);
+
+  const rootClass = `${styles.root} studio-root${workspace.scenesCollapsed ? " scenes-collapsed" : ""}${workspace.panelOpen ? "" : " panel-collapsed"}`;
+
+  return (
+    <div className={rootClass}>
+      <div className="swr-shell">
+        <Slot region="top">
+          <Topbar snapshot={snapshot} command={command} workspace={workspace} onToggleScenes={toggleScenes} onTogglePanel={togglePanel} />
+        </Slot>
+        <Slot region="rail">{null}</Slot>
+        <Slot region="stage">{null}</Slot>
+        <Slot region="tray">{null}</Slot>
+        <Slot region="dock">{null}</Slot>
+        {workspace.panelOpen ? (
+          <Slot region="panel">{null}</Slot>
+        ) : (
+          <section data-region="panel" className={styles.rail}>
+            <button type="button" className={styles.restore} onClick={togglePanel}>❯</button>
+          </section>
+        )}
+      </div>
+      <ToastLayer bridge={bridge} />
+    </div>
+  );
+}
+```
+
+`ToastLayer` se crea en la Task 11; para que esta tarea compile, crear ahora su versión mínima que
+`ToastLayer.jsx` reemplazará intacta:
+
+```jsx
+// ui/src/components/ToastLayer.jsx
+export function ToastLayer() {
+  return null;
+}
+```
+
+```css
+/* ui/src/components/StudioShell.module.css */
+.root { display: block; block-size: 100%; }
+.slot { display: flex; flex-direction: column; gap: var(--swr-sp-2); min-width: 0; min-height: 0; }
+.rail { display: flex; align-items: flex-start; }
+.restore {
+  inline-size: 100%;
+  block-size: 44px;
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-sm);
+  background: var(--swr-bg-glass);
+  color: var(--swr-text-dim);
+  cursor: pointer;
+}
+.restore:hover { color: var(--swr-text); border-color: var(--swr-line-strong); }
+```
+
+- [ ] **Step 4: Escribir la barra superior**
+
+```jsx
+// ui/src/components/Topbar.jsx
+import { CommandButton } from "./primitives/CommandButton.jsx";
+import { StatusPill } from "./primitives/StatusPill.jsx";
+import { TruncatedText } from "./primitives/TruncatedText.jsx";
+import { t } from "../i18n.js";
+import styles from "./Topbar.module.css";
+
+const statusOf = (room) => {
+  if (!room.connected) return room.reconnecting ? { tone: "warn", label: t("studiojs.statusUpdating") } : { tone: "err", label: t("studiojs.statusOffline") };
+  return { tone: "ok", label: t("studiojs.statusConnected") };
+};
+
+export function Topbar({ snapshot, workspace, command, onToggleScenes, onTogglePanel }) {
+  const { room, production, broadcast } = snapshot;
+  const status = statusOf(room);
+  const live = production.live;
+  const error = (domain) => (snapshot.errors?.[domain] ? String(snapshot.errors[domain]) : "");
+  return (
+    <header className={styles.bar} role="banner">
+      <button type="button" className={styles.collapse} aria-expanded={String(!workspace.scenesCollapsed)} aria-controls="scenesRail" onClick={onToggleScenes}>
+        <span data-icon aria-hidden="true">◫</span>
+        <span className={styles.collapseLabel}>{workspace.scenesCollapsed ? t("studio.showScenes") : t("studio.hideScenes")}</span>
+      </button>
+      <div className={styles.identity}>
+        <TruncatedText className={styles.title} title={room.title}>{room.title}</TruncatedText>
+        <StatusPill tone={status.tone} label={status.label} />
+        {live ? <StatusPill tone="live" dot label={t("studio.liveBadge")} /> : null}
+        {production.recording ? <StatusPill tone="err" label={t("studio.record")} /> : null}
+        {broadcast.relay?.active ? <StatusPill tone="idle" label={`${Math.round(broadcast.relay.bitrate / 100) / 10} Mbps`} /> : null}
+      </div>
+      <div className={styles.actions}>
+        <CommandButton
+          data-action="record"
+          status={production.recording ? "active" : "idle"}
+          icon="●"
+          label={t("studio.record")}
+          title={t("studio.recordHint")}
+          error={error("broadcast")}
+          collapsible
+          onClick={() => command("record.toggle", {})}
+        />
+        <CommandButton
+          data-action="live"
+          status={live ? "active" : "idle"}
+          icon="▲"
+          primary
+          label={live ? t("studio.goLive") : t("studio.goLive")}
+          error={error("broadcast")}
+          onClick={() => command(live ? "live.stop" : "live.start", {})}
+        />
+        <button type="button" className={styles.collapse} aria-expanded={String(workspace.panelOpen)} aria-controls="studioPanes" onClick={onTogglePanel}>
+          <span data-icon aria-hidden="true">⌄</span>
+          <span className={styles.collapseLabel}>{workspace.panelOpen ? t("studio.hidePanel") : t("studio.showPanel")}</span>
+        </button>
+      </div>
+    </header>
+  );
+}
+```
+
+```css
+/* ui/src/components/Topbar.module.css */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--swr-sp-3);
+  min-width: 0;
+  padding: var(--swr-sp-2) var(--swr-sp-3);
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-md);
+  background: var(--swr-bg-glass);
+  backdrop-filter: blur(var(--swr-blur));
+  box-shadow: var(--swr-shadow-1);
+}
+.identity { display: flex; align-items: center; gap: var(--swr-sp-2); flex: 1 1 auto; min-width: 0; }
+.title { flex: 0 1 auto; max-inline-size: 42ch; font-size: var(--swr-text-md); font-weight: 620; }
+.actions { display: flex; align-items: center; gap: var(--swr-sp-2); flex: 0 0 auto; min-width: 0; }
+.collapse {
+  display: inline-flex; align-items: center; gap: var(--swr-sp-1);
+  flex: 0 0 auto;
+  padding: var(--swr-sp-1) var(--swr-sp-2);
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-sm);
+  background: transparent;
+  color: var(--swr-text-dim);
+  font-size: var(--swr-text-xs);
+  cursor: pointer;
+}
+.collapse:hover { color: var(--swr-text); border-color: var(--swr-line-strong); }
+.collapseLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1120px) {
+  .collapse .collapseLabel, .title { display: none; }
+  .collapse { padding: var(--swr-sp-1); }
+}
+```
+
+`ui/src/main.jsx` añade `import "./styles/layout.css";` junto a los otros dos estilos, y
+`ui/src/mount-next.jsx` añade `installI18n()` (importado de `./i18n.js`) como primera línea de
+`mountNext`, antes de `createFixtureEngine`.
+
+- [ ] **Step 5: Verificar**
+
+Run: `npm --prefix ui test -- tests/shell.test.jsx ui/tests/topbar.test.jsx && npm --prefix ui test && node scripts/build-ui.mjs`
+Expected: los 8 tests nuevos PASS, los 20 anteriores siguen PASS (27 en total sin contar los de `node --test`), build correcto.
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
+Expected: `ok` — el HTML generado sigue conteniendo los contenedores legacy.
+
+- [ ] **Step 6: Comprobar en el navegador y commit**
+
+Run: abrir `http://localhost:8443/studio?room=<sala-de-prueba>#key=<clave>` con `?ui=next` y `?ui=legacy`
+Expected: legacy idéntico a hoy; next muestra la barra Control Room Pro con píldoras y la acción
+Transmitir reservando su ancho, sin barras de scroll en 1440 px.
+
+```bash
+git add ui/src/styles/layout.css ui/src/components ui/src/main.jsx ui/src/mount-next.jsx ui/tests/shell.test.jsx ui/tests/topbar.test.jsx web/js/i18n
+git commit -m "feat(ui): lay out the studio shell and control-room topbar"
+```
+
+---
+
+### Task 10: Regiones de producción sobre datos simulados
+
+**Files:**
+- Create: `ui/src/components/SceneRail.jsx` + `.module.css`, `ProgramStage.jsx` + `.module.css`, `LayoutBar.jsx` + `.module.css`, `SourceTray.jsx` + `.module.css`, `ProductionDock.jsx` + `.module.css`
+- Modify: `ui/src/components/StudioShell.jsx` (sustituye los `Slot` vacíos), `ui/src/fixtures/next-studio.js` (fuente con nombre de 96 caracteres para forzar el corte)
+- Test: `ui/tests/regions.test.jsx`
+
+**Interfaces:**
+- Consumes: primitivas (Tasks 6–8), `useStageHeight` (Task 8), acciones de `actions.js` (Task 5).
+- Produces:
+  - `<SceneRail production command collapsed />` — `#scenesRail`, tarjetas por escena con
+    `aria-current="true"` en la editada, contador, botón de enlace OBS (`command("scene.copyObsLink")`) y
+    botón de expansión cuando `collapsed`.
+  - `<ProgramStage production media />` — `#program` con `--stage-height`, badge LIVE, overlay de
+    `clearScreen` y `countdown` cuando `> 0`.
+  - `<LayoutBar layout featured sources command />` — los ocho ids reales
+    `solo split grid pip sidebar spotlight screen news`, `aria-pressed` en el activo.
+  - `<SourceTray sources command />` — tarjetas `auto-fit minmax(148px,1fr)`; cada una con `IconButton`
+    de micro, `Switch` de visibilidad, `TruncatedText` del nombre, `LevelMeter` y `OverflowMenu`
+    (calidad, quitar).
+  - `<ProductionDock snapshot command />` — Monitor, Cámara, Pantalla, Medio, VDO, Ajustes, Invitar como
+    `CommandButton collapsible`; lo que no cabe pasa a `OverflowMenu`.
+
+- [ ] **Step 1: Escribir el test que falla**
+
+```jsx
+// ui/tests/regions.test.jsx
+import { test, expect, vi, afterEach } from "vitest";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { SceneRail } from "../src/components/SceneRail.jsx";
+import { ProgramStage } from "../src/components/ProgramStage.jsx";
+import { LayoutBar } from "../src/components/LayoutBar.jsx";
+import { SourceTray } from "../src/components/SourceTray.jsx";
+import { ProductionDock } from "../src/components/ProductionDock.jsx";
+import { nextStudioFixture } from "../src/fixtures/next-studio.js";
+
+afterEach(cleanup);
+const { production, media, room } = nextStudioFixture;
+
+test("SceneRail marks the edited scene and asks for the OBS link", async () => {
+  const command = vi.fn();
+  render(<SceneRail production={production} command={command} collapsed={false} />);
+  const cards = document.querySelectorAll("[data-scene]");
+  expect(cards).toHaveLength(8);
+  expect(cards[0]).toHaveAttribute("aria-current", "true");
+  await userEvent.click(cards[4]);
+  expect(command).toHaveBeenCalledWith("scene.select", { name: "5" });
+  await userEvent.click(document.querySelector('[data-action="obs-link"]'));
+  expect(command).toHaveBeenCalledWith("scene.copyObsLink", { name: "1" });
+});
+
+test("a collapsed rail still exposes an expand control with a name", () => {
+  const command = () => {};
+  render(<SceneRail production={production} command={command} collapsed onExpand={() => {}} />);
+  expect(document.querySelector('[data-action="expand-scenes"]')).toBeInTheDocument();
+});
+
+test("LayoutBar presses exactly one layout", async () => {
+  const command = vi.fn();
+  render(<LayoutBar layout="grid" featured="" sources={media.sources} command={command} />);
+  expect(document.querySelectorAll("[data-layout]")).toHaveLength(8);
+  await userEvent.click(document.querySelector('[data-layout="pip"]'));
+  expect(command).toHaveBeenCalledWith("scene.setLayout", { layout: "pip" });
+});
+
+test("ProgramStage shows the countdown and the clear-screen overlay", () => {
+  const { rerender } = render(<ProgramStage production={{ ...production, countdown: 5 }} media={media} />);
+  expect(document.querySelector("#program")).toBeInTheDocument();
+  expect(screen.getByText("5")).toBeInTheDocument();
+  rerender(<ProgramStage production={{ ...production, countdown: 0, clearScreen: true }} media={media} />);
+  expect(document.querySelector("[data-overlay]")).toBeInTheDocument();
+});
+
+test("SourceTray keeps every control named when the card shrinks", async () => {
+  const command = vi.fn();
+  render(<SourceTray sources={media.sources} command={command} />);
+  const long = media.sources[0];
+  expect(screen.getByText(long.name)).toHaveAttribute("data-truncated");
+  await userEvent.click(document.querySelector('[data-role="visibility"]'));
+  expect(command).toHaveBeenCalledWith("source.hide", { id: media.sources[0].id, hidden: true });
+  fireEvent.click(document.querySelector('[data-role="source-more"]'));
+  await userEvent.click(screen.getAllByRole("menuitem").at(-1));
+  expect(command).toHaveBeenLastCalledWith("source.remove", { id: media.sources[0].id });
+});
+
+test("an errored source states its problem without blocking the tray", () => {
+  render(<SourceTray sources={media.sources} command={() => {}} />);
+  expect(document.querySelector('[data-source="media-loop"] [role="status"]')).toBeInTheDocument();
+});
+
+test("ProductionDock renders the seven dock actions", () => {
+  const command = vi.fn();
+  render(<ProductionDock snapshot={{ production, media, room }} command={command} />);
+  for (const id of ["monitor", "camera", "screen", "media", "vdo", "settings", "invite"]) {
+    expect(document.querySelector('[data-action="' + id + '"]')).toBeInTheDocument();
+  }
+});
+
+test("dock actions that do not fit collapse into the menu, never into an empty pill", () => {
+  const command = () => {};
+  render(<ProductionDock snapshot={{ production, media, room }} command={command} collapsedActions={["ajustes", "invite"]} />);
+  const menu = document.querySelector('[data-action="dock-more"]');
+  fireEvent.click(menu);
+  expect(screen.getAllByRole("menuitem").length).toBe(2);
+});
+```
+
+- [ ] **Step 2: Verificar que fallan**
+
+Run: `npm --prefix ui test -- tests/regions.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/components/SceneRail.jsx"».
+
+- [ ] **Step 3: Implementar rail, escenario y layouts**
+
+Las cinco claves de fuente ya las añadió Task 9 Step 3: no duplicarlas.
+
+```jsx
+// ui/src/components/SceneRail.jsx
+import { IconButton } from "./primitives/IconButton.jsx";
+import { TruncatedText } from "./primitives/TruncatedText.jsx";
+import { t } from "../i18n.js";
+import styles from "./SceneRail.module.css";
+
+export function SceneRail({ production, command, collapsed = false, onExpand }) {
+  if (collapsed) {
+    return (
+      <div className={styles.collapsed}>
+        <IconButton icon="◫" data-action="expand-scenes" label={t("studio.showScenes")} onClick={onExpand} />
+        {production.scenes.map((scene) => (
+          <button key={scene.name} type="button" className={styles.mini} aria-current={scene.name === production.editScene ? "true" : undefined} onClick={() => command("scene.select", { name: scene.name })}>
+            {scene.name}
+          </button>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div id="scenesRail" className={styles.rail}>
+      <h2 className={styles.heading}>{t("studio.organizeProgram")}</h2>
+      <div className={styles.cards}>
+        {production.scenes.map((scene) => (
+          <button
+            key={scene.name}
+            data-scene={scene.name}
+            type="button"
+            className={`${styles.card} ${scene.isProgram ? styles.program : ""}`}
+            aria-current={scene.name === production.editScene ? "true" : undefined}
+            title={scene.isProgram ? t("studiojs.sceneProgramTitle") : t("studiojs.sceneExtraTitle", { n: scene.name })}
+            onClick={() => command("scene.select", { name: scene.name })}
+          >
+            <TruncatedText className={styles.name}>{scene.isProgram ? t("studiojs.sceneProgram") : t("studiojs.sceneName", { n: scene.name })}</TruncatedText>
+            <span className={styles.count}>{scene.count ? t("studiojs.sceneCount", { n: scene.count }) : t("studiojs.sceneEmpty")}</span>
+          </button>
+        ))}
+      </div>
+      <IconButton icon="⧉" data-action="obs-link" label={t("studiojs.obsLink")} onClick={() => command("scene.copyObsLink", { name: production.editScene })} />
+    </div>
+  );
+}
+```
+
+```css
+/* ui/src/components/SceneRail.module.css */
+.rail { display: flex; flex-direction: column; gap: var(--swr-sp-2); min-width: 0; block-size: 100%; }
+.collapsed { display: flex; flex-direction: column; align-items: center; gap: var(--swr-sp-1); }
+.mini { inline-size: 32px; block-size: 28px; border: 1px solid var(--swr-line); border-radius: var(--swr-r-sm); background: transparent; color: var(--swr-text-faint); font-size: var(--swr-text-2xs); cursor: pointer; }
+.mini[aria-current="true"] { color: var(--swr-text); border-color: var(--swr-brand); }
+.heading { margin: 0; font-size: var(--swr-text-2xs); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--swr-text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: var(--swr-sp-1); min-width: 0; overflow: auto; }
+.card { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--swr-sp-2); border: 1px solid var(--swr-line); border-radius: var(--swr-r-sm); background: var(--swr-bg-raise); color: var(--swr-text-dim); font-size: var(--swr-text-xs); cursor: pointer; transition: border-color var(--swr-fast) var(--swr-ease), background var(--swr-fast) var(--swr-ease); }
+.card:hover { border-color: var(--swr-line-strong); color: var(--swr-text); }
+.card[aria-current="true"] { border-color: var(--swr-brand); background: var(--swr-brand-soft); color: var(--swr-text); }
+.program { border-style: dashed; }
+.name, .count { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.count { color: var(--swr-text-faint); font-size: var(--swr-text-2xs); }
+```
+
+```jsx
+// ui/src/components/ProgramStage.jsx
+import { useRef } from "react";
+import { useStageHeight } from "../hooks/useStageHeight.js";
+import { StatusPill } from "./primitives/StatusPill.jsx";
+import { t } from "../i18n.js";
+import styles from "./ProgramStage.module.css";
+
+// React only owns the frame: the canvas pixels keep coming from Compositor.
+export function ProgramStage({ production, media }) {
+  const ref = useRef(null);
+  useStageHeight(ref);
+  return (
+    <div ref={ref} className={styles.stage} data-region="stage-inner">
+      <canvas id="program" className={styles.canvas} width={1280} height={720} aria-label={t("studio.workArea")} />
+      {production.live ? <StatusPill className={styles.live} tone="live" dot label={t("studio.liveBadge")} /> : null}
+      {production.countdown > 0 ? <div className={styles.countdown} data-countdown={production.countdown} role="timer" aria-live="polite">{production.countdown}</div> : null}
+      {production.clearScreen ? <div className={styles.clear} data-overlay="clear" role="status" aria-label={t("studio.clearScreen")}>{t("studio.clearScreen")}</div> : null}
+      <ul className={styles.strip}>
+        {media.sources.filter((source) => production.stage.includes(source.id)).map((source) => (
+          <li key={source.id} className={styles.chip}>{source.kind} · {source.quality}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+```css
+/* ui/src/components/ProgramStage.module.css */
+.stage { position: relative; display: flex; flex-direction: column; gap: var(--swr-sp-2); min-width: 0; block-size: 100%; }
+.canvas { inline-size: 100%; block-size: var(--stage-height, auto); max-block-size: 100%; border-radius: var(--swr-r-md); background: var(--swr-bg-deep); box-shadow: var(--swr-shadow-2); object-fit: contain; }
+.live { position: absolute; inset-block-start: var(--swr-sp-2); inset-inline-start: var(--swr-sp-2); }
+.countdown { position: absolute; inset: 0; display: grid; place-content: center; font-size: var(--swr-text-xl); font-family: var(--swr-font-mono); color: var(--swr-text); text-shadow: 0 2px 20px rgba(0, 0, 0, 0.8); }
+.clear { position: absolute; inset: 0; display: grid; place-content: center; background: color-mix(in srgb, var(--swr-bg-deep) 92%, transparent); color: var(--swr-text-dim); font-size: var(--swr-text-sm); }
+.strip { display: flex; gap: var(--swr-sp-1); margin: 0; padding: 0; list-style: none; min-width: 0; overflow: hidden; }
+.chip { max-inline-size: 22ch; padding: 2px var(--swr-sp-2); border: 1px solid var(--swr-line); border-radius: var(--swr-r-pill); color: var(--swr-text-faint); font-size: var(--swr-text-2xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+```
+
+```jsx
+// ui/src/components/LayoutBar.jsx
+import { t } from "../i18n.js";
+import styles from "./LayoutBar.module.css";
+
+const LAYOUTS = [
+  ["solo", "studio.layoutSolo"], ["split", "studio.layoutSplit"], ["grid", "studio.layoutGrid"],
+  ["pip", "studio.layoutPip"], ["sidebar", "studio.layoutSidebar"], ["spotlight", "studio.layoutSpotlight"],
+  ["screen", "studio.layoutScreen"], ["news", "studio.layoutNews"],
+];
+
+export function LayoutBar({ layout, command, sources = [], featured = "" }) {
+  return (
+    <div className={styles.bar} role="group" aria-label={t("studio.layouts")}>
+      {LAYOUTS.map(([id, key]) => (
+        <button key={id} data-layout={id} type="button" className={styles.button} aria-pressed={String(id === layout)} onClick={() => command("scene.setLayout", { layout: id })}>
+          <span data-icon aria-hidden="true">{glph(id)}</span>
+          <span className={styles.label}>{t(key)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function glph(id) {
+  return { solo: "▢", split: "▥", grid: "▦", pip: "⧈", sidebar: "▤", spotlight: "◉", screen: "▭", news: "▣" }[id] || "▢";
+}
+```
+
+```css
+/* ui/src/components/LayoutBar.module.css */
+.bar { display: flex; flex-wrap: wrap; gap: var(--swr-sp-1); min-width: 0; }
+.button { display: inline-flex; align-items: center; gap: var(--swr-sp-1); min-width: 0; padding: var(--swr-sp-1) var(--swr-sp-2); border: 1px solid var(--swr-line); border-radius: var(--swr-r-pill); background: transparent; color: var(--swr-text-dim); font-size: var(--swr-text-2xs); cursor: pointer; transition: color var(--swr-fast) var(--swr-ease), border-color var(--swr-fast) var(--swr-ease); }
+.button:hover { color: var(--swr-text); border-color: var(--swr-line-strong); }
+.button[aria-pressed="true"] { color: var(--swr-text); background: var(--swr-brand-soft); border-color: var(--swr-brand); }
+.label { max-inline-size: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1120px) { .label { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); } }
+```
+
+- [ ] **Step 4: Implementar bandeja y dock**
+
+```jsx
+// ui/src/components/SourceTray.jsx
+import { TruncatedText } from "./primitives/TruncatedText.jsx";
+import { LevelMeter } from "./primitives/LevelMeter.jsx";
+import { IconButton } from "./primitives/IconButton.jsx";
+import { Switch } from "./primitives/Switch.jsx";
+import { OverflowMenu } from "./primitives/OverflowMenu.jsx";
+import { t } from "../i18n.js";
+import styles from "./SourceTray.module.css";
+
+const meters = (source) => Math.max(0, Math.min(1, (Number(source.level) + 60) / 60));
+
+export function SourceTray({ sources, command }) {
+  return (
+    <div id="backstage" className={styles.tray} aria-label={t("studio.backstage")}>
+      <h2 className={styles.heading}>{t("studio.backstage")}</h2>
+      <ul className={styles.grid}>
+        {sources.map((source) => (
+          <li key={source.id} data-source={source.id} className={`${styles.card} ${styles[source.status]}`}>
+            <div className={styles.head}>
+              <span data-icon aria-hidden="true">{icon(source.kind)}</span>
+              <TruncatedText className={styles.name} title={source.name}>{source.name}</TruncatedText>
+            </div>
+            <div className={styles.meter}>
+              <LevelMeter value={meters(source)} label={`${t("studio.monitor")} · ${source.name}`} />
+              {source.error ? <span role="status" className={styles.error}>{t(source.error)}</span> : null}
+            </div>
+            <div className={styles.controls}>
+              <IconButton
+                data-role="source-mute"
+                icon={source.muted ? "🔇" : "🎙"}
+                label={source.muted ? t("studiojs.askMic") : t("studiojs.muteMic")}
+                onClick={() => command("source.mute", { id: source.id, muted: !source.muted })}
+              />
+              <Switch
+                data-role="visibility"
+                label={`${source.hidden ? t("studio.showSource") : t("studio.hideSource")} · ${source.name}`}
+                checked={!source.hidden}
+                onChange={(checked) => command("source.hide", { id: source.id, hidden: !checked })}
+              />
+              <OverflowMenu
+                data-role="source-more"
+                items={[
+                  { id: "hd", label: t("studio.qualityHd"), onClick: () => command("source.setQuality", { id: source.id, quality: "hd" }) },
+                  { id: "fhd", label: t("studio.qualityFullHd"), onClick: () => command("source.setQuality", { id: source.id, quality: "fhd" }) },
+                  { id: "remove", label: t("studio.removeSource"), danger: true, onClick: () => command("source.remove", { id: source.id }) },
+                ]}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function icon(kind) {
+  return { camera: "◉", screen: "▣", media: "▶", vdo: "⌁", guest: "○" }[kind] || "▪";
+}
+```
+
+```css
+/* ui/src/components/SourceTray.module.css */
+.tray { display: flex; flex-direction: column; gap: var(--swr-sp-2); min-width: 0; }
+.heading { margin: 0; font-size: var(--swr-text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--swr-text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: var(--swr-sp-2); margin: 0; padding: 0; list-style: none; min-width: 0; max-block-size: 34vh; overflow: auto; }
+.card { display: flex; flex-direction: column; gap: var(--swr-sp-1); min-width: 0; padding: var(--swr-sp-2); border: 1px solid var(--swr-line); border-radius: var(--swr-r-md); background: linear-gradient(180deg, var(--swr-bg-panel), var(--swr-bg-raise)); }
+.card.pending { border-color: var(--swr-warn); }
+.card.error { border-color: var(--swr-err); }
+.head { display: flex; align-items: center; gap: var(--swr-sp-1); min-width: 0; }
+.name { min-width: 0; font-size: var(--swr-text-sm); }
+.meter { display: flex; align-items: center; gap: var(--swr-sp-1); min-width: 0; }
+.error { min-width: 0; color: var(--swr-err); font-size: var(--swr-text-2xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.controls { display: flex; align-items: center; gap: var(--swr-sp-1); min-width: 0; }
+```
+
+```jsx
+// ui/src/components/ProductionDock.jsx
+import { CommandButton } from "./primitives/CommandButton.jsx";
+import { OverflowMenu } from "./primitives/OverflowMenu.jsx";
+import { t } from "../i18n.js";
+import styles from "./ProductionDock.module.css";
+
+const ACTIONS = [
+  { id: "monitor", icon: "◎", label: () => t("studio.monitor"), hint: () => t("studio.monitorHint"), command: "device.monitor" },
+  { id: "camera", icon: "◉", label: () => t("studio.camera"), hint: () => t("studio.cameraHint"), command: "device.camera" },
+  { id: "screen", icon: "▣", label: () => t("studio.screen"), hint: () => t("studio.screenHint"), command: "device.screen" },
+  { id: "media", icon: "▶", label: () => t("studio.media"), hint: () => t("studio.mediaHint"), command: "device.media" },
+  { id: "vdo", icon: "⌁", label: () => "VDO" /* i18n-lint-ignore nombre propio */, hint: () => t("studio.vdoHint"), command: "device.vdo" },
+  { id: "settings", icon: "⚙", label: () => t("studio.settings"), hint: () => t("studio.settings"), command: "room.settings" },
+  { id: "invite", icon: "＋", label: () => t("studio.invite"), hint: () => t("studio.invite"), command: "room.invite" },
+];
+
+export function ProductionDock({ snapshot, command, collapsedActions = [] }) {
+  const shown = ACTIONS.filter((action) => !collapsedActions.includes(action.id));
+  const hidden = ACTIONS.filter((action) => collapsedActions.includes(action.id));
+  return (
+    <footer className={styles.dock} role="toolbar" aria-label={t("studio.production")}>
+      <div className={styles.cluster}>
+        {shown.map((action) => (
+          <CommandButton
+            key={action.id}
+            data-action={action.id}
+            icon={action.icon}
+            label={action.label()}
+            title={action.hint()}
+            collapsible
+            status={snapshot.production.muteStage && action.id === "monitor" ? "active" : "idle"}
+            onClick={() => command(action.command, {})}
+          />
+        ))}
+      </div>
+      {hidden.length ? (
+        <OverflowMenu
+          data-action="dock-more"
+          items={hidden.map((action) => ({ id: action.id, label: action.label(), icon: action.icon, onClick: () => command(action.command, {}) }))}
+        />
+      ) : null}
+    </footer>
+  );
+}
+```
+
+```css
+/* ui/src/components/ProductionDock.module.css */
+.dock { display: flex; align-items: center; gap: var(--swr-sp-2); min-width: 0; padding: var(--swr-sp-2); border: 1px solid var(--swr-line); border-radius: var(--swr-r-md); background: var(--swr-bg-glass); backdrop-filter: blur(var(--swr-blur)); }
+.cluster { display: flex; align-items: center; gap: var(--swr-sp-2); flex: 1 1 auto; min-width: 0; overflow: hidden; }
+```
+
+Añadir a `ui/src/bridge/actions.js`, en la lista de nombres, las acciones de chrome local que ya usan
+Topbar, Dock y Rail: `device.monitor`, `device.vdo`, `room.settings`, `room.invite`,
+`scene.copyObsLink`. En modo `next` con fixture, `engine.apply` las ignora y quedan registradas para la
+Task 6 del plan 2.
+
+Montar las regiones en `StudioShell.jsx` sustituyendo los `Slot` vacíos:
+
+```jsx
+        <Slot region="rail">
+          <SceneRail production={snapshot.production} command={command} collapsed={workspace.scenesCollapsed} onExpand={toggleScenes} />
+        </Slot>
+        <Slot region="stage">
+          <ProgramStage production={snapshot.production} media={snapshot.media} />
+          <LayoutBar layout={snapshot.production.layout} featured={snapshot.production.featured} sources={snapshot.media.sources} command={command} />
+        </Slot>
+        <Slot region="tray"><SourceTray sources={snapshot.media.sources} command={command} /></Slot>
+        <Slot region="dock"><ProductionDock snapshot={snapshot} command={command} /></Slot>
+```
+
+- [ ] **Step 5: Verificar y commit**
+
+Run: `npm --prefix ui test -- tests/regions.test.jsx && npm --prefix ui test && node scripts/build-ui.mjs`
+Expected: 8 tests PASS y suite completo en verde.
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && node --check web/js/studio.js"`
+Expected: sin salida — ninguna lógica del motor fue tocada.
+
+```bash
+git add ui/src/components ui/src/bridge/actions.js ui/src/fixtures/next-studio.js ui/tests/regions.test.jsx
+git commit -m "feat(ui): render scenes, program, layouts, source tray and dock from the snapshot"
+```
+
+---
+
+### Task 11: Avisos, errores por dominio y región `aria-live`
+
+**Files:**
+- Create: `ui/src/lib/toasts.js`, `ui/src/hooks/useToasts.js`, `ui/src/components/ToastLayer.jsx` (reemplaza el stub de la Task 9) + `ToastLayer.module.css`
+- Modify: `ui/src/bridge/studio-bridge.js` (`onError` multicanal), `ui/tests/bridge.test.jsx` (dos casos nuevos)
+- Test: `ui/tests/toasts.test.jsx`
+
+**Interfaces:**
+- Consumes: `snapshot.errors` (cuatro dominios, Task 5) y `snapshot.toasts.items`.
+- Produces:
+  - `createToastQueue({ max = 3, ttl = { ok: 2600, info: 3200, warn: 5000, err: 7000 }, now, schedule }) → { push(text, kind): id, items(): item[], dismiss(id), subscribe(fn) }`
+  - `useToasts(bridge) → [items, { push, dismiss }]`
+  - `bridge.onError(listener) → unsubscribe`, `listener(error, domain)`; se dispara en el `catch` de
+    `command()` además de publicar en `snapshot.errors`.
+
+- [ ] **Step 1: Escribir los tests que fallan**
+
+```jsx
+// ui/tests/toasts.test.jsx
+import { test, expect, vi, afterEach } from "vitest";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createToastQueue } from "../src/lib/toasts.js";
+import { ToastLayer } from "../src/components/ToastLayer.jsx";
+import { createStudioBridge } from "../src/bridge/studio-bridge.js";
+import { createFixtureEngine } from "../src/bridge/fixture-engine.js";
+import { nextStudioFixture } from "../src/fixtures/next-studio.js";
+
+afterEach(cleanup);
+
+test("the queue caps at three items and drops the oldest", () => {
+  const queue = createToastQueue({ now: () => 0, schedule: () => () => {} });
+  for (const text of ["a", "b", "c", "d"]) queue.push(text, "info");
+  expect(queue.items().map((item) => item.text)).toEqual(["b", "c", "d"]);
+});
+
+test("a toast disappears after its severity budget", () => {
+  const timers = [];
+  const queue = createToastQueue({ now: () => 0, schedule: (fn, ms) => { timers.push([fn, ms]); return () => {}; } });
+  queue.push("grabando", "ok");
+  queue.push("sin conexión", "err");
+  expect(timers.map(([, ms]) => ms)).toEqual([2600, 7000]);
+});
+
+test("the bridge notifies error listeners per domain", async () => {
+  const engine = createFixtureEngine(nextStudioFixture);
+  const bridge = createStudioBridge({ engine });
+  const seen = [];
+  const off = bridge.onError((error, domain) => seen.push([error.message, domain]));
+  engine.failNext = new Error("puerto ocupado");
+  await expect(bridge.command("relay.retry", {})).rejects.toThrow("puerto ocupado");
+  expect(seen).toEqual([["puerto ocupado", "broadcast"]]);
+  off();
+  engine.failNext = new Error("otra vez");
+  await expect(bridge.command("relay.retry", {})).rejects.toThrow("otra vez");
+  expect(seen).toHaveLength(1);
+});
+
+test("toasts are dismissible, polite and never overlap the dock", async () => {
+  const bridge = createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) });
+  bridge.notify("Cámara añadida", "ok");
+  bridge.notify("Sin conexión con el relé", "err");
+  render(<ToastLayer bridge={bridge} />);
+  const region = screen.getByRole("region", { name: "Avisos del estudio" });
+  expect(region).toHaveAttribute("aria-live", "polite");
+  expect(screen.getByText("Cámara añadida")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent("Sin conexión con el relé");
+  await userEvent.click(screen.getAllByRole("button", { name: /Cerrar aviso/i })[0]);
+  expect(screen.queryByText("Cámara añadida")).toBeNull();
+});
+
+test("an empty queue renders nothing", () => {
+  const bridge = createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) });
+  const { container } = render(<ToastLayer bridge={bridge} />);
+  expect(container.querySelector("[data-toast]")).toBeNull();
+});
+```
+
+Añadir a `ui/tests/bridge.test.jsx`:
+
+```jsx
+test("notify publishes into the snapshot so React can render toasts", () => {
+  const bridge = createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) });
+  bridge.notify("hola", "info");
+  expect(bridge.getSnapshot().toasts.items.map((item) => item.text)).toEqual(["hola"]);
+  bridge.dismissToast(bridge.getSnapshot().toasts.items[0].id);
+  expect(bridge.getSnapshot().toasts.items).toEqual([]);
+});
+```
+
+- [ ] **Step 2: Verificar que fallan**
+
+Run: `npm --prefix ui test -- tests/toasts.test.jsx ui/tests/bridge.test.jsx`
+Expected: FAIL —«Failed to resolve import "../src/lib/toasts.js"» y «bridge.notify is not a function».
+
+- [ ] **Step 3: Implementar cola, bridge y capa**
+
+```js
+// ui/src/lib/toasts.js
+const TTL = { ok: 2600, info: 3200, warn: 5000, err: 7000 };
+
+export function createToastQueue({ max = 3, ttl = TTL, now = () => Date.now(), schedule = (fn, ms) => { const id = setTimeout(fn, ms); return () => clearTimeout(id); } } = {}) {
+  let items = [];
+  const listeners = new Set();
+  const cancel = new Map();
+  const publish = () => { for (const listener of [...listeners]) listener(); };
+  const notify = (id) => {
+    cancel.set(id, schedule(() => { dismiss(id); }, ttl[id.kind] ?? ttl.info));
+  };
+  function dismiss(id) {
+    cancel.get(id)?.();
+    cancel.delete(id);
+    items = items.filter((item) => item.id !== id);
+    publish();
+  }
+  return {
+    items: () => items,
+    push(text, kind = "info") {
+      const id = `${now()}-${items.length + 1}`;
+      items = [...items, { id, text, kind }].slice(-max);
+      notify(items.at(-1));
+      publish();
+      return id;
+    },
+    dismiss,
+    subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    destroy() { for (const off of cancel.values()) off(); cancel.clear(); listeners.clear(); },
+  };
+}
+```
+
+En `ui/src/bridge/studio-bridge.js`, añadir dentro de `createStudioBridge` (después de `store`) y antes
+de `command`:
+
+```js
+  const queue = createToastQueue();
+  const errorListeners = new Set();
+  const relay = () => store.set({ toasts: { items: queue.items() } });
+  queue.subscribe(relay);
+  relay();
+```
+
+dentro del `catch` de `command`, justo antes de `throw error`:
+
+```js
+      for (const listener of [...errorListeners]) listener(error, domain);
+      queue.notify(error?.message || String(error), "err");
+```
+
+y en el objeto devuelto:
+
+```js
+    notify: (text, kind = "info") => queue.notify(text, kind),
+    dismissToast: (id) => queue.dismiss(id),
+    onError(listener) { errorListeners.add(listener); return () => errorListeners.delete(listener); },
+```
+
+con `destroy()` llamando además `queue.destroy(); errorListeners.clear();`.
+
+```jsx
+// ui/src/hooks/useToasts.js
+import { useCallback, useSyncExternalStore } from "react";
+
+export function useToasts(bridge) {
+  const subscribe = useCallback((onChange) => bridge.subscribe(onChange), [bridge]);
+  const items = useSyncExternalStore(subscribe, () => bridge.getSnapshot().toasts.items, () => []);
+  return [items, { push: bridge.notify, dismiss: bridge.dismissToast }];
+}
+```
+
+```jsx
+// ui/src/components/ToastLayer.jsx
+import { useToasts } from "../hooks/useToasts.js";
+import { TruncatedText } from "./primitives/TruncatedText.jsx";
+import { t } from "../i18n.js";
+import styles from "./ToastLayer.module.css";
+
+export function ToastLayer({ bridge }) {
+  const [items, { dismiss }] = useToasts(bridge);
+  if (!items.length) return null;
+  return (
+    <section className={styles.layer} role="region" aria-live="polite" aria-label={t("studio.notifications")}>
+      {items.map((item) => (
+        <div key={item.id} data-toast className={`${styles.toast} ${styles[item.kind]}`} role={item.kind === "err" ? "alert" : "status"}>
+          <TruncatedText className={styles.text} title={item.text}>{item.text}</TruncatedText>
+          <button type="button" className={styles.close} aria-label={t("studio.closeNotification")} onClick={() => dismiss(item.id)}>✕</button>
+        </div>
+      ))}
+    </section>
+  );
+}
+```
+
+`studio.notifications` y `studio.closeNotification` se añadieron a las tres dictionaries en Task 9
+Step 3; si falta alguna lo detecta `tests/ui-i18n.test.mjs` (Task 13). No escribir el texto literal
+dentro del componente.
+
+```css
+/* ui/src/components/ToastLayer.module.css */
+.layer { position: fixed; inset-block-end: calc(var(--swr-sp-6) + 56px); inset-inline-end: var(--swr-sp-4); z-index: var(--swr-z-toast); display: flex; flex-direction: column; gap: var(--swr-sp-2); inline-size: min(320px, calc(100vw - 2 * var(--swr-sp-4))); pointer-events: none; }
+.toast { display: flex; align-items: center; gap: var(--swr-sp-2); min-width: 0; padding: var(--swr-sp-2) var(--swr-sp-3); border: 1px solid var(--swr-line-strong); border-radius: var(--swr-r-md); background: var(--swr-bg-glass); backdrop-filter: blur(var(--swr-blur)); box-shadow: var(--swr-shadow-2); color: var(--swr-text); font-size: var(--swr-text-sm); pointer-events: auto; animation: swr-toast-in var(--swr-base) var(--swr-ease); }
+.text { min-width: 0; flex: 1 1 auto; }
+.close { flex: 0 0 auto; border: 0; background: transparent; color: var(--swr-text-faint); cursor: pointer; }
+.ok { border-color: var(--swr-ok); }
+.warn { border-color: var(--swr-warn); }
+.err { border-color: var(--swr-err); color: var(--swr-err); }
+@keyframes swr-toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+@media (max-width: 820px) { .layer { inset-block-end: 64px; inset-inline: var(--swr-sp-2); inline-size: auto; } }
+```
+
+- [ ] **Step 4: Verificar**
+
+Run: `npm --prefix ui test -- tests/toasts.test.jsx ui/tests/bridge.test.jsx && npm --prefix ui test`
+Expected: los 6 tests nuevos PASS y el resto de la suite de `ui/tests/` sigue PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add ui/src/lib/toasts.js ui/src/hooks/useToasts.js ui/src/components/ToastLayer.jsx ui/src/components/ToastLayer.module.css ui/src/bridge/studio-bridge.js ui/tests/toasts.test.jsx ui/tests/bridge.test.jsx
+git commit -m "feat(ui): add toast queue and per-domain error reporting"
+```
+
+---
+
+### Task 12: Puerta anti-desbordamiento bloqueante
+
+**Files:**
+- Create: `scripts/overflow-smoke.py`, `docs/OVERFLOW-GATE.md`
+- Modify: `.github/workflows/ci.yml` (job `browser`, paso nuevo tras `interface-smoke`), `Makefile` (target `overflow`)
+
+**Interfaces:**
+- Consumes: `/studio?ui=next` con `nextStudioFixture` (Tasks 4–11) y un servidor Go en marcha.
+- Produces: `python scripts/overflow-smoke.py --url http://localhost:18443 [--browser RUTA]` con código de
+  salida 0 si no hay desbordamiento y 1 con la lista de selectores culpables. Viewports cubiertos:
+  `1440x900`, `1120x800`, `820x900`, `390x640`.
+
+- [ ] **Step 1: Escribir el smoke que falla**
+
+```python
+"""Blocking overflow gate: the Studio must never clip, scroll or leave a nameless control."""
+import argparse
+import json
+import time
+from playwright.sync_api import sync_playwright
+
+VIEWPORTS = [(1440, 900), (1120, 800), (820, 900), (390, 640)]
+PROBE = """
+() => {
+  const clipped = [];
+  for (const node of document.querySelectorAll('.studio-root *')) {
+    if (node.scrollWidth - node.clientWidth > 1 && getComputedStyle(node).overflow !== 'visible') continue;
+    if (node.scrollWidth - node.clientWidth > 1) {
+      const path = node.id ? '#' + node.id : node.tagName.toLowerCase() + '.' + (node.className || '').split(' ')[0];
+      clipped.push({ path, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth, text: (node.textContent || '').trim().slice(0, 48) });
+    }
+  }
+  const emptyButtons = [...document.querySelectorAll('.studio-root button')]
+    .filter(b => !(b.textContent || '').trim() && !b.getAttribute('aria-label') && !b.title && !(b.querySelector('[data-icon]') || {}).textContent)
+    .map(b => b.outerHTML.slice(0, 80));
+  const primary = document.querySelector('.studio-root [data-status]');
+  const primaryLabel = [...document.querySelectorAll('.studio-root button')].map(b => (b.textContent || '').trim()).find(x => x.length > 3) || '';
+  return {
+    clipped,
+    emptyButtons,
+    documentScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 || document.documentElement.scrollHeight > document.documentElement.clientHeight + 1,
+    primary: { visible: Boolean(primary), labelLength: primaryLabel.length },
+  };
+}
+"""
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--url", required=True)
+parser.add_argument("--browser")
+parser.add_argument("--room")
+args = parser.parse_args()
+
+with sync_playwright() as pw:
+    browser = pw.chromium.launch(headless=True, executable_path=args.browser)
+    context = browser.new_context(locale="es-ES", viewport={"width": 1440, "height": 900}, color_scheme="dark", service_workers="block", ignore_https_errors=True)
+    room = args.room or f"overflow-{time.time_ns()}"
+    keys = context.request.post(args.url + "/api/rooms", data={"room": room, "title": "Puerta de desbordamiento", "password": "overflow-password"}).json()
+    page = ctx = context.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(args.url + "/studio?ui=next&room=" + room + "#key=" + keys["hostKey"])
+    page.wait_for_selector("[data-region='top']")
+    failures = []
+    for width, height in VIEWPORTS:
+        page.set_viewport_size({"width": width, "height": height})
+        page.wait_for_timeout(350)
+        report = page.evaluate(PROBE)
+        if errors:
+            failures.append(f"{width}x{height}: page errors {errors}")
+        if report["documentScroll"]:
+            failures.append(f"{width}x{height}: the document itself scrolls")
+        if report["clipped"]:
+            failures.append(f"{width}x{height}: clipped {json.dumps(report['clipped'][:6], ensure_ascii=False)}")
+        if report["emptyButtons"]:
+            failures.append(f"{width}x{height}: nameless controls {report['emptyButtons']}")
+        if not report["primary"]["visible"] or report["primary"]["labelLength"] < 4:
+            failures.append(f"{width}x{height}: the primary action lost its label ({report['primary']})")
+    browser.close()
+
+if failures:
+    print("OVERFLOW GATE FAILED")
+    for line in failures:
+        print(" -", line)
+    raise SystemExit(1)
+print("overflow gate ok")
+```
+
+- [ ] **Step 2: Ejecutarlo y ver el estado real**
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go build -o /tmp/streamwebrom ./cmd/streamwebrom && /tmp/streamwebrom -addr 127.0.0.1:18443 -stun= -data /tmp/swr-overflow & sleep 2; python scripts/overflow-smoke.py --url http://localhost:18443"`
+Expected: `overflow gate ok`. Si falla, la lista imprimida dice el selector exacto: corregir el CSS del
+componente culpable (reglas de la spec §8: `min-width: 0`, elipsis con nombre, `flex: 0 0 auto` en la
+primaria) y repetir hasta verde. Este paso **no** se marca como completo sin la salida `ok`.
+
+- [ ] **Step 3: Documentar la puerta**
+
+```markdown
+# Puerta anti-desbordamiento del Studio
+
+`scripts/overflow-smoke.py` abre `/studio?ui=next` en 1440, 1120, 820 y 390 px de ancho y falla si:
+
+- algún elemento del shell tiene `scrollWidth` mayor que su `clientWidth` sin recorte intencional;
+- el documento entero crea scroll horizontal o vertical;
+- queda algún botón sin texto, sin `aria-label`, sin `title` y sin glifo visible;
+- la acción primaria (`Transmitir`) desaparece o se queda sin etiqueta legible.
+
+Se ejecuta en el job `browser` de CI y es bloqueante. Localmente:
+
+```bash
+make ui
+go run ./cmd/streamwebrom -addr 127.0.0.1:18443 -stun= -data /tmp/swr-overflow &
+make overflow
+```
+```
+
+(archivo `docs/OVERFLOW-GATE.md`; el bloque de comandos anterior va entre fences anidados, escribirlos
+como tres líneas normales para no romper el markdown del doc).
+
+- [ ] **Step 4: Hacerla bloqueante**
+
+`Makefile`:
+
+```make
+overflow:
+	python3 scripts/overflow-smoke.py --url http://localhost:18443
+```
+
+`.github/workflows/ci.yml`, en el job `browser`, inmediatamente después de
+`- run: python scripts/interface-smoke.py --url http://localhost:18443`:
+
+```yaml
+      - name: overflow gate (the studio must never clip)
+        run: python scripts/overflow-smoke.py --url http://localhost:18443
+```
+
+y en la matriz de pasos del job `test`, junto al paso de `node --test`, para que el doc de la puerta no
+se quede obsoleto:
+
+```yaml
+      - name: overflow gate documentation exists
+        if: runner.os == 'Linux'
+        run: test -s docs/OVERFLOW-GATE.md
+```
+
+- [ ] **Step 5: Verificar y commit**
+
+Run: `npm --prefix ui test && node --test tests/*.test.mjs`
+Expected: todo en verde (la puerta no cubre el modo legacy: ese camino lo vigila `interface-smoke.py`).
+
+```bash
+git add scripts/overflow-smoke.py docs/OVERFLOW-GATE.md Makefile .github/workflows/ci.yml
+git commit -m "test(ui): block layout overflow and nameless controls in the studio shell"
+```
+
+---
+
+### Task 13: Idioma, shell offline y documentación
+
+**Files:**
+- Create: `tests/ui-i18n.test.mjs`, `tests/ui-shell-assets.test.mjs`
+- Modify: `docs/INTERFAZ.md`, `CHANGELOG.md`
+
+**Interfaces:**
+- Consumes: `ui/src/**` completo de las Tasks 5–11 y `web/sw.js` de la Task 2.
+- Produces: dos tests de `node --test` que `make test` ya ejecuta (`tests/*.test.mjs`), más la
+  documentación del modo `next`.
+
+- [ ] **Step 1: Escribir el test de idioma que falla**
+
+```js
+// tests/ui-i18n.test.mjs
+import { readFile, readdir } from "node:fs/promises";
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { moduleURL } from "./module-url.mjs";
+
+const es = (await import(await moduleURL("i18n/es.js"))).es;
+const en = (await import(await moduleURL("i18n/en.js"))).en;
+const ru = (await import(await moduleURL("i18n/ru.js"))).ru;
+
+async function sources(dir, acc = []) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) await sources(full, acc);
+    else if (full.endsWith(".jsx") || full.endsWith(".js")) acc.push(full);
+  }
+  return acc;
+}
+
+const files = (await sources("ui/src")).filter((file) => !file.endsWith("ui/src/i18n.js"));
+
+test("every t() key used by the React shell exists in all three dictionaries", async () => {
+  const missing = [];
+  for (const file of files) {
+    const text = await readFile(file, "utf8");
+    for (const [, key] of text.matchAll(/t\(\s*"([a-zA-Z]+\.[A-Za-z0-9]+)"/g)) {
+      for (const [code, dict] of [["es", es], ["en", en], ["ru", ru]]) {
+        if (!(key in dict)) missing.push(`${file}: ${key} (${code})`);
+      }
+    }
+  }
+  assert.deepEqual(missing, []);
+});
+
+test("no visible string is hardcoded in JSX", async () => {
+  const offenders = [];
+  for (const file of files) {
+    const text = await readFile(file, "utf8");
+    if (text.includes("i18n-lint-ignore")) continue;
+    for (const [match] of [...text.matchAll(/>([<>]?[A-ZÁÉÍÓÚÑa-záéíóúñ][^<>{}]{2,48})</g)]) {
+      if (!/^\{/.test(match) && !/^\s*$/.test(match)) offenders.push(`${file}: ${match.trim()}`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+```
+
+- [ ] **Step 2: Escribir el test de coherencia del shell offline**
+
+```js
+// tests/ui-shell-assets.test.mjs
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+const sw = await readFile("web/sw.js", "utf8");
+const list = (name) => {
+  const match = sw.match(new RegExp(`const ${name} = \\[([^\\]]*)\\]`, "s"));
+  assert.ok(match, `${name} list missing from sw.js`);
+  return [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+};
+
+test("every path the offline shell precaches exists in web/", async () => {
+  const paths = [...list("PAGES"), ...list("CLASSIC")].filter((path) => !/^\/(studio|guest|view|diagnostics|vdo)/.test(path) || path.endsWith(".html"));
+  const built = new Set(["/js/studio.js", "/css/app.css", "/img/logo.svg", "/manifest.webmanifest", "/"]);
+  const missing = [];
+  for (const path of [...list("PAGES"), ...list("CLASSIC")]) {
+    if (built.has(path)) continue;
+    try { await readFile(`web${path}`); } catch { missing.push(path); }
+  }
+  assert.deepEqual(missing, [], "sw.js precaches files that are not in web/");
+});
+
+test("the generated asset list is what the worker will actually receive", async () => {
+  const list = JSON.parse(await readFile("web/js/sw-assets.json", "utf8"));
+  for (const file of list) {
+    assert.match(file, /^(js|css)\//);
+    await readFile(`web/${file}`);
+  }
+});
+```
+
+- [ ] **Step 3: Ejecutar y corregir las desviaciones**
+
+Run: `node --test tests/ui-i18n.test.mjs tests/ui-shell-assets.test.mjs`
+Expected: primero FAIL. Corregir **sin crear claves nuevas**: sustituir cada cadena literal de JSX por la
+clave `studio.*`/`studiojs.*` existente que la listaba (Task 9 y Task 10 ya usan `t("studio.hideScenes")`,
+`t("studio.record")`, etc.) y ajustar `PAGES`/`CLASSIC` de `web/sw.js` para que solo enumeren ficheros
+que existen de verdad. Donde un rótulo sea un nombre propio («OBS», «VDO») añadir la marca
+`/* i18n-lint-ignore */` en la línea del componente, no un texto nuevo.
+
+Repetir hasta que ambos tests pasen.
+
+- [ ] **Step 4: Documentar el modo `next`**
+
+En `docs/INTERFAZ.md`, al final del apartado del Studio:
+
+```markdown
+## Modo `next` del Studio
+
+La página `/studio` arranca con el shell React de `ui/`, pero el **modo por defecto sigue siendo el
+Studio de siempre**. Para ver la interfaz nueva se añade `?ui=next` a la URL o se guarda
+`localStorage.setItem("swr.ui","next")`; con `?ui=legacy` se vuelve al comportamiento actual sin tocar
+nada más. En modo `next` la interfaz se pinta desde `ui/src/fixtures/next-studio.js`: es la maqueta
+real, con los estilos y las primitivas definitivas, y todavía no manda órdenes al motor. La portación del
+motor WebRTC a `StudioBridge` llega con el plan siguiente.
+
+Los estilos viven en `ui/src/styles/tokens.css` (Control Room Pro) y en los `*.module.css` de cada
+componente; `web/css/app.css` sigue vistiendo a las páginas que aún no migraron. Ninguna regla del shell
+nuevo toca `#program`: los píxeles del escenario los pinta siempre `Compositor`.
+```
+
+En `CHANGELOG.md`, bajo la versión sin publicar:
+
+```markdown
+- El Studio estrena shell React + Vite con la paleta Control Room Pro, disponible detrás de `?ui=next`; la interfaz actual sigue siendo la predeterminada.
+- Nueva prueba bloqueante `scripts/overflow-smoke.py`: el Studio no puede recortar texto, crear scroll ni dejar controles sin nombre en 1440, 1120, 820 y 390 px.
+```
+
+- [ ] **Step 5: Verificación final del plan y commit**
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && make test"`
+Expected: verde — `go vet`, `go test`, `node --check` de todos los `web/js/*.js`, `jslint.py`,
+`node --test tests/*.test.mjs` (incluidos los dos ficheros nuevos) y `npm --prefix ui test`.
+
+Run: `python scripts/interface-smoke.py --url http://localhost:18443 && python scripts/studio-smoke.py --url http://localhost:18443`
+Expected: ambos PASS — el Studio real no cambió de comportamiento.
+
+```bash
+git add tests/ui-i18n.test.mjs tests/ui-shell-assets.test.mjs ui/src docs/INTERFAZ.md CHANGELOG.md
+git commit -m "docs(ui): cover the next-mode switch and pin the shell's strings and precache"
+```
+
+---
+
+## Self-review del autor del plan
+
+1. **Cobertura de la spec.** §4.1/§4.2 (arquitectura y estructura) → Tasks 1, 4, 5, 8, 9. §4.3 (assets,
+   `sw.js`, embed, Docker, `make ui`) → Tasks 1, 2, 13. §5 (componentes y primitivas) → Tasks 6, 7, 9, 10.
+   §6 (flujo de datos y snapshot) → Tasks 5 y 8. §7 (errores) → Tasks 5, 9, 10, 11. §8
+   (anti-desbordamiento) → Tasks 6, 7, 9, 10 y la puerta de la Task 12. §9 (pruebas) → Tasks 1–8, 12, 13;
+   las capas «motor real» y «humos del Studio en modo next» corresponden al plan 2 por la enmienda A1.
+   §10 etapas 1–2 de 7 quedan cubiertas; etapas 3–7 → planes 2 y 3.
+2. **Placeholders.** Ninguno: cada paso lleva su código o su comando exacto. Las ocho claves de i18n
+   que el shell necesita y no existen en el repo se añaden explícitamente en Task 9 Step 3, con su
+   texto en los tres idiomas; `tests/ui-i18n.test.mjs` (Task 13) es el control que lo vigila.
+3. **Consistencia de tipos.** `createStudioBridge({ engine })`, `bridge.subscribe/getSnapshot/command/
+   destroy/notify/dismissToast/onError`, `engine.snapshot/subscribe/apply/emit/destroy`,
+   `ERROR_DOMAINS = ["media","broadcast","room","network"]`, `workspace = { scenesCollapsed, panelOpen,
+   activeTab }`, clases CSS `studio-root`, `scenes-collapsed`, `panel-collapsed`, regiones
+   `data-region="top|rail|stage|tray|dock|panel"`: usados con los mismos nombres en todas las tareas.
+   El `Slot` de la Task 9 se reemplaza por componentes en la Task 10 sin cambiar las regiones.
+
+
