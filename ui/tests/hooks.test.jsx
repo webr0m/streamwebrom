@@ -95,6 +95,12 @@ test("useStageHeight follows the ref and releases the node it replaced", () => {
   rerender({ r: { current: after } });
   expect(observers).toHaveLength(2);
   expect(observers[1].target).toBe(after);
+  // The teardown observation of the node being replaced carries a zero box, so
+  // the contract must not stay frozen on the height of a detached stage.
+  expect(before.style.getPropertyValue("--stage-height")).toBe("300px");
+  act(() => { observers[0].callback([{ contentRect: { height: 0 }, target: before }]); });
+  expect(before.style.getPropertyValue("--stage-height")).toBe("");
+  expect(after.style.getPropertyValue("--stage-height")).toBe("");
   act(() => { observers[1].callback([{ contentRect: { height: 640 }, target: after }]); });
   expect(after.style.getPropertyValue("--stage-height")).toBe("640px");
   // A measurement reported for a node this observer never watched is ignored
