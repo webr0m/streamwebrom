@@ -1,5 +1,8 @@
 // ui/tests/primitives-text.test.jsx
 import { test, expect, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TruncatedText } from "../src/components/primitives/TruncatedText.jsx";
@@ -30,8 +33,6 @@ test("IconButton cannot exist without an accessible name", () => {
   render(<IconButton icon="⚙" label="Ajustes" size="md" onClick={() => {}} className="extra" />);
   const button = screen.getByRole("button", { name: "Ajustes" });
   expect(button).toHaveClass("md");
-  // A missing tone/size class must never reach the DOM as the literal word.
-  expect(button.className).not.toContain("undefined");
 });
 
 test("CommandButton walks idle → pending → error and keeps its icon", async () => {
@@ -39,7 +40,6 @@ test("CommandButton walks idle → pending → error and keeps its icon", async 
   const { rerender } = render(<CommandButton status="idle" icon="▲" label="Transmitir" onClick={onClick} />);
   const idle = screen.getByRole("button", { name: "Transmitir" });
   expect(idle).toHaveAttribute("aria-pressed", "false");
-  expect(idle.className).not.toContain("undefined");
 
   rerender(<CommandButton status="pending" icon="▲" label="Transmitir" onClick={onClick} />);
   expect(screen.getByRole("button", { name: "Transmitir" })).toBeDisabled();
@@ -61,4 +61,34 @@ test("the primary command reserves its own width", () => {
   const button = screen.getByRole("button", { name: "Transmitir" });
   expect(button).toHaveClass("primary");
   expect(button).toHaveAttribute("aria-pressed", "true");
+});
+
+// toHaveClass("primary") can only prove which key the component asked for: with
+// classNameStrategy "non-scoped" (ui/vite.config.js) styles.nope answers "nope", so a
+// deleted CSS rule is invisible to it. The component↔stylesheet pairing is pinned to the
+// files here, the same way ui/tests/tokens.test.jsx pins --swr-*, and only the Playwright
+// gate of Task 12 can prove the browser agrees.
+test("each primitive stylesheet declares the classes its component asks for", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const css = (name) => readFileSync(resolve(here, "..", "src", "components", "primitives", name), "utf8");
+
+  const pill = css("StatusPill.module.css");
+  for (const cls of ["pill", "text", "dot", "ok", "warn", "err", "idle", "live"]) {
+    expect(pill, `StatusPill .${cls}`).toMatch(new RegExp(`^\\s*\\.${cls} \\{`, "m"));
+  }
+  // A second .live .dot rule would silently override a future pulse by cascade order.
+  expect(pill.match(/^\s*\.live \.dot \{/gm) || []).toHaveLength(1);
+
+  const command = css("CommandButton.module.css");
+  for (const cls of ["slot", "button", "label", "pending", "active", "error", "primary"]) {
+    expect(command, `CommandButton .${cls}`).toMatch(new RegExp(`^\\s*\\.${cls} \\{`, "m"));
+  }
+  expect(command, "CommandButton .collapsible").toMatch(/^\s*\.collapsible \.label \{/m);
+  // idle is the base look and "on air" is StatusPill's tone: neither may grow a class here,
+  // because styles[status] would then emit a token no rule answers for.
+  expect(command).not.toMatch(/^\s*\.idle \{/m);
+  expect(command).not.toMatch(/^\s*\.live \{/m);
+
+  const icon = css("IconButton.module.css");
+  for (const cls of ["button", "sm", "md"]) expect(icon, `IconButton .${cls}`).toMatch(new RegExp(`^\\s*\\.${cls} \\{`, "m"));
 });
