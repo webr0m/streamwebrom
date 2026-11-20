@@ -807,22 +807,31 @@ Expected: FAIL —«the page must not load the legacy studio module eagerly» (t
 
 - [ ] **Step 3: Crear el HTML y el interruptor**
 
-Copiar `web/studio.html` a `ui/studio.html` y aplicar exactamente tres cambios:
+Copiar `web/studio.html` a `ui/studio.html` y aplicar exactamente dos cambios en el pie del body:
 
 ```html
-    <!-- 1. se BORRA esta línea del pie del body -->
+    <!-- 1. se BORRAN estas dos líneas del pie del body -->
     <script type="module" src="/js/studio.js"></script>
     <script type="module" src="/js/pwa.js"></script>
 
     <!-- 2. se AÑADE el arranque React (Vite lo reemplaza por el bundle versionado) -->
     <script type="module" src="/src/main.jsx"></script>
-
-    <!-- 3. el contenedor raíz pasa a ser el punto de montaje de ambos modos -->
-    <div id="studioRoot" class="studio-root" data-i18n-root>…contenido intacto…</div>
 ```
 
-`/js/pwa.js` se deja importado desde `boot-legacy.js` y `main.jsx` para no perder el registro
-del service worker en ninguno de los dos modos.
+El contenedor raíz **no se toca**: `web/studio.html:9` ya es `<div class="studio" id="studioRoot">`,
+que es a la vez el árbol que manipula el JS legacy y el punto de montaje de React. Añadirle clases o
+atributos nuevos (`.studio-root`, `data-i18n-root`) no tiene consumidor hoy y arriesga el grid
+`.studio`, así que queda fuera. El resto del markup —`/img/logo.svg`, `/manifest.webmanifest`,
+`/js/appearance.js`, `/css/app.css`— se queda literal: son rutas absolutas que resuelve el servidor Go,
+y Vite las deja intactas (lo verificado en build real: `href="/css/app.css"` sobrevive sin transformar).
+
+Dos avisos de Vite son **esperables** y no hay que silenciarlos: `<script src="/js/appearance.js"> …
+can't be bundled without type="module"` (poner `type="module"` cambiaría el orden de ejecución del
+selector de tema) y `/css/app.css doesn't exist at build time, it will remain unchanged`.
+
+`/js/pwa.js` lo importa `main.jsx` —con el prefijo de contenido— para las dos modalidades, y
+`boot-legacy.js` solo arranca `studio.js`: si lo importaran los dos, el service worker se registraría
+dos veces en modo legacy.
 
 ```js
 // ui/src/mode.js
@@ -857,7 +866,6 @@ import { assetBase } from "./mode.js";
 const base = assetBase(import.meta.url);
 
 export async function bootLegacy() {
-  await import(`${base}/js/pwa.js`);
   await import(`${base}/js/studio.js`);
 }
 ```
@@ -866,9 +874,12 @@ export async function bootLegacy() {
 // ui/src/main.jsx
 import "./styles/tokens.css";
 import "./styles/motion.css";
-import { uiMode, storedMode } from "./mode.js";
+import { uiMode, storedMode, assetBase } from "./mode.js";
 
 const mode = uiMode(new URLSearchParams(location.search), storedMode());
+// El service worker se registra en las dos modalidades y con el prefijo de
+// contenido: el modo legacy sin red necesita su precache igual que el shell.
+await import(`${assetBase(import.meta.url)}/js/pwa.js`);
 if (mode === "legacy") {
   const { bootLegacy } = await import("./boot-legacy.js");
   await bootLegacy();
@@ -907,7 +918,10 @@ export async function mountNext() {
 - [ ] **Step 4: Verificar**
 
 Run: `node scripts/build-ui.mjs && npm -C ui test -- tests/mode.test.jsx`
-Expected: build escribe `web/studio.html` y `js/studio-<hash>.js`; 4 tests PASS.
+Expected: build escribe `web/studio.html` y `js/studio-<hash>.js`; 4 tests PASS. El manifest pasa a
+indexar la página por clave `"studio.html"` (antes `"src/main.jsx"`) y aparecen chunks nuevos
+(`js/preload-helper-<hash>.js`, `js/mount-next-<hash>.js`) que `collectSwAssets` ya recoge. Los dos
+avisos de Vite documentados en el Step 3 tienen que aparecer: si falta otro aviso o error, no es esperable.
 
 Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
 Expected: `ok`.
