@@ -1,6 +1,7 @@
 // ui/src/mount-next.jsx
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "./styles/layout.css";
 import { installI18n } from "./i18n.js";
 import { createStudioBridge } from "./bridge/studio-bridge.js";
 import { createFixtureEngine } from "./bridge/fixture-engine.js";
