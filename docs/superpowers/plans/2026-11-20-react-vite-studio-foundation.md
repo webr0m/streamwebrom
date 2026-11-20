@@ -526,8 +526,13 @@ de `web/` para que ninguna ruta se pierda al pasar de una lista a otra.
 
 - [ ] **Step 5: Verificar**
 
-Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/ && node --check web/sw.js"`
-Expected: `ok …internal/server` y `node --check` sin salida (sintaxis válida).
+Run: `node --check web/sw.js`
+Expected: sin salida (sintaxis válida). En Windows: el WSL del propietario no tiene `node` en PATH
+(`/usr/bin/go` sí), así que un `node --check` dentro de `wsl bash -lc` devuelve 127 y no comprueba
+nada.
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
+Expected: `ok …internal/server`.
 
 Run: `node scripts/build-ui.mjs && wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go run ./cmd/streamwebrom -addr 127.0.0.1:18443 -stun= -data /tmp/swr-ui &"` luego `curl -s http://localhost:18443/sw.js | grep -c "studio-"`
 Expected: `1` o más — el sw servido contiene el bundle versionado y ningún `__SWR_SHELL__`.
@@ -1874,7 +1879,7 @@ export const cx = (...names) => names.filter(Boolean).join(" ");
 import { cx } from "./cx.js";
 import styles from "./Switch.module.css";
 
-export function Switch({ label, checked, onChange, disabled = false, className = "" }) {
+export function Switch({ label, checked, onChange, disabled = false, className = "", ...rest }) {
   return (
     <button
       type="button"
@@ -1884,12 +1889,19 @@ export function Switch({ label, checked, onChange, disabled = false, className =
       disabled={disabled}
       className={cx(styles.switch, checked && styles.on, className)}
       onClick={() => onChange?.(!checked)}
+      {...rest}
     >
       <span className={styles.knob} aria-hidden="true" />
     </button>
   );
 }
 ```
+
+`...rest` está aquí porque Task 10 necesita colgar atributos de prueba en el control
+(`data-role="visibility"`). Sin el spread, React descarta el atributo y el `data-*` nunca llega al
+DOM: el primitivo era opaco a los datos de sus consumidores. `IconButton` y `OverflowMenu` —los
+otros dos controles que `SourceTray` usa en la misma fila— ya aceptaban `...rest`; este era el
+único que no.
 
 ```css
 /* ui/src/components/primitives/Switch.module.css */
@@ -3896,10 +3908,13 @@ Expected: build con los nombres de chunk cambiados —las cinco regiones son alc
 determinismo compara el `sw-assets.json` en disco con un rebuild, así que si corres `node --test`
 antes del build, falla el golpe siguiente y se cura solo.
 
-Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && node --check web/js/studio.js && go test -count=1 ./internal/server/"`
-Expected: sin salida en el `--check` —ninguna lógica del motor fue tocada— y `ok` del paquete
-`internal/server`. El `cd` va al worktree: la ruta del repo principal comprobaría y testearía un
-árbol que esta rama no está cambiando.
+Run: `node --check web/js/studio.js`
+Expected: sin salida —ninguna lógica del motor fue tocada—. Va en Windows porque el WSL del
+propietario no tiene `node` en PATH.
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && go test -count=1 ./internal/server/"`
+Expected: `ok` del paquete `internal/server`. El `cd` va al worktree: la ruta del repo principal
+comprobaría y testearía un árbol que esta rama no está cambiando.
 
 `web/studio.html` sale regenerado con los hashes nuevos y ES de la rama (R32): se commitea, no se
 descarta. Los chunks con hash siguen ignorados.
