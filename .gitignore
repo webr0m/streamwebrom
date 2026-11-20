@@ -21,3 +21,6 @@ __pycache__/
 /desktop/out/
 /desktop/test/tone/bin/
 /desktop/test/tone/obj/
+
+# isolated workspaces for feature branches
+.worktrees/
