@@ -24,6 +24,11 @@ export default defineConfig({
       },
     },
   },
+  // @vitejs/plugin-react's babel pass runs for the client build only: under
+  // Vitest's SSR transform .jsx falls back to esbuild's classic runtime, so
+  // every rendered component would need `import React`. Pinning automatic here
+  // keeps src/ and tests/ on one JSX runtime.
+  esbuild: { jsx: "automatic" },
   server: {
     port: 5173,
     proxy: Object.fromEntries(
@@ -38,5 +43,6 @@ export default defineConfig({
     globals: false,
     setupFiles: ["tests/setup.js"],
     include: ["tests/**/*.test.jsx"],
+    css: { modules: { classNameStrategy: "non-scoped" } },
   },
 });
