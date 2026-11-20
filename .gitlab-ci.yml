@@ -6,6 +6,12 @@ default:
     paths: [.cache/go]
 variables:
   GOPATH: '$CI_PROJECT_DIR/.cache/go'
+.node22: &node22
+  image: node:22-bookworm
+.test-js-common: &test-js-common
+  <<: *node22
+  stage: test
+  needs: []
 test:
   stage: test
   before_script:
@@ -15,15 +21,50 @@ test:
     - go test -race -count=1 ./...
     - python3 scripts/jslint.py web/js
     - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+# The bundle check and the Go syntax check need different runtimes, so they are
+# separate jobs instead of one `make test` on a hand-assembled image: that way
+# each runner stays distro-free (apt/nodesource churn was the fragile part) and
+# `make all` in binaries keeps its ui prerequisite unmet-by-design.
 test-js:
-  stage: test
-  image: node:22-bookworm
+  <<: *test-js-common
   script:
+    # Same prerequisite as GitHub CI (ci.yml): the bundle has to exist before the
+    # tests that assert it run. Without this step ui-artifacts.test.mjs would
+    # depend on npm ci reaching the network from inside a test.
+    - node scripts/build-ui.mjs
     - node --test tests/*.test.mjs
     - for f in web/js/*.js; do node --input-type=module --check < "$f"; done
     - node --check web/sw.js
+test-ui:
+  <<: *test-js-common
+  needs: [test-js]
+  cache:
+    key: ui-node-modules
+    paths: [ui/node_modules]
+  script:
+    # Vitest lives in ui/node_modules/.bin, so the package manager runs with
+    # cwd=ui (npm --prefix does not move the script cwd since npm 11).
+    - cd ui && npm test
 binaries:
   stage: build
+  # make all chains the `ui` target unconditionally, so this job needs node and
+  # npm next to go; the default golang:1.27-bookworm ships neither (exit 127).
+  # node:22-bookworm carries npm out of the box; the Go toolchain is fetched
+  # from go.dev because Debian's own golang-go lags several minors behind
+  # go.mod. The URL is pinned per-architecture on purpose: a single hard-coded
+  # amd64 link would silently cross-compile for the wrong arch on arm64 runners.
+  image:
+    name: node:22-bookworm
+    entrypoint: [""]
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip git make
+    - GO_ARCH=$(dpkg --print-architecture)
+    - curl -fsSL "https://go.dev/dl/go1.27.0.linux-${GO_ARCH}.tar.gz" | tar -C /usr/local -xz
+    - export PATH="/usr/local/go/bin:$PATH"
+    - go version
+    # `make all` chains the ui prerequisite, so npm must resolve from the job
+    # shell exactly as scripts/build-ui.mjs spawns it.
+    - npm --version
   script:
     - make all
     - cd dist && sha256sum * > SHA256SUMS.txt
