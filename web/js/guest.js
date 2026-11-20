@@ -20,6 +20,9 @@ import { immersive } from "./immersive.js";
 import { RoomAudio, pictureInPicture } from "./room-audio.js";
 import { screenAudioNotice, resumeCaptureAudio, stopScreenCapture } from "./devices.js";
 import { chooseScreen } from "./screen-share.js";
+import { installI18n, t, onLangChange } from "./i18n.js";
+
+installI18n();
 
 const room = (params.get("room") || "").toLowerCase();
 if (!room) location.href = "/";
@@ -58,7 +61,7 @@ function selectNetwork(mode) {
   if (mode === "auto") url.searchParams.delete("network"); else url.searchParams.set("network", mode);
   history.replaceState(null, "", url);
   sig.useNetwork(mode);
-  if (entered) connectionStatus("Cambiando la ruta de audio y video…");
+  if (entered) connectionStatus(t("guest.switchingRoute"), "guest.switchingRoute");
 }
 $("#networkMode").onchange = () => selectNetwork($("#networkMode").value);
 let myId = "";
@@ -69,16 +72,24 @@ $("#name").value = params.get("label") || params.get("name") || savedName;
 if (params.get("password") || params.get("pw")) $("#pw").value = params.get("password") || params.get("pw");
 
 // ---------- pre-join ----------
+let roomTitle = "", roomGone = false, joinLabelKey = "guest.join";
+function renderRoomTitle() {
+  const node = $("#roomTitle");
+  if (!node) return;
+  if (roomGone) node.textContent = t("guest.roomMissing");
+  else node.textContent = roomTitle ? t("guest.joinRoomTitle", { title: roomTitle }) : t("guest.joinTitle");
+}
 api(`/api/rooms/${encodeURIComponent(room)}`).then((r) => {
-  $("#roomTitle").textContent = r.title ? `Unirse a “${r.title}”` : "Unirse al programa";
+  roomTitle = r.title || "";
+  renderRoomTitle();
   $("#pwBox").classList.toggle("hidden", !r.password);
-}).catch(() => { $("#roomTitle").textContent = "Esta sala no existe o ya terminó"; $("#joinBtn").disabled = true; });
+}).catch(() => { roomGone = true; renderRoomTitle(); $("#joinBtn").disabled = true; });
 
 let remoteKbps = 0; // set by the host (director) from the studio
 const videoKbps = () => remoteKbps || Number(params.get("bitrate") || params.get("vb")) || kbpsFor(Number(prefs.quality));
 const pubOpts = (name) => ({ kind: "camera", name, videoKbps: videoKbps(), fps: Number(prefs.fps) || 30, codec: prefs.codec, stereo: prefs.stereo, audioKbps: prefs.stereo ? 256 : 96 });
 
-let meterTimer;
+let meterTimer, noDeviceNotice = false;
 function showMeter(stream) {
   clearInterval(meterTimer);
   const lvl = levelMeter(stream);
@@ -100,7 +111,7 @@ async function startPreview() {
   if (!$("#devPre").children.length) await renderPanel($("#devPre"), prefs, onPrefChange);
   media.getTracks().forEach((t) => t.stop());
   media = await open();
-  if (!media.getTracks().length && !$("#devWarn").textContent) $("#devWarn").textContent = "No se detectó cámara ni micrófono. Puedes entrar igual para ver y chatear.";
+  if (!media.getTracks().length && !$("#devWarn").textContent) { noDeviceNotice = true; $("#devWarn").textContent = t("guest.noDevices"); }
   $("#preview").srcObject = media; mirrorPreview($("#preview"));
   showMeter(media);
   await renderPanel($("#devPre"), prefs, onPrefChange);
@@ -140,7 +151,7 @@ async function swapDevices(what, quiet = false) {
   if (kind === "audio") showMeter(media);
   $("#devCamCtl")?.replaceChildren(cameraControls(media.getVideoTracks()[0]) || "");
   sendMedia();
-  if (!quiet) toast(kind === "video" ? "Cámara cambiada" : "Micrófono cambiado", "ok");
+  if (!quiet) toast(kind === "video" ? t("guest.cameraSwitched") : t("guest.micSwitched"), "ok");
 }
 
 onDeviceChange(() => {
@@ -153,7 +164,7 @@ const previewReady = startPreview().catch(e => { $("#devWarn").textContent = exp
 $("#joinBtn").onclick = join;
 async function join() {
   const name = $("#name").value.trim();
-  if (!name) return toast("Escribe tu nombre", "err");
+  if (!name) return toast(t("guest.enterName"), "err");
   try { localStorage.setItem("swr.name", name); } catch {}
   $("#joinBtn").disabled = true;
   $("#networkMode").disabled = true;
@@ -162,10 +173,12 @@ async function join() {
     if (sig.mediaMode === "auto") {
       const cfg = await api("/api/config");
       sig.mediaMode = await automaticRoute(cfg, mode => {
-        $("#joinBtn").textContent = mode === "local" ? "Comprobando la conexión alternativa…" : "Comprobando la mejor conexión…";
+        joinLabelKey = mode === "local" ? "guest.checkingAlt" : "guest.checkingBest";
+        $("#joinBtn").textContent = t(joinLabelKey);
       }, { room, password: $("#pw").value });
     }
-    $("#joinBtn").textContent = "Entrando…";
+    joinLabelKey = "guest.joining";
+    $("#joinBtn").textContent = t(joinLabelKey);
     const invite = new URLSearchParams(location.hash.slice(1)).get("invite") || "";
     const m = await sig.connect({ type: "join", room, role: "guest", name, password: $("#pw").value, invite, rejoin: new URLSearchParams(location.hash.slice(1)).get("participant") || undefined });
     if (m.type === "waiting") { $("#pre").classList.add("hidden"); $("#waiting").classList.remove("hidden"); return; }
@@ -174,7 +187,8 @@ async function join() {
     toast(e.message, "err");
     $("#joinBtn").disabled = false;
     $("#networkMode").disabled = false;
-    $("#joinBtn").textContent = "Entrar";
+    joinLabelKey = "guest.join";
+    $("#joinBtn").textContent = t(joinLabelKey);
   }
 }
 if ((params.has("autostart") || params.has("autojoin") || params.has("aj")) && $("#name").value) setTimeout(join, 800);
@@ -183,8 +197,10 @@ let entered = false, rewait = false;
 let connectingMedia = false;
 let mediaGeneration = 0;
 let hadMediaConnection = false;
-function connectionStatus(text) {
+let lastConnectionKey = "";
+function connectionStatus(text, key = "") {
   if (sig.closed) return;
+  lastConnectionKey = key;
   // Initial entry only: weak signal, paused capture and transient ICE states
   // must never put a reconnect overlay over a live call.
   $("#connection").classList.toggle("hidden", hadMediaConnection || !text);
@@ -195,7 +211,7 @@ async function connectMedia() {
   if (!media.getTracks().length) { connectionStatus(""); return; }
   const generation = ++mediaGeneration;
   connectingMedia = true;
-  if (!hadMediaConnection) connectionStatus("Conectando audio y video…");
+  if (!hadMediaConnection) connectionStatus(t("guest.connectingMedia"), "guest.connectingMedia");
   try {
     pub?.stop(); pub = null;
     const fresh = await publish(sig, media, pubOpts($("#name").value));
@@ -219,8 +235,8 @@ sig.on("welcome", (m) => {
   if (rewait) { rewait = false; $("#waiting").classList.add("hidden"); $("#call").classList.remove("hidden"); resume(m); return; }
   if (!entered && !$("#waiting").classList.contains("hidden")) enter(m);
 });
-sig.on("denied", () => { document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card" }, el("h2", { text: "El anfitrión no aprobó tu ingreso." })))); });
-sig.on("kicked", () => { sig.close(); leave("El anfitrión te retiró de la sala."); });
+sig.on("denied", () => { document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card" }, el("h2", { text: t("guest.deniedTitle") })))); });
+sig.on("kicked", () => { sig.close(); leave(t("guest.kicked")); });
 sig.on("reconnected", (m) => {
   if (!entered) return; // still in the waiting room: the server re-sent "waiting" and the host sees the knock again
   if (m.type === "waiting") { // the server forgot us (e.g. it restarted): wait to be let back in
@@ -254,7 +270,7 @@ async function resume(m) {
       x.pub = fresh;
       if (fresh.id !== id) { extraCams.delete(id); extraCams.set(fresh.id,x); }
       if (x.tile) { x.tile.dataset.id = fresh.id; x.tile.dataset.peer = myId; }
-    } catch (e) { if (!sig.closed && sig.ws === socket) toast(`No se pudo restablecer la cámara adicional: ${e.message}`,"err"); }
+    } catch (e) { if (!sig.closed && sig.ws === socket) toast(t("guest.extraCamFailed", { error: e.message }),"err"); }
   }
   $("#chatlog").replaceChildren(); for (const c of m.chat || []) addChat(c); // catch up on what we missed
   sendMedia();
@@ -269,7 +285,7 @@ async function enter(m) {
   clearInterval(meterTimer);
   if (params.has("muted") || params.has("mute")) media.getAudioTracks().forEach((t) => (t.enabled = false));
   if (params.has("videomute") || params.has("vm")) media.getVideoTracks().forEach((t) => (t.enabled = false));
-  addTile("me", media, $("#name").value + " (tú)", true, levelMeter(media));
+  addTile("me", media, $("#name").value + " " + t("guest.youBadge"), true, levelMeter(media));
   await connectMedia();
   if (sig.closed) return;
   setMic(micOn()); setCam(camOn());
@@ -289,13 +305,13 @@ sig.on("chat", (m) => addChat(m.comment));
 sig.on("reaction", (m) => fly(m.text));
 sig.on("request", (m) => {
   switch (m.action) {
-    case "mute": setMic(false); toast("El anfitrión silenció tu micrófono"); break;
-    case "unmute": ask("El anfitrión te pide activar el micrófono", "Activar", () => setMic(true)); break;
-    case "camoff": setCam(false); toast("El anfitrión apagó tu cámara"); break;
-    case "camon": ask("El anfitrión te pide encender la cámara", "Encender", () => setCam(true)); break;
+    case "mute": setMic(false); toast(t("guest.hostMutedMic")); break;
+    case "unmute": ask(t("guest.hostAskUnmute"), t("guest.activate"), () => setMic(true)); break;
+    case "camoff": setCam(false); toast(t("guest.hostCamOff")); break;
+    case "camon": ask(t("guest.hostAskCamOn"), t("guest.turnOn"), () => setCam(true)); break;
     case "lowerhand": $("#handBtn").classList.remove("on"); break;
-    case "screenoff": if (screenPub) stopScreen(); toast("El anfitrión detuvo tu pantalla compartida"); break;
-    case "screenon": toast("Solicita autorización antes de compartir pantalla"); break;
+    case "screenoff": if (screenPub) stopScreen(); toast(t("guest.hostStoppedScreen")); break;
+    case "screenon": toast(t("guest.screenNeedsApproval")); break;
     default: remoteControl(m.action, m.value).catch((e) => toast(e.message, "err"));
   }
 });
@@ -316,7 +332,7 @@ async function remoteControl(action, v) {
       return report("stats", await remoteStats(pub));
     case "quality": {
       const extra = v?.stream ? extraCams.get(v.stream) : null;
-      if (v?.stream && v.stream !== pub?.id && !extra) throw new Error("La cámara solicitada ya no está disponible");
+      if (v?.stream && v.stream !== pub?.id && !extra) throw new Error(t("misc.guestCamGone"));
       const targetMedia = extra?.media || media, targetPrefs = extra ? { ...prefs } : prefs;
       const h = Number(v?.height), fps = Number(v?.fps), kbps = Number(v?.kbps);
       if (h && h >= 144 && h <= 2160) targetPrefs.quality = String(h);
@@ -330,30 +346,30 @@ async function remoteControl(action, v) {
         catch (e) { console.warn("applyConstraints", e); }
       }
       if (!ok && raw) {
-        if (extra) throw new Error("Esta cámara adicional no permite aplicar esa resolución");
+        if (extra) throw new Error(t("misc.guestCamNoResolution"));
         await swapDevices("video", true);
       }
       const targetPub = extra?.pub || pub;
       if (targetPub) await targetPub.setBitrate(rate, Number(targetPrefs.fps) || 30);
       if (!extra) savePrefs(prefs);
-      toast(`El anfitrión ajustó tu video: ${targetPrefs.quality}p · ${targetPrefs.fps} fps · ${rate} kbps`);
+      toast(t("guest.hostAdjustedVideo", { quality: targetPrefs.quality, fps: targetPrefs.fps, rate }));
       return report("quality", { ...await remoteSnapshot(extra?.media || media, targetPrefs, { videoKbps: rate }), stream: targetPub?.id });
     }
     case "device": {
       const kind = v?.kind === "audio" ? "audio" : "video";
       const { cams, mics } = await listDevices();
       const list = kind === "video" ? cams : mics;
-      if (!list.some((d) => d.deviceId === v?.deviceId)) throw new Error("Dispositivo no encontrado");
+      if (!list.some((d) => d.deviceId === v?.deviceId)) throw new Error(t("misc.guestDeviceMissing"));
       if (kind === "video") prefs.camera = v.deviceId; else prefs.mic = v.deviceId;
       savePrefs(prefs);
       await swapDevices(kind, true);
-      toast(kind === "video" ? "El anfitrión cambió tu cámara" : "El anfitrión cambió tu micrófono");
+      toast(kind === "video" ? t("guest.hostChangedCam") : t("guest.hostChangedMic"));
       return report("devices", await remoteSnapshot(media, prefs, { videoKbps: videoKbps() }));
     }
     case "camctl": {
-      const t = camTrack();
-      if (!t || !CAMCTL.includes(v?.name)) throw new Error("Control de cámara no disponible");
-      await t.applyConstraints({ advanced: [{ [v.name]: v.value }] });
+      const track = camTrack();
+      if (!track || !CAMCTL.includes(v?.name)) throw new Error(t("misc.guestCamControl"));
+      await track.applyConstraints({ advanced: [{ [v.name]: v.value }] });
       return;
     }
     case "gain": {
@@ -361,7 +377,7 @@ async function remoteControl(action, v) {
       if (!(g >= 0 && g <= 400)) return;
       prefs.gain = Math.round(g); savePrefs(prefs);
       await swapDevices("audio", true);
-      return toast(`El anfitrión ajustó tu micrófono a ${prefs.gain}%`);
+      return toast(t("guest.hostAdjustedMic", { level: prefs.gain }));
     }
     case "audio": {
       for (const k of ["echo", "denoise", "autogain", "stereo"]) if (typeof v?.[k] === "boolean") prefs[k] = v[k];
@@ -371,7 +387,7 @@ async function remoteControl(action, v) {
     case "deafen": case "undeafen":
       deafened = action === "deafen";
       for (const id of remotes.keys()) { const audio = roomAudio.get(id); if (audio) audio.muted = deafened; }
-      return toast(deafened ? "El anfitrión silenció lo que escuchas (por ejemplo, para que no se acople)" : "Vuelves a escuchar la sala");
+      return toast(deafened ? t("guest.deafenedNote") : t("guest.undeafenedNote"));
     case "message":
       return showHostMessage(String(v || "").slice(0, 500));
     case "reload": {
@@ -382,7 +398,7 @@ async function remoteControl(action, v) {
     case "transfer": {
       const u = new URL(location.href);
       u.searchParams.set("room", String(v || "")); u.searchParams.set("label", $("#name").value); u.searchParams.set("autostart", "1");
-      toast("El anfitrión te está moviendo a otra sala…");
+      toast(t("guest.transferringRoom"));
       sig.close(); pub?.stop();
       return setTimeout(() => location.replace(u.toString()), 600);
     }
@@ -391,7 +407,7 @@ async function remoteControl(action, v) {
 
 function showHostMessage(text) {
   if (!text) return;
-  const box = el("div", { class: "hostmsg" }, el("b", { text: "Mensaje del anfitrión" }), el("p", { text }), el("button", { class: "small primary", onclick: () => box.remove(), text: "Entendido" }));
+  const box = el("div", { class: "hostmsg" }, el("b", { text: t("guest.hostMessageTitle") }), el("p", { text }), el("button", { class: "small primary", onclick: () => box.remove(), text: t("guest.understood") }));
   document.body.append(box);
   setTimeout(() => box.remove(), 30000);
 }
@@ -399,7 +415,7 @@ sig.on("error", (m) => toast(m.error, "err"));
 
 function ask(text, btn, fn) {
   // Privacy: the host can turn things off, but turning them on needs the guest's click.
-  const box = el("div", { class: "toast ask" }, el("span", { text }), el("button", { class: "small primary", onclick: () => { fn(); box.remove(); }, text: btn }), el("button", { class: "small", onclick: () => box.remove(), text: "Ahora no" }));
+  const box = el("div", { class: "toast ask" }, el("span", { text }), el("button", { class: "small primary", onclick: () => { fn(); box.remove(); }, text: btn }), el("button", { class: "small", onclick: () => box.remove(), text: t("guest.notNow") }));
   ($("#toasts") || document.body).append(box);
   setTimeout(() => box.remove(), 15000);
 }
@@ -419,7 +435,7 @@ async function watch(id, kind, owner, name, revision) {
     const sub = await subscribe(sig, id);
     if (remotes.get(id) !== pending) { sub.close(); return; }
     const lvl = sub.stream.getAudioTracks().length ? levelMeter(sub.stream) : () => 0;
-    const tile = addTile(id, sub.stream, sub.name || name || "Invitado", false, lvl, kind, owner);
+    const tile = addTile(id, sub.stream, sub.name || name || t("guest.guestTile"), false, lvl, kind, owner);
     const entry = { sub, tile, level: lvl, video: tile.querySelector("video"), revision };
     remotes.set(id, entry);
   } catch { if (remotes.get(id) === pending) retryRemote(id, pending); }
@@ -447,13 +463,13 @@ function addTile(id, stream, name, mine, level, kind = "camera", owner = "") {
   v.play().catch(() => {});
   const audio = mine ? null : roomAudio.add(id, stream); if (audio) audio.muted = deafened;
   if (audio) applySink(audio, prefs.speaker);
-  const vol = mine ? null : el("input", { type: "range", min: 0, max: 1, step: 0.05, value: 1, title: "Volumen (solo para ti)", class: "tilevol", oninput: (e) => { if (audio) audio.volume = Number(e.target.value); } });
+  const vol = mine ? null : el("input", { type: "range", min: 0, max: 1, step: 0.05, value: 1, title: t("guest.volumeTitle"), class: "tilevol", oninput: (e) => { if (audio) audio.volume = Number(e.target.value); } });
   const tile = el("div", { class: "tile", "data-id": id, "data-name": name, "data-kind": kind, "data-peer": mine ? myId : owner }, v,
-    el("span", { class: "tile-latency", title: "Latencia de ida y vuelta (RTT) de este participante al servidor; no es el retraso total del video", text: "RTT —" }),
-    el("button", { class: "tile-focus", type: "button", "aria-label": `Ampliar video de ${name}`, "aria-pressed": "false" }),
+    el("span", { class: "tile-latency", title: t("guest.rttTitle"), text: t("guest.rttValue") }),
+    el("button", { class: "tile-focus", type: "button", "aria-label": t("guest.focusAria", { name }), "aria-pressed": "false" }),
     el("span", { class: "name", text: name }), vol);
   $("#grid").append(tile); updateHiddenCameras(); telemetry.refresh();
-  const t = setInterval(() => { if (!tile.isConnected) return clearInterval(t); tile.classList.toggle("speaking", level() > 0.15); }, 150);
+  const speakingTimer = setInterval(() => { if (!tile.isConnected) return clearInterval(speakingTimer); tile.classList.toggle("speaking", level() > 0.15); }, 150);
   return tile;
 }
 
@@ -470,7 +486,10 @@ function updateStageBadge() {
   const progMuted = state.stageMuted || mine.some((id) => state.muted?.[id]);
   const others = Object.entries(state.outputs || {}).filter(([, o]) => mine.some((id) => (o.stage || []).includes(id))).map(([n]) => n);
   const b = $("#stageState");
-  b.textContent = live ? (state.live ? "EN VIVO" : "en escenario") + (live && progMuted ? " · silenciado" : "") : others.length ? `en escena ${others.join(", ")}` : "backstage";
+  if (!b) return;
+  b.textContent = live
+    ? (state.live ? (progMuted ? t("guest.stageLiveMuted") : t("guest.stageLive")) : progMuted ? t("guest.stageOnStageMuted") : t("guest.stageOnStage"))
+    : others.length ? t("guest.stageOnStageOthers", { names: others.join(", ") }) : t("guest.stageBackstage");
   b.className = "pill " + (live ? "red" : "");
   renderScreenPermission();
 }
@@ -512,17 +531,17 @@ function renderScreenPermission() {
   const button = $("#screenBtn"), box = $("#screenShareStatus");
   if (!button || !box) return;
   const supported = !!navigator.mediaDevices?.getDisplayMedia;
-  const label = screenPub ? "Detener pantalla compartida" : screenPending ? "Cancelar solicitud de pantalla" : screenAllowed ? "Compartir pantalla autorizada" : "Solicitar compartir pantalla";
-  button.title = !supported ? "Este navegador no permite compartir pantalla" : !onLiveStage() ? "El anfitrión debe subirte al escenario para compartir pantalla" : label;
+  const label = screenPub ? t("guest.screenStopTitle") : screenPending ? t("guest.screenCancelRequestTitle") : screenAllowed ? t("guest.screenAuthorizedTitle") : t("guest.screenRequestTitle");
+  button.title = !supported ? t("guest.screenUnsupportedTitle") : !onLiveStage() ? t("guest.screenNeedsStageTitle") : label;
   button.setAttribute("aria-label", button.title);
   button.disabled = screenOpening || (!screenPub && !screenPending && (!onLiveStage() || !supported));
   button.classList.toggle("on", !!screenPub);
-  const text = screenPub ? "Compartiendo pantalla. El anfitrión controla su salida al escenario." : screenPending ? "Solicitud enviada. Esperando autorización del anfitrión…" : screenAllowed ? "El anfitrión autorizó tu pantalla. Elige qué compartir." : screenNotice;
+  const text = screenPub ? t("guest.screenSharingText") : screenPending ? t("guest.screenPendingText") : screenAllowed ? t("guest.screenAllowedText") : screenNotice;
   box.classList.toggle("hidden", !text);
   $("#screenShareText").textContent = text;
   $("#startScreen").classList.toggle("hidden", !screenAllowed || !!screenPub);
   $("#startScreen").disabled = screenOpening;
-  $("#cancelScreen").textContent = screenPub ? "Detener" : screenPending || screenAllowed ? "Cancelar" : "Cerrar";
+  $("#cancelScreen").textContent = screenPub ? t("guest.stop") : screenPending || screenAllowed ? t("guest.cancel") : t("guest.close");
 }
 function stopScreen(notify = true) {
   const active = screenAllowed || screenPending || screenPub || screenOpening;
@@ -539,15 +558,15 @@ function screenPermission(m) {
   else if (m.action === "allowed") { ++screenAttempt; screenAllowed = true; screenPending = false; screenNotice = ""; }
   else {
     stopScreen(false);
-    screenNotice = m.action === "denied" ? "El anfitrión rechazó la solicitud de pantalla." : m.action === "revoked" ? "El permiso de pantalla terminó. Puedes solicitarlo de nuevo cuando estés en el escenario." : "";
+    screenNotice = m.action === "denied" ? t("guest.screenDeniedNotice") : m.action === "revoked" ? t("guest.screenRevokedNotice") : "";
   }
   renderScreenPermission();
 }
 async function shareScreen() {
   if (screenPub || screenPending) return stopScreen();
   if (screenOpening) return;
-  if (!onLiveStage()) return toast("El anfitrión debe subirte al escenario antes de compartir pantalla.");
-  if (!navigator.mediaDevices?.getDisplayMedia) return toast("Este navegador no permite compartir pantalla. Usa un navegador compatible en un computador.", "err");
+  if (!onLiveStage()) return toast(t("guest.screenNeedsStageToast"));
+  if (!navigator.mediaDevices?.getDisplayMedia) return toast(t("guest.screenUnsupportedToast"), "err");
   const attempt = screenAttempt;
   if (!screenAllowed) {
     screenPending = true; renderScreenPermission();
@@ -562,10 +581,10 @@ async function shareScreen() {
     const opened = await chooseScreen();
     if (sig.closed || attempt !== screenAttempt || !screenAllowed || !onLiveStage()) { stopScreenCapture(opened); return; }
     screenMedia = opened;
-    const publication = await publish(sig, opened, { kind: "screen", name: $("#name").value + " · pantalla", videoKbps: 5000, contentHint: "detail", codec: prefs.codec, stereo: true, audioKbps: 192 });
+    const publication = await publish(sig, opened, { kind: "screen", name: $("#name").value + " · " + t("guest.screenLabel"), videoKbps: 5000, contentHint: "detail", codec: prefs.codec, stereo: true, audioKbps: 192 });
     if (sig.closed || attempt !== screenAttempt || !screenAllowed) { publication.stop(); stopScreenCapture(opened); return; }
     screenPub = publication;
-    opened.addEventListener('captureerror',e=>{stopScreen();toast(e.detail||'La captura se detuvo',"err")},{once:true});
+    opened.addEventListener('captureerror',e=>{stopScreen();toast(e.detail||t("guest.captureStopped"),"err")},{once:true});
     toast(screenAudioNotice(opened), opened.getAudioTracks().length ? "ok" : "");
     opened.getVideoTracks()[0].onended = () => stopScreen();
   } catch (e) { if (attempt === screenAttempt) { stopScreen(); if (!sig.closed && e.name !== "NotAllowedError" && e.name !== "AbortError") toast(explain(e), "err"); } }
@@ -580,11 +599,11 @@ $("#cam2Btn").onclick = async () => {
   const { cams } = await listDevices();
   const used = media.getVideoTracks()[0]?.getSettings().deviceId;
   const options = cams.filter((c) => c.deviceId !== used);
-  if (!options.length) return toast("No hay otra cámara conectada.", "err");
+  if (!options.length) return toast(t("guest.noOtherCam"), "err");
   const dlg = el("dialog", { class: "card devdialog" },
-    el("h3", { text: "Agregar otra cámara" }),
-    ...options.map((c, i) => el("button", { onclick: async () => { dlg.close(); dlg.remove(); await addExtraCam(c); }, text: c.label || `Cámara ${i + 2}` })),
-    el("button", { class: "small", onclick: () => { dlg.close(); dlg.remove(); }, text: "Cancelar" }));
+    el("h3", { text: t("guest.addCamera") }),
+    ...options.map((c, i) => el("button", { onclick: async () => { dlg.close(); dlg.remove(); await addExtraCam(c); }, text: c.label || t("guest.cameraNth", { n: i + 2 }) })),
+    el("button", { class: "small", onclick: () => { dlg.close(); dlg.remove(); }, text: t("guest.cancel") }));
   document.body.append(dlg); dlg.showModal();
 };
 async function addExtraCam(dev) {
@@ -592,12 +611,12 @@ async function addExtraCam(dev) {
   if (sig.closed) { stream.getTracks().forEach(t => t.stop()); return; }
   warnings.forEach((w) => toast(w, "err"));
   if (!stream.getVideoTracks().length) return;
-  const name = `${$("#name").value} · ${(dev.label || "cámara 2").slice(0, 24)}`;
+  const name = `${$("#name").value} · ${(dev.label || t("guest.secondCamera")).slice(0, 24)}`;
   let slot=1; while ([...extraCams.values()].some(e=>e.slot===slot)) slot++;
   let p;
   try { p = await publish(sig, stream, { ...pubOpts(name), name, stream: "camera-slot-" + slot }); }
   catch (e) { stream.getTracks().forEach(t => t.stop()); if (!sig.closed) toast(e.message, "err"); return; }
-  const tile = addTile(p.id, stream, name + " (tú)", true, () => 0);
+  const tile = addTile(p.id, stream, name + " " + t("guest.youBadge"), true, () => 0);
   const entry = { pub:p, media:stream, slot, tile };
   extraCams.set(p.id, entry);
   const close = () => { entry.pub.stop(); stream.getTracks().forEach(t => t.stop()); extraCams.delete(entry.pub.id); tile.remove(); };
@@ -605,7 +624,7 @@ async function addExtraCam(dev) {
   stream.getVideoTracks()[0].onended = close;
 }
 
-$("#leaveBtn").onclick = () => leave("Saliste de la sala.");
+$("#leaveBtn").onclick = () => leave(t("guest.leftRoom"));
 
 function leave(text) {
   // Closing signalling first avoids queued unpublish operations delaying the
@@ -622,7 +641,7 @@ function leave(text) {
   // A different query forces a fresh document while preserving the invitation.
   const back = new URL(location.href);
   back.searchParams.set("reenter", crypto.randomUUID());
-  document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card col" }, el("h2", { text }), el("a", { class: "btn", href: back.href, text: "Volver a entrar" }))));
+  document.body.replaceChildren(el("div", { class: "landing" }, el("div", { class: "card col" }, el("h2", { text }), el("a", { class: "btn", href: back.href, text: t("guest.rejoin") }))));
 }
 
 // Keyboard: M mic, V camera, hold Space = push-to-talk while muted (Discord style)
@@ -641,7 +660,7 @@ function addChat(c) {
   appendChat($("#chatlog"), msg);
   if ($("#chat").classList.contains("hidden") && c.peerId !== myId) {
     $("#chatBtn").classList.add("on");
-    if (msg.dataset.mention) toast(`${c.from} te mencionó en el chat`);
+    if (msg.dataset.mention) toast(t("guest.mentioned", { name: c.from }));
   }
 }
 const composer = mountComposer($("#chatInput").parentElement, $("#chatInput"), (x) => sig.send(x.sticker ? { type: "chat", kind: "sticker", text: x.sticker } : { type: "chat", text: x.text }));
@@ -673,10 +692,29 @@ async function resumeForeground() {
       const tracks = kind === "audio" ? media.getAudioTracks() : media.getVideoTracks();
       if (tracks.some(t => t.readyState === "ended")) await swapDevices(kind === "audio" ? "audio" : "video", true);
     }
-  } catch (e) { if (!sig.closed) toast(`No se pudo recuperar la llamada: ${explain(e)}`, "err"); }
+  } catch (e) { if (!sig.closed) toast(t("guest.recoveryFailed", { error: explain(e) }), "err"); }
   finally { foregroundRecovery = false; }
 }
 document.addEventListener("visibilitychange", resumeForeground);
 document.addEventListener("resume", resumeForeground);
 window.addEventListener("pageshow", resumeForeground);
 window.addEventListener("online", resumeForeground);
+
+// Language switch: i18n rewrites the static markup, but these labels are built
+// by this module, so they have to be redrawn against the new dictionary too.
+function refreshDevicePanels() {
+  const target = $("#devDialog")?.open ? $("#devPanel") : $("#pre").classList.contains("hidden") ? null : $("#devPre");
+  if (target && target.children.length) renderPanel(target, prefs, onPrefChange);
+  $("#camCtlPre").replaceChildren(cameraControls(media.getVideoTracks()[0]) || "");
+  if (entered) $("#devCamCtl")?.replaceChildren(cameraControls(media.getVideoTracks()[0]) || "");
+}
+onLangChange(() => {
+  renderRoomTitle();
+  const joinBtn = $("#joinBtn");
+  if (joinBtn) joinBtn.textContent = t(joinLabelKey);
+  if ($("#devWarn") && noDeviceNotice) $("#devWarn").textContent = t("guest.noDevices");
+  if ($("#connectionText") && lastConnectionKey) $("#connectionText").textContent = t(lastConnectionKey);
+  if (entered) updateStageBadge();
+  renderScreenPermission();
+  refreshDevicePanels();
+});

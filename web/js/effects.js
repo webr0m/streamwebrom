@@ -15,23 +15,30 @@
 import { segmentationClient } from "./segmentation-client.js";
 import { effectBudget } from "./effect-budget.js";
 import { el, toast } from "./rtc.js";
+import { t, onLangChange } from "./i18n.js";
 
+// Labels carry their translation key in data-i18n so a language switch rewrites
+// them in place (i18n.renderStatic walks [data-i18n] on every change).
+const tx = (key, attrs = {}) => ({ ...attrs, "data-i18n": key, text: t(key) });
+const opt = (value, key) => el("option", tx(key, { value }));
+
+// The lists hold keys, not strings: translated when the panel is drawn.
 export const EFFECTS = [
-  ["none", "Sin efecto"],
-  ["blur", "Desenfocar fondo"],
-  ["blur-strong", "Desenfocar fondo (fuerte)"],
-  ["bg", "Fondo virtual (imagen, video o color)"],
-  ["replace", "Reemplazar mi cámara por imagen o video"],
+  ["none", "effects.none"],
+  ["blur", "effects.blur"],
+  ["blur-strong", "effects.blurStrong"],
+  ["bg", "effects.bg"],
+  ["replace", "effects.replace"],
 ];
 
 // Built-in backgrounds (drawn, so nothing to download).
 export const PRESETS = [
-  ["studio", "Estudio morado", ["#2a1458", "#7c5cff"]],
-  ["night", "Azul noche", ["#050b1f", "#1e4fa8"]],
-  ["sunset", "Atardecer", ["#ff6a3d", "#9b2c8f"]],
-  ["office", "Gris oficina", ["#3b4250", "#a7aebb"]],
-  ["green", "Verde croma (para OBS)", ["#00b140", "#00b140"]],
-  ["blue", "Azul croma", ["#0047bb", "#0047bb"]],
+  ["studio", "effects.presetStudio", ["#2a1458", "#7c5cff"]],
+  ["night", "effects.presetNight", ["#050b1f", "#1e4fa8"]],
+  ["sunset", "effects.presetSunset", ["#ff6a3d", "#9b2c8f"]],
+  ["office", "effects.presetOffice", ["#3b4250", "#a7aebb"]],
+  ["green", "effects.presetGreen", ["#00b140", "#00b140"]],
+  ["blue", "effects.presetBlue", ["#0047bb", "#0047bb"]],
 ];
 
 // Images/videos the user picked this session (object URLs are not persisted;
@@ -41,8 +48,8 @@ const assets = { bg: null, replace: null };
 /** Remember an uploaded file for "bg" or "replace". Returns a short description. */
 export async function setAsset(slot, file, prefs) {
   if (!file) return "";
-  if (!/^(image|video)\//.test(file.type)) throw new Error("Usa una imagen (JPG, PNG, WebP, GIF) o un video (MP4, WebM).");
-  if (file.size > 300 * 1024 * 1024) throw new Error("Archivo muy grande (máx. 300 MB).");
+  if (!/^(image|video)\//.test(file.type)) throw new Error(t("misc.effectsUnsupportedFile"));
+  if (file.size > 300 * 1024 * 1024) throw new Error(t("misc.effectsFileTooLarge"));
   const url = URL.createObjectURL(file);
   assets[slot]?.revoke?.();
   assets[slot] = { url, kind: file.type.startsWith("video/") ? "video" : "image", name: file.name, revoke: () => URL.revokeObjectURL(url) };
@@ -55,7 +62,7 @@ export async function setAsset(slot, file, prefs) {
 function assetFor(slot, prefs) {
   if (assets[slot]) return assets[slot];
   const saved = prefs[slot === "bg" ? "effectBgImage" : "effectReplaceImage"];
-  return saved ? { url: saved, kind: "image", name: "imagen guardada" } : null;
+  return saved ? { url: saved, kind: "image", name: t("effects.savedImage") } : null;
 }
 
 export const effectActive = (p) => !!p.effect && p.effect !== "none";
@@ -130,7 +137,7 @@ export async function applyEffect(track, p) {
 
   const bgAsset = mode === "bg" && !p.effectPreset ? mediaElement(assetFor("bg", p)) : null;
   const replaceAsset = mode === "replace" ? mediaElement(assetFor("replace", p)) : null;
-  if (mode === "replace" && !replaceAsset) toast("Elige una imagen o video para reemplazar tu cámara.", "err");
+  if (mode === "replace" && !replaceAsset) toast(t("effects.replaceNeedsAsset"), "err");
 
   const segmented = ["blur", "blur-strong", "bg"].includes(mode);
   let client = null;
@@ -173,7 +180,7 @@ export async function applyEffect(track, p) {
     } catch (e) {
       client?.stop(); cam?.pause(); if (cam) cam.srcObject = null;
       bgAsset?.pause?.(); replaceAsset?.pause?.();
-      console.warn("segmenter worker", e); toast("No se pudo iniciar el efecto sin bloquear la cámara; envío la cámara normal.", "err");
+      console.warn("segmenter worker", e); toast(t("effects.segmenterFailed"), "err");
       return track;
     }
   }
@@ -249,26 +256,24 @@ export async function applyEffect(track, p) {
 
 /** The "Efectos de video" block for the settings panel. onChange() reopens the camera. */
 export function effectsPanel(prefs, onChange) {
-  const sel = el("select", { id: "dev-effect" }, ...EFFECTS.map(([v, t]) => el("option", { value: v, text: t })));
+  const sel = el("select", { id: "dev-effect" }, ...EFFECTS.map(([v, key]) => opt(v, key)));
   sel.value = prefs.effect || "none";
-  const preset = el("select", { id: "dev-effect-preset" }, el("option", { value: "", text: "Mi imagen o video…" }), ...PRESETS.map(([v, t]) => el("option", { value: v, text: t })));
+  const preset = el("select", { id: "dev-effect-preset" }, opt("", "effects.myImageVideo"), ...PRESETS.map(([v, key]) => opt(v, key)));
   preset.value = prefs.effectPreset || "";
   const file = el("input", { type: "file", accept: "image/*,video/*" });
   const info = el("span", { class: "muted", style: "font-size:12px" });
   const showInfo = () => {
     const slot = sel.value === "replace" ? "replace" : "bg";
     const a = assetFor(slot, prefs);
-    info.textContent = a ? `Usando: ${a.name}` : (slot === "replace" || !preset.value ? "Aún no elegiste archivo." : "");
+    // Dynamic text: rebuilt on language change through the listener below.
+    info.textContent = a ? t("effects.using", { name: a.name }) : (slot === "replace" || !preset.value ? t("effects.noFileYet") : "");
   };
-  const performanceMode = el("select", { id: "dev-effect-performance" },
-    el("option", { value: "fast", text: "Baja latencia (recomendado, hasta 720p)" }),
-    el("option", { value: "balanced", text: "Equilibrado (hasta 1080p)" }),
-    el("option", { value: "detail", text: "Más detalle (mayor consumo)" }));
+  const performanceMode = el("select", { id: "dev-effect-performance" }, opt("fast", "effects.perfFast"), opt("balanced", "effects.perfBalanced"), opt("detail", "effects.perfDetail"));
   performanceMode.value = prefs.effectPerformance || "fast";
   performanceMode.onchange = () => { prefs.effectPerformance = performanceMode.value; onChange("video"); };
-  const performanceRow = el("div", {}, el("label", { text: "Rendimiento del efecto" }), performanceMode);
-  const presetRow = el("div", {}, el("label", { text: "Fondo" }), preset);
-  const fileRow = el("div", {}, el("label", { text: "Imagen o video (se queda en tu equipo)" }), file, info);
+  const performanceRow = el("div", {}, el("label", tx("effects.performance")), performanceMode);
+  const presetRow = el("div", {}, el("label", tx("effects.background")), preset);
+  const fileRow = el("div", {}, el("label", tx("effects.fileLabel")), file, info);
   const sync = () => {
     presetRow.classList.toggle("hidden", sel.value !== "bg");
     fileRow.classList.toggle("hidden", !(sel.value === "replace" || (sel.value === "bg" && !preset.value)));
@@ -284,7 +289,10 @@ export function effectsPanel(prefs, onChange) {
     file.value = "";
   };
   sync();
-  return el("details", { class: "camdetails", open: effectActive(prefs) }, el("summary", { text: "✨ Efectos de video (fondo virtual, desenfoque, imagen)" }),
-    el("div", { class: "col", style: "margin-top:8px" }, el("div", {}, el("label", { text: "Efecto" }), sel), performanceRow, presetRow, fileRow,
-      el("p", { class: "muted", style: "margin:0;font-size:12px", text: "El recorte se procesa en un worker de tu equipo sin acumular fotogramas. Si el equipo se sobrecarga se prioriza video reciente. Para usar filtros de OBS, selecciona OBS Virtual Camera como cámara y deja este efecto desactivado." })));
+  // "Usando: …" is not a plain dictionary lookup, so it follows the language here.
+  const details = el("details", { class: "camdetails", open: effectActive(prefs) }, el("summary", tx("effects.summary")),
+    el("div", { class: "col", style: "margin-top:8px" }, el("div", {}, el("label", tx("effects.effect")), sel), performanceRow, presetRow, fileRow,
+      el("p", { class: "muted", style: "margin:0;font-size:12px" }, el("span", tx("effects.note")))));
+  const drop = onLangChange(() => { if (details.isConnected) showInfo(); else drop(); });
+  return details;
 }

@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // RTT is a round trip to the SFU, not glass-to-glass video delay.
 export function transportMetrics(report) {
   let pair = null, jitter = null;
@@ -30,7 +31,7 @@ export function roomTelemetry(sig, ownPC, ping, update) {
   const welcome = e => { peers.clear(); for (const p of e.detail.peers || []) peers.set(p.id, p.network); paint(); tick(); };
   const network = e => { peers.set(e.detail.peerId, e.detail.value); paint(); };
   const left = e => { peers.delete(e.detail.peerId); paint(); };
-  const disconnected = () => { generation++; peers.clear(); if (ping) ping.textContent = "Sala —"; paint(); };
+  const disconnected = () => { generation++; peers.clear(); if (ping) ping.textContent = t("misc.pingIdle"); paint(); };
   async function tick() {
     if (stopped || running || sig.closed || sig.ws?.readyState !== 1) return;
     running = true;
@@ -40,10 +41,10 @@ export function roomTelemetry(sig, ownPC, ping, update) {
       const roomPing = Math.round(performance.now() - start), pc = ownPC();
       const media = pc?.connectionState === "connected" ? transportMetrics(await pc.getStats()) : { rtt: null, jitter: null };
       if (stopped || epoch !== generation || socket !== sig.ws) return;
-      if (ping) ping.textContent = `Sala ${roomPing} ms`;
+      if (ping) ping.textContent = t("misc.pingMs", { ms: roomPing });
       sig.send({ type: "latency", value: { ...media, roomPing, batteryPercent: Number.isFinite(battery?.level) ? Math.round(Math.max(0, Math.min(1, battery.level)) * 100) : null, charging: battery ? !!battery.charging : null } });
       paint();
-    } catch { if (!stopped && epoch === generation && ping) ping.textContent = "Sala —"; }
+    } catch { if (!stopped && epoch === generation && ping) ping.textContent = t("misc.pingIdle"); }
     finally { running = false; }
   }
   for (const type of ["peer-updated", "peer-joined"]) sig.addEventListener(type, receive);

@@ -464,6 +464,8 @@ body:has(.studio.cinema) #toasts { display:none; }
 .page-toolbar { min-height:64px; padding:12px clamp(16px,4vw,64px); display:flex; justify-content:space-between; align-items:center; gap:12px; background:var(--panel); border-bottom:1px solid var(--line); }
 .appearance-control { display:flex; align-items:center; gap:8px; margin:0; white-space:nowrap; }
 .appearance-control select, .guest-heading select { width:auto; min-width:100px; padding:7px 10px; font-size:12px; }
+.lang-slot { display:inline-flex; align-items:center; }
+.lang-slot select { width:auto; min-width:96px; padding:7px 10px; font-size:12px; }
 .guest-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
 .home-page .landing { min-height:calc(100dvh - 64px); padding:40px clamp(16px,4vw,64px); }
 .landing .hero { max-width:1160px; gap:56px; }

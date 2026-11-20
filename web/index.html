@@ -2,38 +2,38 @@
 <html lang="es">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>StreamWebRom · Estudio de streaming</title>
+<title data-i18n="home.title">StreamWebRom · Estudio de streaming</title>
 <link rel="icon" href="/img/logo.svg"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#141518"><link rel="apple-touch-icon" href="/img/icon-192.png"><script src="/js/appearance.js"></script><link rel="stylesheet" href="/css/app.css">
 </head>
 <body class="home-page">
-<header class="page-toolbar"><a class="brand" href="/"><img src="/img/logo.svg" alt="">StreamWebRom</a><label class="appearance-control"><span>Tema visual</span><select data-theme-picker aria-label="Tema visual"><option value="light">Día</option><option value="dark">Noche</option><option value="auto">Automático</option></select></label></header>
+<header class="page-toolbar"><a class="brand" href="/"><img src="/img/logo.svg" alt="">StreamWebRom</a><span class="lang-slot" data-lang-slot></span><label class="appearance-control"><span data-i18n="home.theme">Tema visual</span><select data-theme-picker data-i18n-aria="home.theme" aria-label="Tema visual"><option value="light" data-i18n="home.themeLight">Día</option><option value="dark" data-i18n="home.themeDark">Noche</option><option value="auto" data-i18n="home.themeAuto">Automático</option></select></label></header>
 <main class="landing">
   <div class="hero">
     <section>
       <div class="brand"><img src="/img/logo.svg" alt="">StreamWebRom</div>
-      <h1 style="margin-top:22px">Tu estudio en vivo.<br>Directo a OBS, YouTube y Twitch.</h1>
-      <p class="muted">Invitados por enlace, sin instalar nada. Latencia ultrabaja con WebRTC, salida limpia para OBS, multistream RTMP, grabación por invitado y branding en vivo.</p>
+      <h1 style="margin-top:22px"><span data-i18n="home.heroTitle">Tu estudio en vivo.</span><br><span data-i18n="home.heroSubtitle">Directo a OBS, YouTube y Twitch.</span></h1>
+      <p class="muted" data-i18n="home.heroLead">Invitados por enlace, sin instalar nada. Latencia ultrabaja con WebRTC, salida limpia para OBS, multistream RTMP, grabación por invitado y branding en vivo.</p>
       <div class="features">
-        <div>🎥 Invitados con un link</div><div>🧩 Salida para OBS (Browser Source y WHEP)</div>
-        <div>📡 Multistream a varias plataformas</div><div>🎬 Escenas y 8 layouts</div>
-        <div>🏷️ Banners, ticker, logo y nombres</div><div>💬 Chat y comentarios en pantalla</div>
-        <div>⏺️ Grabación aislada por invitado</div><div>🚪 Sala de espera y backstage</div>
+        <div data-i18n="home.featureGuestsLink">🎥 Invitados con un link</div><div data-i18n="home.featureObsOutput">🧩 Salida para OBS (Browser Source y WHEP)</div>
+        <div data-i18n="home.featureMultistream">📡 Multistream a varias plataformas</div><div data-i18n="home.featureScenes">🎬 Escenas y 8 layouts</div>
+        <div data-i18n="home.featureBranding">🏷️ Banners, ticker, logo y nombres</div><div data-i18n="home.featureChat">💬 Chat y comentarios en pantalla</div>
+        <div data-i18n="home.featureRecording">⏺️ Grabación aislada por invitado</div><div data-i18n="home.featureBackstage">🚪 Sala de espera y backstage</div>
       </div>
     </section>
     <section class="card col">
-      <span class="section-label">Tu próxima transmisión</span><h2>Crear estudio</h2>
-      <div><label for="roomEngine">Servicio de la sala</label><select id="roomEngine"><option value="local">StreamWebRom · relé local</option><option value="vdo">VDO.Ninja · sala independiente</option></select><p id="roomEngineHelp" class="muted">Nuestro estudio completo, con relé local. El anfitrión puede habilitar Cloudflare desde una sala con contraseña.</p></div>
-      <div><label for="title">Nombre del programa</label><input id="title" placeholder="Mi show en vivo" maxlength="120"></div>
-      <div><label for="room">ID de sala (opcional)</label><input id="room" placeholder="se genera automáticamente" maxlength="48" pattern="[a-z0-9_-]+"></div>
-      <div><label for="pw">Contraseña para invitados (opcional)</label><input id="pw" type="password" maxlength="128" autocomplete="new-password"></div>
-      <label class="row"><input id="lobby" type="checkbox"> Sala de espera: aprobar a cada invitado</label>
-      <button class="primary" id="create">Crear estudio</button>
-      <button class="hidden" id="install">⬇ Instalar como app</button>
+      <span class="section-label" data-i18n="home.nextStream">Tu próxima transmisión</span><h2 data-i18n="home.createStudio">Crear estudio</h2>
+      <div><label for="roomEngine" data-i18n="home.roomService">Servicio de la sala</label><select id="roomEngine"><option value="local" data-i18n="home.engineLocal">StreamWebRom · relé local</option><option value="vdo" data-i18n="home.engineVdo">VDO.Ninja · sala independiente</option></select><p id="roomEngineHelp" class="muted" data-i18n="home.roomEngineHelpLocal">Nuestro estudio completo, con relé local. El anfitrión puede habilitar Cloudflare desde una sala con contraseña.</p></div>
+      <div><label for="title" data-i18n="home.programName">Nombre del programa</label><input id="title" data-i18n-placeholder="home.programNamePlaceholder" placeholder="Mi show en vivo" maxlength="120"></div>
+      <div><label for="room" data-i18n="home.roomIdOptional">ID de sala (opcional)</label><input id="room" data-i18n-placeholder="home.roomIdAutoPlaceholder" placeholder="se genera automáticamente" maxlength="48" pattern="[a-z0-9_-]+"></div>
+      <div><label for="pw" data-i18n="home.guestPasswordOptional">Contraseña para invitados (opcional)</label><input id="pw" type="password" maxlength="128" autocomplete="new-password"></div>
+      <label class="row"><input id="lobby" type="checkbox"> <span data-i18n="home.lobbyCheck">Sala de espera: aprobar a cada invitado</span></label>
+      <button class="primary" id="create" data-i18n="home.createStudio">Crear estudio</button>
+      <button class="hidden" id="install" data-i18n="home.installApp">⬇ Instalar como app</button>
       <hr style="border:0;border-top:1px solid var(--line);width:100%">
-      <h3>¿Te invitaron?</h3>
-      <div class="row"><input id="joinRoom" placeholder="ID de sala"><button id="join">Entrar</button></div>
+      <h3 data-i18n="home.invitedTitle">¿Te invitaron?</h3>
+      <div class="row"><input id="joinRoom" data-i18n-placeholder="home.roomIdField" placeholder="ID de sala"><button id="join" data-i18n="home.join">Entrar</button></div>
       <div id="savedStudios" class="saved-studios"></div><div id="recent" class="list"></div>
-      <a href="/diagnostics">Comprobar conexión, cámara y servidor</a>
+      <a href="/diagnostics" data-i18n="home.checkConnection">Comprobar conexión, cámara y servidor</a>
     </section>
   </div>
 </main>

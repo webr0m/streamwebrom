@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix='swr-audio-') as folder, sync_playwright
         w.setparams((1,2,48000,0,'NONE','not compressed'))
         w.writeframes(b''.join(struct.pack('<h',int(8000*math.sin(2*math.pi*440*i/48000))) for i in range(48000*3)))
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=flags+['--use-file-for-fake-audio-capture='+str(wav)])
-    ctx=browser.new_context(permissions=['camera','microphone'],service_workers='block',viewport={'width':1440,'height':1000})
+    ctx=browser.new_context(locale='es-ES',permissions=['camera','microphone'],service_workers='block',viewport={'width':1440,'height':1000})
     ctx.add_init_script(INIT)
     if args.preview_js:
         for name in ['studio.js','guest.js','rtc.js','connection-health.js']:

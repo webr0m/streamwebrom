@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright, expect
 p=argparse.ArgumentParser();p.add_argument('--url',default='http://localhost:18443');p.add_argument('--browser');p.add_argument('--screenshots');p.add_argument('--css',help='Preview a working-tree stylesheet against an existing disposable server');args=p.parse_args()
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required'])
-    ctx=browser.new_context(viewport={'width':1440,'height':1000},permissions=['camera','microphone'],service_workers='block')
+    ctx=browser.new_context(locale='es-ES',viewport={'width':1440,'height':1000},permissions=['camera','microphone'],service_workers='block')
     if args.css:ctx.route('**/css/app.css',lambda route:route.fulfill(content_type='text/css',body=Path(args.css).read_text(encoding='utf8')))
     ctx.route('https://vdo.ninja/**',lambda route:route.fulfill(content_type='text/html',body='<title>Official app fixture</title><body style="margin:0;background:#182233;color:white">External application fixture</body>'))
     page=ctx.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))

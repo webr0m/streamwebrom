@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { moduleURL } from './module-url.mjs';
 globalThis.location={search:'',hash:''};
 const rtcURL=await moduleURL('rtc.js');
-const source=(await readFile(new URL('../web/js/network.js',import.meta.url),'utf8')).replace('"./rtc.js"',JSON.stringify(rtcURL));
+const i18nURL=await moduleURL('i18n.js');
+const source=(await readFile(new URL('../web/js/network.js',import.meta.url),'utf8')).replace('"./rtc.js"',JSON.stringify(rtcURL)).replace('"./i18n.js"',JSON.stringify(i18nURL));
 const {chooseRoute,routeCandidates}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 const cfg={ice:[{urls:'turns:cloud.test:443?transport=tcp'}],localIce:[{urls:'turns:local.test:443?transport=tcp'}],relay:{provider:'cloudflare'}};
 

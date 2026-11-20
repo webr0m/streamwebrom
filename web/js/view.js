@@ -9,10 +9,13 @@
 //   &audioonly=1 sound only · &status=0 hide status text · &transparent=1
 //   &stats=1 show resolution / fps / bitrate overlay
 import { $, params, hashParams, Signal, subscribe, staleRevision } from "./rtc.js";
+import { installI18n, t, onLangChange } from "./i18n.js";
 import { singleOutput } from "./output-quality.js";
 import { watchConnection } from "./connection-health.js";
 import { Compositor, programGain } from "./compositor.js";
 import { needsOutputSource } from "./bandwidth.js";
+
+installI18n();
 
 const room = (params.get("room") || "").toLowerCase();
 const key = hashParams.get("key") || params.get("key") || "";
@@ -35,7 +38,18 @@ if (audioOnly) single.style.visibility = "hidden";
 const framing = kind => document.body.classList.toggle("contain", params.get("cover") === "0" || (params.get("cover") !== "1" && kind === "screen"));
 framing();
 const status = $("#status");
-const say = (t) => { status.textContent = t; status.classList.toggle("hidden", !t || params.get("status") === "0"); };
+// Written from here on, so the static i18n binding must not fight it.
+status.removeAttribute("data-i18n");
+let said = null;
+const say = (text) => {
+  if (!text) said = null;
+  status.textContent = text;
+  status.classList.toggle("hidden", !text || params.get("status") === "0");
+};
+// Language-agnostic status: the key and its vars are kept so a language switch
+// can repaint whatever the page is currently saying.
+const sayKey = (key, vars) => { said = { key, vars }; say(t(key, vars)); };
+onLangChange(() => { if (said) say(t(said.key, said.vars)); });
 
 let state = {};
 const sources = new Map();
@@ -60,11 +74,11 @@ async function recover(info, entry) {
   sources.delete(info.id); entry.stopWatch?.(); clearTimeout(entry.frameTimer); entry.sub?.close(); entry.video.srcObject = null;
   const audio = audios.get(info.id); if (audio) { audio.pause(); audio.srcObject = null; audios.delete(info.id); }
   if (!explicitRoute && !triedLocal && sig.localIce.length && !switching) {
-    switching = true; triedLocal = true; sig.mediaMode = "local"; say("probando conexión alternativa…");
-    try { await sig.reconnect(); } catch { say("esperando conexión…"); } finally { switching = false; }
+    switching = true; triedLocal = true; sig.mediaMode = "local"; sayKey("misc.viewTestingAlt");
+    try { await sig.reconnect(); } catch { sayKey("misc.viewWaitingConnection"); } finally { switching = false; }
     return;
   }
-  say("esperando señal…");
+  sayKey("misc.viewWaitingSignal");
   clearTimeout(retries.get(info.id));
   retries.set(info.id, setTimeout(() => { retries.delete(info.id); if (available.has(info.id)) watch(available.get(info.id)); }, 1000));
 }
@@ -156,9 +170,9 @@ sig.on("stream-removed", (m) => {
   available.delete(m.stream); clearTimeout(retries.get(m.stream)); retries.delete(m.stream);
   const s = sources.get(m.stream); s?.stopWatch?.(); clearTimeout(s?.frameTimer); s?.sub?.close(); if (s) s.video.srcObject = null; sources.delete(m.stream);
   const audio = audios.get(m.stream); if (audio) { audio.pause(); audio.srcObject = null; audio.remove(); } audios.delete(m.stream);
-  if (only === m.stream) { clearInterval(statsTimer); single.srcObject = null; say("señal perdida, reintentando…"); }
+  if (only === m.stream) { clearInterval(statsTimer); single.srcObject = null; sayKey("misc.viewSignalLost"); }
 });
-sig.on("disconnected", () => { resetMedia(); say("reconectando…"); });
+sig.on("disconnected", () => { resetMedia(); sayKey("misc.viewReconnecting"); });
 sig.on("reconnected", (m) => { state = m.state; configureRoute(); discover(m.streams); syncAudio(); });
 
 sig.connect({ type: "join", room, role: "viewer", key, name: "OBS" })
@@ -170,9 +184,9 @@ sig.connect({ type: "join", room, role: "viewer", key, name: "OBS" })
       compositor = new Compositor(c, sources, view, { transparent: params.get("transparent") === "1", height: params.get("quality"), fps: params.get("fps") }); compositor.start();
     }
     discover(m.streams);
-    say(only ? "esperando señal…" : "");
+    if (only) sayKey("misc.viewWaitingSignal"); else say("");
   })
-  .catch((e) => say("error: " + e.message));
+  .catch((e) => sayKey("misc.viewError", { message: e.message }));
 
 function startStats(pc) {
   clearInterval(statsTimer);
@@ -185,7 +199,9 @@ function startStats(pc) {
     r.forEach((x) => {
       if (x.type !== "inbound-rtp" || x.kind !== "video") return;
       const kbps = last ? Math.round(((x.bytesReceived - last.bytesReceived) * 8) / ((x.timestamp - last.timestamp) || 1)) : 0;
-      box.textContent = `${x.frameWidth || "?"}×${x.frameHeight || "?"} · ${Math.round(x.framesPerSecond || 0)} fps · ${kbps} kbps · perdidos ${x.packetsLost || 0}`;
+      box.textContent = t("misc.viewStats", {
+        width: x.frameWidth || "?", height: x.frameHeight || "?", fps: Math.round(x.framesPerSecond || 0), kbps, lost: x.packetsLost || 0,
+      });
       last = x;
     });
   }, 1000);

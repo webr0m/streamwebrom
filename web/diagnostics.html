@@ -2,28 +2,28 @@
 <html lang="es">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>Diagnóstico · StreamWebRom</title>
+  <title data-i18n="diagnostics.title">Diagnóstico · StreamWebRom</title>
   <script src="/js/appearance.js"></script><link rel="stylesheet" href="/css/app.css"><link rel="manifest" href="/manifest.webmanifest">
   <script type="module" src="/js/diagnostics.js"></script>
 </head>
 <body>
   <main style="max-width:760px;margin:40px auto;padding:20px">
-    <div class="guest-heading"><a href="/">← StreamWebRom</a><select data-theme-picker aria-label="Tema visual"><option value="light">Día</option><option value="dark">Noche</option><option value="auto">Automático</option></select></div>
-    <h1>Comprueba tu equipo antes de entrar</h1>
-    <p>Revisa el navegador y la conexión con tu servidor. La prueba de cámara y micrófono es opcional y termina al detectar los dispositivos.</p>
+    <div class="guest-heading"><a href="/">← StreamWebRom</a><select data-theme-picker data-i18n-aria="diagnostics.themeLabel" aria-label="Tema visual"><option value="light" data-i18n="diagnostics.themeDay">Día</option><option value="dark" data-i18n="diagnostics.themeNight">Noche</option><option value="auto" data-i18n="diagnostics.themeAuto">Automático</option></select><span class="lang-slot" data-lang-slot></span></div>
+    <h1 data-i18n="diagnostics.heading">Comprueba tu equipo antes de entrar</h1>
+    <p data-i18n="diagnostics.intro">Revisa el navegador y la conexión con tu servidor. La prueba de cámara y micrófono es opcional y termina al detectar los dispositivos.</p>
     <div id="checks" role="status" aria-live="polite"></div>
-    <p><button id="media" class="btn primary">Probar cámara y micrófono</button> <button id="refresh" class="btn">Revisar de nuevo</button></p>
+    <p><button id="media" class="btn primary" data-i18n="diagnostics.testMedia">Probar cámara y micrófono</button> <button id="refresh" class="btn" data-i18n="diagnostics.refresh">Revisar de nuevo</button></p>
     <p id="mediaResult" role="status" aria-live="polite"></p>
-    <p><button id="relay" class="btn">Probar relé TURN</button></p>
+    <p><button id="relay" class="btn" data-i18n="diagnostics.testRelay">Probar relé TURN</button></p>
     <p id="relayResult" role="status" aria-live="polite"></p>
-    <p><label for="networkMode">Ruta para las pruebas</label>
-      <select id="networkMode"><option value="auto">Automática</option><option value="tls">Solo conexión cifrada por 443</option><option value="local">Relé del equipo anfitrión por 443</option></select></p>
-    <p><button id="videoRoute" class="btn primary">Probar video hasta el servidor</button></p>
+    <p><label for="networkMode" data-i18n="diagnostics.routeLabel">Ruta para las pruebas</label>
+      <select id="networkMode"><option value="auto" data-i18n="diagnostics.routeAuto">Automática</option><option value="tls" data-i18n="diagnostics.routeTls">Solo conexión cifrada por 443</option><option value="local" data-i18n="diagnostics.routeLocal">Relé del equipo anfitrión por 443</option></select></p>
+    <p><button id="videoRoute" class="btn primary" data-i18n="diagnostics.testVideoRoute">Probar video hasta el servidor</button></p>
     <p id="videoRouteResult" role="status" aria-live="polite"></p>
-    <p class="muted">Esta prueba envía una imagen de color generada y comprueba que vuelve a recibirse. No utiliza tu cámara ni tu micrófono. Si «Automática» falla, prueba las otras rutas.</p>
-    <h2>Desde Android, iPhone o iPad</h2>
-    <p>Abre la URL HTTPS de tu servidor. También puedes instalar la app web desde el menú del navegador; en Safari usa Compartir → Añadir a pantalla de inicio. Los clientes móviles aceptan el mismo enlace del estudio o de invitación.</p>
-    <p>Las redes 4G/5G pueden necesitar un relé TURN, preferiblemente con TCP/TLS en el puerto 443. Cloudflare Tunnel publica la web; el túnel HTTP no transporta el audio y video WebRTC. La prueba TURN comprueba la asignación de una ruta de relé desde este equipo; el paso de video se comprueba al entrar en la sala.</p>
+    <p class="muted" data-i18n="diagnostics.videoRouteNote">Esta prueba envía una imagen de color generada y comprueba que vuelve a recibirse. No utiliza tu cámara ni tu micrófono. Si «Automática» falla, prueba las otras rutas.</p>
+    <h2 data-i18n="diagnostics.androidTitle">Desde Android, iPhone o iPad</h2>
+    <p data-i18n="diagnostics.androidBody">Abre la URL HTTPS de tu servidor. También puedes instalar la app web desde el menú del navegador; en Safari usa Compartir → Añadir a pantalla de inicio. Los clientes móviles aceptan el mismo enlace del estudio o de invitación.</p>
+    <p data-i18n="diagnostics.networkNote">Las redes 4G/5G pueden necesitar un relé TURN, preferiblemente con TCP/TLS en el puerto 443. Cloudflare Tunnel publica la web; el túnel HTTP no transporta el audio y video WebRTC. La prueba TURN comprueba la asignación de una ruta de relé desde este equipo; el paso de video se comprueba al entrar en la sala.</p>
   </main>
 </body>
 </html>

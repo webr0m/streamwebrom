@@ -12,7 +12,7 @@ results=[]
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=['--autoplay-policy=no-user-gesture-required'])
     for url in ([args.baseline] if args.baseline else [])+[args.url]:
-        context=browser.new_context(service_workers='block')
+        context=browser.new_context(locale='es-ES',service_workers='block')
         page=context.new_page();errors=[]
         page.on('pageerror',lambda e:errors.append(str(e)))
         page.add_init_script("""window.__workers=0;const W=Worker;

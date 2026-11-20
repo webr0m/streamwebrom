@@ -19,7 +19,7 @@ args=parser.parse_args()
 
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required'])
-    ctx=browser.new_context(permissions=['camera','microphone'],service_workers='block')
+    ctx=browser.new_context(locale='es-ES',permissions=['camera','microphone'],service_workers='block')
     ctx.add_init_script("""const NativePC=RTCPeerConnection;
       window.RTCPeerConnection=class extends NativePC {constructor(c){super({...c,iceTransportPolicy:'relay',
         iceServers:(c?.iceServers||[]).map(s=>({...s,urls:(Array.isArray(s.urls)?s.urls:[s.urls]).filter(u=>!TCP_ONLY||u.includes('transport=tcp'))})).filter(s=>s.urls.length)});

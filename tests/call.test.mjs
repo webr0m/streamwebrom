@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-const moduleAt=async path=>import('data:text/javascript;base64,'+Buffer.from(await readFile(new URL(path,import.meta.url),'utf8')).toString('base64'));
+import { moduleURL } from './module-url.mjs';
+const moduleAt=async path=>import(await moduleURL(path.replace('../web/js/','')));
 const {fitTiles,tileRects}=await moduleAt('../web/js/call-grid.js');
 const {watchConnection}=await moduleAt('../web/js/connection-health.js');
 

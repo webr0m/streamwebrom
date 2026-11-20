@@ -13,7 +13,7 @@ args=parser.parse_args()
 with sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True,executable_path=args.browser,args=[
         '--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required'])
-    host_context=browser.new_context(service_workers='block')
+    host_context=browser.new_context(locale='es-ES',service_workers='block')
     keys=host_context.request.post(args.url+'/api/rooms',data={'room':'layout-'+str(time.time_ns()),'lobby':False}).json()
     host=host_context.new_page();host.goto(args.url+'/diagnostics')
     host.evaluate("""async keys=>{
@@ -24,7 +24,7 @@ with sync_playwright() as pw:
       window.draw=setInterval(()=>{ctx.fillStyle=`hsl(${frame++%360} 55% 30%)`;ctx.fillRect(0,0,320,180);ctx.fillStyle='white';ctx.font='24px sans-serif';ctx.fillText('StreamWebRom',65,95);},200);
       window.source=canvas.captureStream(5);
     }""",keys)
-    mobile=browser.new_context(permissions=['camera','microphone'],service_workers='block',has_touch=True,is_mobile=True,viewport={'width':393,'height':851})
+    mobile=browser.new_context(locale='es-ES',permissions=['camera','microphone'],service_workers='block',has_touch=True,is_mobile=True,viewport={'width':393,'height':851})
     guest=mobile.new_page();errors=[];guest.on('pageerror',lambda e:errors.append(str(e)))
     guest.add_init_script("""window.__pcs=[];window.__owned=[];window.__sockets=[];
       const NativePC=RTCPeerConnection,NativeWS=WebSocket;
@@ -97,7 +97,7 @@ with sync_playwright() as pw:
     # The Linux WebKit build may omit MediaStream. Exercise the actual grid
     # module and CSS independently; this does not claim Safari media support.
     webkit=pw.webkit.launch(headless=True)
-    safari_context=webkit.new_context(viewport={'width':393,'height':851},has_touch=True,service_workers='block')
+    safari_context=webkit.new_context(locale='es-ES',viewport={'width':393,'height':851},has_touch=True,service_workers='block')
     safari=safari_context.new_page();safari.on('pageerror',lambda e:errors.append('WebKit: '+str(e)))
     safari.goto(args.url+'/call-layout-test-not-found')
     safari.set_content('<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="'+args.url+'/css/app.css"></head><body><section class="call"><div class="call-grid-tools"><button id="restoreGrid" class="hidden">Ver todos</button></div><div id="grid" class="grid"></div><div class="bar"><button>Salir</button></div></section></body></html>')

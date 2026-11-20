@@ -16,7 +16,7 @@ with sync_playwright() as pw:
         '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream',
         '--autoplay-policy=no-user-gesture-required',
     ])
-    context = browser.new_context(permissions=['camera', 'microphone'], service_workers='block')
+    context = browser.new_context(locale='es-ES',permissions=['camera', 'microphone'], service_workers='block')
     errors = []
     def page():
         p = context.new_page()
@@ -100,7 +100,7 @@ with sync_playwright() as pw:
     expect(diagnostics.locator('#mediaResult')).to_contain_text('liberado', timeout=10000)
     diagnostics.locator('#relay').click()
     expect(diagnostics.locator('#relayResult')).to_contain_text('no tiene TURN', timeout=10000)
-    mobile_context=browser.new_context(permissions=['camera','microphone'],service_workers='block',has_touch=True,is_mobile=True,viewport={'width':393,'height':851})
+    mobile_context=browser.new_context(locale='es-ES',permissions=['camera','microphone'],service_workers='block',has_touch=True,is_mobile=True,viewport={'width':393,'height':851})
     blocked=mobile_context.new_page()
     blocked.on('pageerror',lambda error: errors.append(str(error)))
     blocked.add_init_script(f'({ice_network})({{delay:0,blocked:true}})')
@@ -168,7 +168,7 @@ with sync_playwright() as pw:
     # Allocation alone is insufficient: the diagnostic must decode generated
     # video after a full publish/subscribe round trip, without opening devices.
     # Emulate a stale CDN/browser copy at every old unversioned module URL.
-    cache_context = browser.new_context(service_workers='block')
+    cache_context = browser.new_context(locale='es-ES',service_workers='block')
     cache_context.route(args.url+'/js/**', lambda route: route.fulfill(status=200,content_type='text/javascript',body='throw new Error("stale unversioned script");'))
     diagnostic = cache_context.new_page()
     diagnostic.on('pageerror',lambda error:errors.append(str(error)))
@@ -178,11 +178,12 @@ with sync_playwright() as pw:
     diagnostic.close(); cache_context.close()
     # Safari's engine catches unsupported syntax and DOM assumptions.
     webkit = pw.webkit.launch(headless=True)
-    safari = webkit.new_page()
+    safari_context = webkit.new_context(locale='es-ES')
+    safari = safari_context.new_page()
     safari.on('pageerror', lambda error: errors.append('WebKit: '+str(error)))
     safari.goto(args.url+'/diagnostics')
     expect(safari.locator('#checks')).to_contain_text('Conectado', timeout=10000)
-    safari.close(); webkit.close()
+    safari_context.close(); webkit.close()
     assert not errors, errors
     print(json.dumps({'ok':True, 'checks':['corrupt storage', 'host camera', 'lobby admission', 'late trickle ICE in both directions', 'guest publication', 'stage', 'OBS media', 'signalling reconnect', 'preflight', 'missing TURN detection', 'failed initial entry has no reconnect button', 'weak signal and background preserve all transports', 'real socket loss recovers silently', 'exit and return twice with invitation fragment', 'WebKit diagnostics'], 'pageErrors':errors}, ensure_ascii=False))
     mobile_context.close(); context.close(); browser.close()

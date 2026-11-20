@@ -1,4 +1,5 @@
 import { api, Signal, publish, subscribe, iceConfiguration } from "./rtc.js";
+import { t } from "./i18n.js";
 
 export function routeCandidates(cfg) {
   const hasTLS = servers => { try { iceConfiguration(servers || [], "tls"); return true; } catch { return false; } };
@@ -16,7 +17,7 @@ export async function chooseRoute(cfg, probe, progress = () => {}) {
     progress(mode);
     try { await probe(mode); return mode; } catch { /* Try the independent route before entering the real room. */ }
   }
-  throw new Error("No se pudo comprobar una ruta de video. Revisa los datos móviles y vuelve a pulsar Entrar.");
+  throw new Error(t("misc.videoRouteCheckFailed"));
 }
 
 async function release(keys) {
@@ -53,7 +54,7 @@ async function probeVideo(keys, mode, timeout = 12000) {
     throw new Error("check ended");
   };
   try {
-    await Promise.race([work(), new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error("La ruta no respondió a la prueba de video.")), timeout); })]);
+    await Promise.race([work(), new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error(t("misc.videoRouteNoResponse"))), timeout); })]);
   } finally {
     ended = true; clearTimeout(deadline); clearInterval(ticker);
     video?.pause(); if (video) video.srcObject = null;
