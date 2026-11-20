@@ -31,6 +31,26 @@ test("cancel drops a pending trailing value", () => {
   expect(seen).toEqual([1]);
 });
 
+test("a throttle driven from zero time still delivers its leading sample", () => {
+  // A clock that starts near 0 — a fake timer, or a monotonic reading — must
+  // not put the first call inside the initial window and queue it away.
+  let t = 0;
+  const seen = [];
+  const meter = throttle((value) => seen.push(value), {
+    hz: 10,
+    now: () => t,
+    later: (fn) => setTimeout(fn, 30),
+  });
+  vi.useFakeTimers();
+  meter.run(1);
+  expect(seen).toEqual([1]);
+  t = 5;
+  meter.run(2); // inside the window: coalesced
+  expect(seen).toEqual([1]);
+  vi.advanceTimersByTime(40);
+  expect(seen).toEqual([1, 2]);
+});
+
 test("LevelMeter clamps a value that arrives outside the linear range", () => {
   const { rerender } = render(<LevelMeter value={1.4} label="Nivel" />);
   expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "100");
