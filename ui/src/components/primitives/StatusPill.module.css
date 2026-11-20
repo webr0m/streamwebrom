@@ -1,0 +1,25 @@
+/* ui/src/components/primitives/StatusPill.module.css */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--swr-sp-1);
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px var(--swr-sp-2);
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-pill);
+  background: var(--swr-bg-glass);
+  color: var(--swr-text-dim);
+  font-size: var(--swr-text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { inline-size: 8px; block-size: 8px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.ok { color: var(--swr-ok); border-color: var(--swr-line-strong); }
+.err { color: var(--swr-err); }
+.warn { color: var(--swr-warn); }
+.idle { color: var(--swr-text-faint); }
+.live { color: var(--swr-live); border-color: var(--swr-live); }
+.live .dot { box-shadow: 0 0 12px 2px rgba(255, 59, 82, 0.45); }
+.live .dot { animation: none; }

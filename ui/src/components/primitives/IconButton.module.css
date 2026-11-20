@@ -1,0 +1,16 @@
+/* ui/src/components/primitives/IconButton.module.css */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--swr-line);
+  border-radius: var(--swr-r-sm);
+  background: var(--swr-bg-panel);
+  color: var(--swr-text-dim);
+  transition: color var(--swr-fast) var(--swr-ease), border-color var(--swr-fast) var(--swr-ease), background var(--swr-fast) var(--swr-ease);
+}
+.button:hover { color: var(--swr-text); border-color: var(--swr-line-strong); }
+.button:focus-visible { outline: 2px solid var(--swr-brand); outline-offset: 1px; }
+.sm { inline-size: 30px; block-size: 30px; }
+.md { inline-size: 36px; block-size: 36px; }

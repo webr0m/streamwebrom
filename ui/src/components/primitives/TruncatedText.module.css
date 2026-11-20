@@ -1,0 +1,7 @@
+/* ui/src/components/primitives/TruncatedText.module.css */
+.clip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
