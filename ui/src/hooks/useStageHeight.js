@@ -6,18 +6,17 @@ export function useStageHeight(ref) {
   useEffect(() => {
     const node = ref.current;
     if (!node || typeof ResizeObserver === "undefined") return;
-    // The closure must always style the node it is currently measuring: a
-    // later ref.current would leave --stage-height on the detached element.
-    let target = node;
     const observer = new ResizeObserver(([entry]) => {
+      // Style the node the observer reports, not the one captured at setup:
+      // React only reruns this effect when the ref object identity changes, so
+      // a swapped ref.current would otherwise leave --stage-height on the
+      // detached element. An entry for another node is not ours to apply.
+      if (entry?.target !== node) return;
       const next = Math.round(entry.contentRect.height);
-      if (next > 0) { target.style.setProperty("--stage-height", `${next}px`); setHeight(next); }
+      if (next > 0) { node.style.setProperty("--stage-height", `${next}px`); setHeight(next); }
     });
     observer.observe(node);
-    return () => {
-      target = ref.current ?? node;
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, [ref]);
   return height;
 }

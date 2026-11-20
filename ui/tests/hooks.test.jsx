@@ -58,18 +58,52 @@ test("useStageHeight writes --stage-height like the legacy observer", () => {
   const observers = [];
   vi.stubGlobal("ResizeObserver", class {
     constructor(callback) { this.callback = callback; observers.push(this); }
-    observe() {}
+    observe(target) { this.target = target; }
     disconnect() { this.disconnected = true; }
   });
   const node = document.createElement("div");
   const ref = { current: node };
   const { result, unmount } = renderHook(() => useStageHeight(ref));
   expect(observers).toHaveLength(1);
-  act(() => { observers[0].callback([{ contentRect: { height: 420.4 } }]); });
+  act(() => { observers[0].callback([{ contentRect: { height: 420.4 }, target: node }]); });
   expect(result.current).toBe(420);
   expect(node.style.getPropertyValue("--stage-height")).toBe("420px");
   unmount();
   expect(observers[0].disconnected).toBe(true);
+});
+
+test("useStageHeight follows the ref and releases the node it replaced", () => {
+  const observers = [];
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe(target) { this.target = target; }
+    disconnect() { this.disconnected = true; }
+  });
+  const before = document.createElement("div");
+  const after = document.createElement("div");
+  const ref = { current: before };
+  // React only re-runs the effect when the ref object identity changes, so the
+  // hook must style the node the observer reports (entry.target): a swapped
+  // ref.current must not leave --stage-height on the detached element.
+  const { rerender } = renderHook(({ r }) => useStageHeight(r), { initialProps: { r: ref } });
+  expect(observers).toHaveLength(1);
+  expect(observers[0].target).toBe(before);
+  ref.current = after;
+  act(() => { observers[0].callback([{ contentRect: { height: 300 }, target: before }]); });
+  expect(before.style.getPropertyValue("--stage-height")).toBe("300px");
+  expect(after.style.getPropertyValue("--stage-height")).toBe("");
+  rerender({ r: { current: after } });
+  expect(observers).toHaveLength(2);
+  expect(observers[1].target).toBe(after);
+  act(() => { observers[1].callback([{ contentRect: { height: 640 }, target: after }]); });
+  expect(after.style.getPropertyValue("--stage-height")).toBe("640px");
+  // A measurement reported for a node this observer never watched is ignored
+  // instead of being applied to the node that is mounted right now.
+  act(() => { observers[1].callback([{ contentRect: { height: 999 }, target: before }]); });
+  expect(after.style.getPropertyValue("--stage-height")).toBe("640px");
+  cleanup();
+  expect(observers[0].disconnected).toBe(true);
+  expect(observers[1].disconnected).toBe(true);
 });
 
 test("useReducedMotion follows the media query", () => {
