@@ -7,10 +7,10 @@ export function useStageHeight(ref) {
     const node = ref.current;
     if (!node || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(([entry]) => {
-      // Style the node the observer reports, not the one captured at setup:
-      // React only reruns this effect when the ref object identity changes, so
-      // a swapped ref.current would otherwise leave --stage-height on the
-      // detached element. An entry for another node is not ours to apply.
+      // The observer is installed for the node captured when the effect ran,
+      // and React only re-runs it on ref identity: an entry naming any other
+      // node is not ours, and painting it would put a foreign height on the
+      // stage that is mounted right now.
       if (entry?.target !== node) return;
       // devicePixelContentBoxSize carries physical pixels; contentRect is the
       // CSS-pixel box the legacy observer read.

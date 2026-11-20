@@ -17,7 +17,10 @@ export function throttle(fn, { hz = 10, now = () => Date.now(), later = (callbac
   };
   return {
     run(value) {
-      if (now() - last >= interval) { last = now(); fn(value); return; }
+      // One clock reading per call: two reads could straddle the window and
+      // deliver a sample that is still inside it.
+      const t = now();
+      if (t - last >= interval) { last = t; fn(value); return; }
       pending = value;
       if (!timer) timer = later(flush);
     },

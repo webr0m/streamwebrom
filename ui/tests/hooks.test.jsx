@@ -124,7 +124,7 @@ test("useStageHeight writes --stage-height like the legacy observer", () => {
   expect(observers[0].disconnected).toBe(true);
 });
 
-test("useStageHeight follows the ref and releases the node it replaced", () => {
+test("useStageHeight ignores a node it never observed and clears a detached one", () => {
   const observers = [];
   vi.stubGlobal("ResizeObserver", class {
     constructor(callback) { this.callback = callback; observers.push(this); }
@@ -135,9 +135,9 @@ test("useStageHeight follows the ref and releases the node it replaced", () => {
   const after = document.createElement("div");
   const ref = { current: before };
   // React only re-runs the effect when the ref object identity changes, so the
-  // hook must style the node the observer reports (entry.target): a swapped
-  // ref.current must not leave --stage-height on the detached element.
-  const { rerender } = renderHook(({ r }) => useStageHeight(r), { initialProps: { r: ref } });
+  // hook keeps working on the node the observer was installed for: an entry for
+  // any other node is dropped rather than styled onto the mounted stage.
+  const { rerender, result } = renderHook(({ r }) => useStageHeight(r), { initialProps: { r: ref } });
   expect(observers).toHaveLength(1);
   expect(observers[0].target).toBe(before);
   ref.current = after;
@@ -147,21 +147,31 @@ test("useStageHeight follows the ref and releases the node it replaced", () => {
   rerender({ r: { current: after } });
   expect(observers).toHaveLength(2);
   expect(observers[1].target).toBe(after);
-  // The teardown observation of the node being replaced carries a zero box, so
-  // the contract must not stay frozen on the height of a detached stage.
+  // The teardown observation of the node being replaced carries a zero box: the
+  // contract must not stay frozen on the height of a detached stage.
   expect(before.style.getPropertyValue("--stage-height")).toBe("300px");
   act(() => { observers[0].callback([{ contentRect: { height: 0 }, target: before }]); });
   expect(before.style.getPropertyValue("--stage-height")).toBe("");
+  expect(result.current).toBe(0);
   expect(after.style.getPropertyValue("--stage-height")).toBe("");
   act(() => { observers[1].callback([{ contentRect: { height: 640 }, target: after }]); });
   expect(after.style.getPropertyValue("--stage-height")).toBe("640px");
-  // A measurement reported for a node this observer never watched is ignored
-  // instead of being applied to the node that is mounted right now.
+  expect(result.current).toBe(640);
   act(() => { observers[1].callback([{ contentRect: { height: 999 }, target: before }]); });
   expect(after.style.getPropertyValue("--stage-height")).toBe("640px");
+  expect(result.current).toBe(640);
   cleanup();
   expect(observers[0].disconnected).toBe(true);
   expect(observers[1].disconnected).toBe(true);
+});
+
+test("useStageHeight needs no ResizeObserver", () => {
+  // jsdom no trae ResizeObserver y el modo legacy nunca lo construyó desde
+  // aquí: sin el stub, el hook debe quedarse en 0 sin escribir la propiedad.
+  const node = document.createElement("div");
+  const { result } = renderHook(() => useStageHeight({ current: node }));
+  expect(result.current).toBe(0);
+  expect(node.style.getPropertyValue("--stage-height")).toBe("");
 });
 
 test("useReducedMotion follows the media query", () => {
@@ -171,4 +181,28 @@ test("useReducedMotion follows the media query", () => {
   match.mockReturnValue({ matches: false, addEventListener() {}, removeEventListener() {} });
   const { result: second } = renderHook(() => useReducedMotion());
   expect(second.current).toBe(false);
+});
+
+test("useReducedMotion follows the change event of the media query", () => {
+  // Un usuario que activa "reducir movimiento" con la app abierta no vuelve a
+  // montar el árbol: solo existe el listener de change, así que es el único
+  // camino real entre el SO y la animación de la barra.
+  let handler = null;
+  const queries = [];
+  vi.spyOn(window, "matchMedia").mockImplementation(() => {
+    const mq = {
+      matches: false,
+      addEventListener: (type, fn) => { if (type === "change") handler = fn; },
+      removeEventListener: () => { handler = null; },
+    };
+    queries.push(mq);
+    return mq;
+  });
+  const { result, unmount } = renderHook(() => useReducedMotion());
+  expect(result.current).toBe(false);
+  expect(handler).toBeTruthy();
+  act(() => { handler({ matches: true }); });
+  expect(result.current).toBe(true);
+  unmount();
+  expect(handler).toBe(null);
 });
