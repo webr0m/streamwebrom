@@ -15,10 +15,8 @@
   position: absolute;
   inset-block: 0;
   inset-inline-start: 0;
-  /* LevelMeter.jsx sets this element's inline size and mirrors the same value
-     into --swr-level on .meter. The ramp is anchored to this box, so it scales
-     with the bar like the legacy .meter i does (web/css/app.css). */
-  background-image: linear-gradient(90deg, var(--swr-ok), var(--swr-warn) 78%, var(--swr-err));
+  inline-size: var(--level, 0%);
+  background: linear-gradient(90deg, var(--swr-ok), var(--swr-warn) 78%, var(--swr-err));
   transition: inline-size var(--swr-fast) linear;
 }
 [data-reduced="true"] .fill { transition: none; }

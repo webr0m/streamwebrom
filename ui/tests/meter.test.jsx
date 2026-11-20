@@ -36,7 +36,7 @@ test("LevelMeter reports its value accessibly and honours reduced motion", () =>
   const meter = screen.getByRole("meter", { name: "Nivel de Cámara principal" });
   expect(meter).toHaveAttribute("aria-valuenow", "72");
   expect(meter).toHaveAttribute("aria-valuemin", "0");
-  expect(meter.style.getPropertyValue("--swr-level")).toBe("72%");
+  expect(meter.style.getPropertyValue("--level")).toBe("72%");
   cleanup();
   render(<LevelMeter value={0.4} label="Nivel" reduced />);
   expect(screen.getByRole("meter")).toHaveAttribute("data-reduced", "true");
