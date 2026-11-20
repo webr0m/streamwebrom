@@ -2865,6 +2865,8 @@ git commit -m "feat(ui): add bridge hooks, local workspace store and audio meter
 ```jsx
 // ui/tests/shell.test.jsx
 import { test, expect, afterEach } from "vitest";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StudioRoot } from "../src/components/StudioShell.jsx";
@@ -2909,8 +2911,16 @@ test("the panel toggle mirrors the legacy class contract", async () => {
 // `.module.css`, y `layout.css` no la cubre porque no es un módulo CSS.
 test("every token the shell grid reaches for is declared", async () => {
   const { readFile } = await import("node:fs/promises");
-  const layout = await readFile(new URL("../src/styles/layout.css", import.meta.url), "utf8");
-  const tokens = await readFile(new URL("../src/styles/tokens.css", import.meta.url), "utf8");
+  // La ruta se reconstruye con `resolve`, igual que en `tokens.test.jsx`: Vite
+  // reescribe toda forma de `new URL("../src/…", import.meta.url)` a una URL de
+  // servidor de desarrollo —también cuando el segmento sale de un `join` o de
+  // una plantilla— y `readFile` rechaza ese origen con «The URL must be of
+  // scheme file». Dos argumentos separados no forman la cadena relativa
+  // continua que busca la reescritura, así que no dispara.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const read = (...parts) => readFile(resolve(here, ...parts), "utf8");
+  const layout = await read("..", "src/styles", "layout.css");
+  const tokens = await read("..", "src/styles", "tokens.css");
   const declared = new Set([...tokens.matchAll(/(--swr-[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
   const used = [...layout.matchAll(/var\(\s*(--swr-[a-z0-9-]+)/g)].map((m) => m[1]);
   expect(used.length).toBeGreaterThan(10);
@@ -2921,6 +2931,8 @@ test("every token the shell grid reaches for is declared", async () => {
 ```jsx
 // ui/tests/topbar.test.jsx
 import { test, expect, vi, afterEach } from "vitest";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Topbar } from "../src/components/Topbar.jsx";
@@ -2976,7 +2988,11 @@ test("the room title clips instead of overflowing", () => {
 // reglas, el texto largo empuja la acción Transmitir fuera de la barra.
 test("the topbar stylesheet keeps the identity column shrinkable", async () => {
   const { readFile } = await import("node:fs/promises");
-  const css = await readFile(new URL("../src/components/Topbar.module.css", import.meta.url), "utf8");
+  // Mismo motivo que en `shell.test.jsx`: la ruta se arma con `resolve` porque
+  // Vite reescribiría `new URL("../src/…", import.meta.url)` a una URL de
+  // servidor y `readFile` exigiría el origen `file:`.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const css = await readFile(resolve(here, "..", "src/components", "Topbar.module.css"), "utf8");
   expect(css).toMatch(/\.identity\s*{[^}]*min-width:\s*0/);
   expect(css).toMatch(/\.title\s*{[^}]*max-inline-size:/);
   expect(css).toMatch(/\.collapseLabel\s*{[^}]*text-overflow:\s*ellipsis/);
