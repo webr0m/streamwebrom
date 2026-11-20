@@ -2253,10 +2253,10 @@ git commit -m "feat(ui): add tabs, switch, overflow menu, field and dialog primi
 - Consumes: `createStudioBridge` (Task 5) y `i18n.js` del repo a través de `ui/src/i18n.js`. Las clases CSS comparten el `cx` ya promovido en `ui/src/components/primitives/cx.js` (Task 7).
 - Produces:
   - `useStudioSnapshot(bridge) → snapshot` — además de las publicaciones del bridge, re-renderiza cuando cambia el idioma. El objeto snapshot NO cambia al cambiar de idioma, así que `swr:lang` se engancha como segundo store (`useSyncExternalStore(onLangChange, lang, lang)`); sin él React haría bail-out y las etiquetas quedarían en el idioma viejo.
-  - `useWorkspace() → [workspace, updateWorkspace(patch)]` con `workspace = { scenesCollapsed, panelOpen, activeTab }` persistido en `localStorage["swr.workspace"]`. La clave es la misma que lee `web/js/workspace.js`, y ese chrome guarda `scenes`/`panel`: toda escritura lleva también los dos campos legacy (`scenes = !scenesCollapsed`, `panel = panelOpen`) y toda lectura acepta cualquiera de las dos grafías. Una sesión en modo `next` no puede borrar la preferencia que el modo `legacy` sigue leyendo (amendment A1).
-  - `useStageHeight(ref) → number` — escribe `--stage-height` en el elemento observado, igual que el `ResizeObserver` legacy, y devuelve la altura redondeada. jsdom no trae `ResizeObserver`: el hook lo detecta y el test lo stubea.
-  - `useReducedMotion() → boolean`.
-  - `throttle(fn, { hz = 10, now, later }) → { run(value), cancel() }` con llamada final garantizada. `cancel()` no puede desprogramar el temporizador que devolvió `later` (puede ser cualquier scheduler), así que usa un centinela `pending === undefined`: el flush disparado no entrega nada y `run()` vuelve a programar.
+  - `useWorkspace() → [workspace, updateWorkspace(patch)]` con `workspace = { scenesCollapsed, panelOpen, activeTab }` persistido en `localStorage["swr.workspace"]`. La clave es la misma que lee `web/js/workspace.js`, y ese chrome guarda `scenes`/`panel`: toda escritura lleva también los dos campos legacy (`scenes = !scenesCollapsed`, `panel = panelOpen`) y toda lectura acepta cualquiera de las dos grafías. Una sesión en modo `next` no puede borrar la preferencia que el modo `legacy` sigue leyendo (amendment A1). La superficie es exactamente el contrato: `project()` estrecha lectura y patch a los tres campos (con los defaults si el valor presente no es del tipo esperado) y `persist()` escribe solo contrato + espejos, de modo que un blob guardado por otro código —`null`, un número, un string, un array con claves numéricas— ni entra en el estado de React ni se propaga de vuelta a la clave compartida.
+  - `useStageHeight(ref) → number` — escribe `--stage-height` en el elemento observado, igual que el `ResizeObserver` legacy, y devuelve la altura redondeada. jsdom no trae `ResizeObserver`: el hook lo detecta (`typeof ResizeObserver === "undefined"`) y devuelve 0 sin escribir la propiedad; el test lo stubea. Solo acepta entradas cuyo `target` sea el nodo para el que se instaló el observador, y una caja de alto 0 (la observación de salida) borra la propiedad y devuelve 0 en vez de dejar congelada la altura de un nodo ya desmontado.
+  - `useReducedMotion() → boolean` — sigue `matches` y el evento `change` del media query.
+  - `throttle(fn, { hz = 10, now, later }) → { run(value), cancel() }` con llamada final garantizada. `cancel()` no puede desprogramar el temporizador que devolvió `later` (puede ser cualquier scheduler), así que usa un centinela `pending === undefined`: el flush disparado no entrega nada y `run()` vuelve a programar sobre la ventana ya armada, sin agendar un segundo temporizador. `last` arranca en `-Infinity`, no en 0: con un reloj inyectado que empieza cerca de cero (un fake timer, una lectura monotónica), un 0 metería la primera llamada dentro de la ventana inicial y la encolarían.
   - `<LevelMeter value={0..1} label />` — `role="meter"`, `aria-valuenow` en porcentaje, `--level` como
     longitud de la barra, `data-reduced="true"` cuando no hay animación. `value` es lineal 0..1: quien tenga decibelios (Task 10) los mapea antes de pasarlos.
     La variable se llama `--level` y no `--swr-level`: el prefijo `--swr-` está reservado por `ui/tests/tokens.test.jsx`, que escanea todo `var(--swr-*)` escrito en un `.module.css` y solo acepta los 46 nombres declarados en `styles/tokens.css`; un dato por instancia en ese namespace es una trampa porque la primera lectura desde CSS rompería el gate de la Task 3. La geometría —degradado sobre el relleno, la rampa escala con la barra— es la de `.meter i` de `web/css/app.css` y del `#meter` que `web/js/guest.js` escribe en línea, así que no es una regresión visual frente al Studio de hoy.
@@ -2310,6 +2310,58 @@ test("an unreadable workspace falls back to the defaults", () => {
   expect(result.current[0].scenesCollapsed).toBe(false);
 });
 
+test("a workspace holding JSON that is not a plain object falls back to the defaults", () => {
+  // JSON.parse accepts all of these: null, numbers and strings would throw or
+  // leak fields if read as a saved object, and an array survives typeof
+  // "object" while carrying only numeric keys.
+  for (const blob of ["null", "42", '"chat"', "[1,2]"]) {
+    localStorage.setItem("swr.workspace", blob);
+    const { result } = renderHook(() => useWorkspace());
+    expect(result.current[0]).toEqual({ scenesCollapsed: false, panelOpen: true, activeTab: "chat" });
+    cleanup();
+  }
+});
+
+test("a write after any non-object blob stores exactly the contract fields", () => {
+  // Arrays and iterables must not be spread into the state: their indices or
+  // characters land under numeric keys and are then written to the shared key.
+  const clean = { scenesCollapsed: false, panelOpen: true, activeTab: "output", scenes: true, panel: true };
+  for (const blob of ['["scenes","panel"]', '"ab"', "null", "42"]) {
+    localStorage.setItem("swr.workspace", blob);
+    const { result } = renderHook(() => useWorkspace());
+    act(() => result.current[1]({ activeTab: "output" }));
+    expect(JSON.parse(localStorage.getItem("swr.workspace"))).toEqual(clean);
+    cleanup();
+  }
+});
+
+test("neither an unrelated patch key nor an unrelated saved key reaches the state or storage", () => {
+  // The store's whole surface is the three contract fields plus the legacy
+  // mirrors; anything else a caller patches in or a previous chrome stored has
+  // to be dropped on both sides, not just hidden from the render.
+  localStorage.setItem("swr.workspace", '{"volume":11,"0":"x","activeTab":"chat"}');
+  const { result } = renderHook(() => useWorkspace());
+  expect(result.current[0]).toEqual({ scenesCollapsed: false, panelOpen: true, activeTab: "chat" });
+  act(() => result.current[1]({ volume: 99, scenesCollapsed: true }));
+  expect(result.current[0]).toEqual({ scenesCollapsed: true, panelOpen: true, activeTab: "chat" });
+  expect(JSON.parse(localStorage.getItem("swr.workspace"))).toEqual({
+    scenesCollapsed: true, panelOpen: true, activeTab: "chat", scenes: false, panel: true,
+  });
+});
+
+test("the saved workspace is narrowed to the contract on read", () => {
+  // The hook's state and every write are exactly the three contract fields
+  // plus the two legacy mirrors, so a blob carrying unrelated keys cannot
+  // smuggle them into the React chrome's view or back into storage.
+  localStorage.setItem("swr.workspace", '{"0":"x","volume":11,"activeTab":"chat"}');
+  const { result } = renderHook(() => useWorkspace());
+  expect(result.current[0]).toEqual({ scenesCollapsed: false, panelOpen: true, activeTab: "chat" });
+  act(() => result.current[1]({ activeTab: "output" }));
+  expect(JSON.parse(localStorage.getItem("swr.workspace"))).toEqual({
+    scenesCollapsed: false, panelOpen: true, activeTab: "output", scenes: true, panel: true,
+  });
+});
+
 test("the snapshot hook re-renders on bridge and language publications", () => {
   const engine = createFixtureEngine(nextStudioFixture);
   const bridge = createStudioBridge({ engine });
@@ -2335,18 +2387,68 @@ test("useStageHeight writes --stage-height like the legacy observer", () => {
   const observers = [];
   vi.stubGlobal("ResizeObserver", class {
     constructor(callback) { this.callback = callback; observers.push(this); }
-    observe() {}
+    observe(target) { this.target = target; }
     disconnect() { this.disconnected = true; }
   });
   const node = document.createElement("div");
   const ref = { current: node };
   const { result, unmount } = renderHook(() => useStageHeight(ref));
   expect(observers).toHaveLength(1);
-  act(() => { observers[0].callback([{ contentRect: { height: 420.4 } }]); });
+  act(() => { observers[0].callback([{ contentRect: { height: 420.4 }, target: node }]); });
   expect(result.current).toBe(420);
   expect(node.style.getPropertyValue("--stage-height")).toBe("420px");
   unmount();
   expect(observers[0].disconnected).toBe(true);
+});
+
+test("useStageHeight ignores a node it never observed and clears a detached one", () => {
+  const observers = [];
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe(target) { this.target = target; }
+    disconnect() { this.disconnected = true; }
+  });
+  const before = document.createElement("div");
+  const after = document.createElement("div");
+  const ref = { current: before };
+  // React only re-runs the effect when the ref object identity changes, so the
+  // hook keeps working on the node the observer was installed for: an entry for
+  // any other node is dropped rather than styled onto the mounted stage.
+  const { rerender } = renderHook(({ r }) => useStageHeight(r), { initialProps: { r: ref } });
+  expect(observers).toHaveLength(1);
+  expect(observers[0].target).toBe(before);
+  ref.current = after;
+  act(() => { observers[0].callback([{ contentRect: { height: 300 }, target: before }]); });
+  expect(before.style.getPropertyValue("--stage-height")).toBe("300px");
+  expect(after.style.getPropertyValue("--stage-height")).toBe("");
+  rerender({ r: { current: after } });
+  expect(observers).toHaveLength(2);
+  expect(observers[1].target).toBe(after);
+  // The teardown observation of the node being replaced carries a zero box: the
+  // contract must not stay frozen on the height of a detached stage.
+  expect(before.style.getPropertyValue("--stage-height")).toBe("300px");
+  act(() => { observers[0].callback([{ contentRect: { height: 0 }, target: before }]); });
+  expect(before.style.getPropertyValue("--stage-height")).toBe("");
+  expect(result.current).toBe(0);
+  expect(after.style.getPropertyValue("--stage-height")).toBe("");
+  act(() => { observers[1].callback([{ contentRect: { height: 640 }, target: after }]); });
+  expect(after.style.getPropertyValue("--stage-height")).toBe("640px");
+  expect(result.current).toBe(640);
+  act(() => { observers[1].callback([{ contentRect: { height: 999 }, target: before }]); });
+  expect(after.style.getPropertyValue("--stage-height")).toBe("640px");
+  expect(result.current).toBe(640);
+  cleanup();
+  expect(observers[0].disconnected).toBe(true);
+  expect(observers[1].disconnected).toBe(true);
+});
+
+test("useStageHeight needs no ResizeObserver", () => {
+  // jsdom no trae ResizeObserver y el modo legacy nunca lo construyó desde
+  // aquí: sin el stub, el hook debe quedarse en 0 sin escribir la propiedad.
+  const node = document.createElement("div");
+  const { result } = renderHook(() => useStageHeight({ current: node }));
+  expect(result.current).toBe(0);
+  expect(node.style.getPropertyValue("--stage-height")).toBe("");
 });
 
 test("useReducedMotion follows the media query", () => {
@@ -2356,6 +2458,30 @@ test("useReducedMotion follows the media query", () => {
   match.mockReturnValue({ matches: false, addEventListener() {}, removeEventListener() {} });
   const { result: second } = renderHook(() => useReducedMotion());
   expect(second.current).toBe(false);
+});
+
+test("useReducedMotion follows the change event of the media query", () => {
+  // Un usuario que activa "reducir movimiento" con la app abierta no vuelve a
+  // montar el árbol: solo existe el listener de change, así que es el único
+  // camino real entre el SO y la animación de la barra.
+  let handler = null;
+  const queries = [];
+  vi.spyOn(window, "matchMedia").mockImplementation(() => {
+    const mq = {
+      matches: false,
+      addEventListener: (type, fn) => { if (type === "change") handler = fn; },
+      removeEventListener: () => { handler = null; },
+    };
+    queries.push(mq);
+    return mq;
+  });
+  const { result, unmount } = renderHook(() => useReducedMotion());
+  expect(result.current).toBe(false);
+  expect(handler).toBeTruthy();
+  act(() => { handler({ matches: true }); });
+  expect(result.current).toBe(true);
+  unmount();
+  expect(handler).toBe(null);
 });
 ```
 
@@ -2393,12 +2519,66 @@ test("cancel drops a pending trailing value", () => {
   expect(seen).toEqual([1]);
 });
 
+test("cancel keeps the armed window instead of scheduling a second flush", () => {
+  // El centinela `pending === undefined` es lo que hace falta cancelar: un
+  // `cancel()` que además hiciera `timer = null` agendaría un temporizador por
+  // cada valor posterior, y el medidor se desconectaría del scheduler. Esta
+  // aserción sobre `scheduled` es la que distingue las dos implementaciones.
+  vi.useFakeTimers();
+  let scheduled = 0;
+  const seen = [];
+  const meter = throttle((value) => seen.push(value), {
+    hz: 10,
+    later: (fn) => { scheduled += 1; return setTimeout(fn, 30); },
+  });
+  meter.run(1);
+  meter.run(2);
+  meter.cancel();
+  meter.run(3);
+  expect(scheduled).toBe(1);
+  vi.advanceTimersByTime(120);
+  expect(seen).toEqual([1, 3]);
+});
+
+test("a throttle driven from zero time still delivers its leading sample", () => {
+  // A clock that starts near 0 — a fake timer, or a monotonic reading — must
+  // not put the first call inside the initial window and queue it away.
+  let t = 0;
+  const seen = [];
+  const meter = throttle((value) => seen.push(value), {
+    hz: 10,
+    now: () => t,
+    later: (fn) => setTimeout(fn, 30),
+  });
+  vi.useFakeTimers();
+  meter.run(1);
+  expect(seen).toEqual([1]);
+  t = 5;
+  meter.run(2); // inside the window: coalesced
+  expect(seen).toEqual([1]);
+  vi.advanceTimersByTime(40);
+  expect(seen).toEqual([1, 2]);
+});
+
+test("LevelMeter clamps a value that arrives outside the linear range", () => {
+  const { rerender } = render(<LevelMeter value={1.4} label="Nivel" />);
+  expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "100");
+  rerender(<LevelMeter value={-3} label="Nivel" />);
+  expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "0");
+  rerender(<LevelMeter value="nope" label="Nivel" />);
+  expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "0");
+});
+
 test("LevelMeter reports its value accessibly and honours reduced motion", () => {
   render(<LevelMeter value={0.72} label="Nivel de Cámara principal" />);
   const meter = screen.getByRole("meter", { name: "Nivel de Cámara principal" });
   expect(meter).toHaveAttribute("aria-valuenow", "72");
   expect(meter).toHaveAttribute("aria-valuemin", "0");
   expect(meter.style.getPropertyValue("--level")).toBe("72%");
+  // data-reduced se pincha también en su forma negativa: el CSS anima por
+  // defecto, así que un render sin `reduced` debe escribir "false" y no
+  // ausentar el atributo, que es lo que leería la rampa animada.
+  expect(meter).toHaveAttribute("data-reduced", "false");
   cleanup();
   render(<LevelMeter value={0.4} label="Nivel" reduced />);
   expect(screen.getByRole("meter")).toHaveAttribute("data-reduced", "true");
@@ -2427,11 +2607,18 @@ function flag(saved, modern, legacy, invert = false) {
 
 function read() {
   let saved = {};
-  try { saved = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch {}
+  try { Object.assign(saved, JSON.parse(localStorage.getItem(KEY) || "{}") || {}); } catch {}
+  return saved;
+}
+
+// The contract is exactly these three fields plus the two legacy mirrors, so a
+// patch carrying anything else — or a blob holding unrelated keys — cannot
+// reach the React chrome's view nor the key the legacy Studio shares.
+function project(workspace) {
   return {
-    scenesCollapsed: flag(saved, "scenesCollapsed", "scenes", true),
-    panelOpen: flag(saved, "panelOpen", "panel"),
-    activeTab: typeof saved.activeTab === "string" ? saved.activeTab : DEFAULTS.activeTab,
+    scenesCollapsed: flag(workspace, "scenesCollapsed", "scenes", true),
+    panelOpen: flag(workspace, "panelOpen", "panel"),
+    activeTab: typeof workspace.activeTab === "string" ? workspace.activeTab : DEFAULTS.activeTab,
   };
 }
 
@@ -2442,12 +2629,23 @@ function legacyMirror(workspace) {
   return { scenes: !workspace.scenesCollapsed, panel: workspace.panelOpen };
 }
 
+// Only the contract fields are ever persisted, so nothing outside them can be
+// smuggled into the key the legacy chrome shares through an accidental spread.
+function persist(workspace) {
+  return {
+    scenesCollapsed: workspace.scenesCollapsed,
+    panelOpen: workspace.panelOpen,
+    activeTab: workspace.activeTab,
+    ...legacyMirror(workspace),
+  };
+}
+
 export function useWorkspace() {
-  const [workspace, setWorkspace] = useState(read);
+  const [workspace, setWorkspace] = useState(() => project(read()));
   const update = useCallback((patch) => {
     setWorkspace((current) => {
-      const next = { ...current, ...patch };
-      try { localStorage.setItem(KEY, JSON.stringify({ ...next, ...legacyMirror(next) })); } catch {}
+      const next = project({ ...current, ...patch });
+      try { localStorage.setItem(KEY, JSON.stringify(persist(next))); } catch {}
       return next;
     });
   }, []);
@@ -2480,8 +2678,23 @@ export function useStageHeight(ref) {
     const node = ref.current;
     if (!node || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(([entry]) => {
+      // The observer is installed for the node captured when the effect ran,
+      // and React only re-runs it on ref identity: an entry naming any other
+      // node is not ours, and painting it would put a foreign height on the
+      // stage that is mounted right now.
+      if (entry?.target !== node) return;
+      // devicePixelContentBoxSize carries physical pixels; contentRect is the
+      // CSS-pixel box the legacy observer read.
       const next = Math.round(entry.contentRect.height);
-      if (next > 0) { node.style.setProperty("--stage-height", `${next}px`); setHeight(next); }
+      if (next > 0) {
+        node.style.setProperty("--stage-height", `${next}px`);
+        setHeight(next);
+      } else {
+        // The removal observation has a zero box: drop the contract instead of
+        // freezing the last mounted height on a node that no longer exists.
+        node.style.removeProperty("--stage-height");
+        setHeight(0);
+      }
     });
     observer.observe(node);
     return () => observer.disconnect();
@@ -2512,9 +2725,12 @@ export function useReducedMotion() {
 // ui/src/lib/throttle.js
 // Meters and bitrate readouts must not re-render the tree 60 times a second;
 // the trailing value is kept so the bar never freezes on an old peak.
+// `last` starts at -Infinity, not 0: with an injected clock beginning near
+// zero (a fake timer or a monotonic reading) a 0 would sit inside the first
+// window and make the leading sample queue instead of being delivered.
 export function throttle(fn, { hz = 10, now = () => Date.now(), later = (callback) => setTimeout(callback, 1000 / hz) } = {}) {
   const interval = 1000 / hz;
-  let last = 0, timer = null, pending;
+  let last = -Infinity, timer = null, pending;
   const flush = () => {
     timer = null;
     if (pending === undefined) return;
@@ -2525,7 +2741,10 @@ export function throttle(fn, { hz = 10, now = () => Date.now(), later = (callbac
   };
   return {
     run(value) {
-      if (now() - last >= interval) { last = now(); fn(value); return; }
+      // One clock reading per call: two reads could straddle the window and
+      // deliver a sample that is still inside it.
+      const t = now();
+      if (t - last >= interval) { last = t; fn(value); return; }
       pending = value;
       if (!timer) timer = later(flush);
     },
@@ -2589,10 +2808,13 @@ export function LevelMeter({ value = 0, label, reduced = false, className = "" }
 - [ ] **Step 4: Verificar**
 
 Run: `npm -C ui test -- tests/hooks.test.jsx tests/meter.test.jsx && node scripts/build-ui.mjs`
-Expected: 9 tests PASS (6 en `hooks.test.jsx`, 3 en `meter.test.jsx`) y build sin errores. Los cinco nombres de chunk pinados no cambian: nada de lo nuevo está alcanzable desde la entrada del build todavía (la Task 9 es la que engancha los hooks).
+Expected: 19 tests PASS (13 en `hooks.test.jsx`, 6 en `meter.test.jsx`) y build sin errores. Los cinco nombres de chunk pinados no cambian: nada de lo nuevo está alcanzable desde la entrada del build todavía (la Task 9 es la que engancha los hooks).
 
 Run: `npm -C ui test`
-Expected: 44 tests PASS en 9 ficheros (35 de la Task 7 + 9 nuevos).
+Expected: 54 tests PASS en 9 ficheros (35 de la Task 7 + 19 nuevos).
+
+Run: `node --test tests/*.test.mjs`
+Expected: 83 tests PASS. El gate de artefactos verifica que todo nombre re-exportado en `ui/src/i18n.js` existe en `web/js/i18n.js`, así que la línea añadida en el Step 1 también se comprueba aquí.
 
 - [ ] **Step 5: Commit**
 
