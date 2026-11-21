@@ -83,10 +83,14 @@ def built_outputs(root):
     """Names of the files `scripts/build-ui.mjs` emitted into this directory.
 
     The check below is a source-code check: it reasons about declarations, imports and
-    browser globals. Vite's hashed chunks are minified module output, and esprima (the
-    parser Debian ships as python3-esprima) stops at their syntax — it predates parts of
-    it. Linting them was never the point, so the manifest the build publishes alongside
-    them is what says which files to hand to the parser and which to skip."""
+    browser globals. Vite's hashed chunks are bundled output, and the parser the runners
+    install — esprima 4.0.1 from PyPI, since Debian bookworm has no `python3-esprima`
+    package at all — stops at the first top-level `await` in `js/studio-<hash>.js`
+    ("Line 2: Unexpected identifier", char 1013) because it predates ES2022. Lowering the
+    operators that `analyse` already lowers changes nothing: the same offset fails parsed
+    raw and lowered. Linting chunks was never the point, so the manifest the build
+    publishes alongside them is what says which files to hand to the parser and which to
+    skip."""
     manifest = os.path.join(root, "sw-assets.json")
     if not os.path.exists(manifest):
         return set()
