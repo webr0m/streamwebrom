@@ -19,8 +19,8 @@ import (
 
 func TestShellAssetsReachTheServiceWorker(t *testing.T) {
 	files := fstest.MapFS{
-		"studio.html":      {Data: []byte(`<script type="module" src="/js/studio-abc.js"></script><link rel="stylesheet" href="/css/studio-abc.css">`)},
-		"js/studio-abc.js": {Data: []byte(`console.log("shell")`)},
+		"studio.html":        {Data: []byte(`<script type="module" src="/js/studio-abc.js"></script><link rel="stylesheet" href="/css/studio-abc.css">`)},
+		"js/studio-abc.js":   {Data: []byte(`console.log("shell")`)},
 		"css/studio-abc.css": {Data: []byte(`body{color:red}`)},
 		"js/sw-assets.json":  {Data: []byte(`["css/studio-abc.css","js/studio-abc.js"]`)},
 		"sw.js":              {Data: []byte(`const SHELL_ASSETS = __SWR_SHELL__;const prefix="__SWR_ASSET_PREFIX__";`)},
@@ -99,8 +99,10 @@ func TestMalformedAssetListDegradesToAnEmptyShell(t *testing.T) {
 // every path verbatim, with no whitespace left over and no incident logged.
 func TestValidAssetListIsReMarshalledWithoutLosses(t *testing.T) {
 	files := fstest.MapFS{
-		"js/sw-assets.json": {Data: []byte("\n  [\"css/studio-abc.css\", \"js/studio-abc.js\"]  \n")},
-		"sw.js":             {Data: []byte(`const SHELL_ASSETS = __SWR_SHELL__;`)},
+		"js/sw-assets.json":  {Data: []byte("\n  [\"css/studio-abc.css\", \"js/studio-abc.js\"]  \n")},
+		"css/studio-abc.css": {},
+		"js/studio-abc.js":   {},
+		"sw.js":              {Data: []byte(`const SHELL_ASSETS = __SWR_SHELL__;`)},
 	}
 	mu := &sync.Mutex{}
 	var lines []string
@@ -145,7 +147,7 @@ func TestEveryInjectedShellAssetIsServed(t *testing.T) {
 		"js/studio-abc12345.js":   {Data: []byte(`export const shell = 1;`)},
 		"css/studio-abc12345.css": {Data: []byte(`body{color:red}`)},
 		"img/x.png":               {Data: []byte("not a real png")},
-		"js/sw-assets.json":       {Data: []byte(`["css/studio-abc12345.css","img/x.png","js/studio-abc12345.js"]`)},
+		"js/sw-assets.json":       {Data: []byte(`["css/studio-abc12345.css","img/x.png","js/missing.js","js/studio-abc12345.js","js/studio-abc12345.js?x","js/studio-abc12345.js"]`)},
 		"sw.js":                   {Data: []byte(`const SHELL_ASSETS = __SWR_SHELL__;`)},
 	}
 	s := New(config.Default(), nil, files, slog.Default())
@@ -290,6 +292,49 @@ func TestStudioHtmlLinksTheVersionedReactShellAndKeepsLegacyIdle(t *testing.T) {
 	}
 	if strings.Contains(string(legacy), `src="/js/studio.js"`) {
 		t.Fatal("the page must not load the legacy studio module eagerly: the boot switch owns it")
+	}
+}
+
+func TestStudioBootsWithoutGeneratedAssets(t *testing.T) {
+	static := embedded()
+	page, err := fs.ReadFile(static, "studio.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, complete := range []bool{false, true} {
+		files := fstest.MapFS{"studio.html": {Data: page}}
+		for _, name := range []string{"js/studio.js", "js/pwa.js", "css/app.css"} {
+			files[name] = &fstest.MapFile{}
+		}
+		tags := studioBundleTags.FindAllSubmatch(page, -1)
+		if len(tags) < 3 {
+			t.Fatal("fixture no longer matches the generated Studio tags")
+		}
+		if complete {
+			for _, tag := range tags {
+				for _, asset := range tag[1:] {
+					if len(asset) != 0 {
+						files[string(asset)] = &fstest.MapFile{}
+					}
+				}
+			}
+		}
+		s := New(config.Default(), nil, files, slog.Default())
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/studio", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("Studio returned %d", w.Code)
+		}
+		html := w.Body.String()
+		for _, name := range []string{"js/studio.js", "js/pwa.js"} {
+			if strings.Contains(html, s.assetPrefix+"/"+name+`"`) == complete {
+				t.Errorf("complete=%v: unexpected classic boot state for %s", complete, name)
+			}
+		}
+		if strings.Contains(html, s.assetPrefix+"/js/studio-") != complete ||
+			!strings.Contains(html, s.assetPrefix+"/css/app.css") {
+			t.Errorf("complete=%v: incorrect generated tags or missing classic stylesheet", complete)
+		}
 	}
 }
 

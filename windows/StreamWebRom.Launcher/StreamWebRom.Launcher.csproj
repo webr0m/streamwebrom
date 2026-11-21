@@ -22,13 +22,14 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <DebugType>none</DebugType>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ServerBinary Condition="'$(ServerBinary)' == ''">..\..\dist\streamwebrom-windows-amd64.exe</ServerBinary>
   </PropertyGroup>
   <ItemGroup>
     <!-- The Go server, cross-compiled by the build script, travels inside the launcher. -->
-    <EmbeddedResource Include="..\..\dist\streamwebrom-windows-amd64.exe" LogicalName="streamwebrom.exe" Condition="Exists('..\..\dist\streamwebrom-windows-amd64.exe')" />
+    <EmbeddedResource Include="$(ServerBinary)" LogicalName="streamwebrom.exe" Condition="Exists('$(ServerBinary)')" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
   <Target Name="RequireEmbeddedServer" BeforeTargets="Publish">
-    <Error Condition="!Exists('..\..\dist\streamwebrom-windows-amd64.exe')" Text="Build dist/streamwebrom-windows-amd64.exe before publishing the launcher." />
+    <Error Condition="!Exists('$(ServerBinary)')" Text="Build the Windows server before publishing the launcher: $(ServerBinary)" />
   </Target>
 </Project>

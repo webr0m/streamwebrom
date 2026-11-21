@@ -129,7 +129,7 @@ func (r *Recorder) Start(room string, s *sfu.Stream) (*Recording, error) {
 		return nil, errors.New("stream has no tracks yet")
 	}
 	r.active[key] = rec
-	s.OnClose(func() { _, _ = r.Stop(room, s.ID) })
+	s.OnClose(func() { _, _ = r.stop(key, rec) })
 	return rec, nil
 }
 
@@ -177,12 +177,21 @@ func (rec *Recording) stop() {
 
 // Stop ends a recording and, when ffmpeg exists, muxes the tracks into one .mkv.
 func (r *Recorder) Stop(room, stream string) (*Recording, error) {
-	key := room + "/" + stream
+	return r.stop(room+"/"+stream, nil)
+}
+
+// The stream-close hook must only end the recording it registered for. A
+// stop/start or a replacement publisher can reuse the same room/stream key.
+func (r *Recorder) stop(key string, expected *Recording) (*Recording, error) {
 	r.mu.Lock()
-	rec, ok := r.active[key]
-	delete(r.active, key)
+	rec := r.active[key]
+	if rec != nil && (expected == nil || rec == expected) {
+		delete(r.active, key)
+	} else {
+		rec = nil
+	}
 	r.mu.Unlock()
-	if !ok {
+	if rec == nil {
 		return nil, errors.New("not recording")
 	}
 	rec.stop()

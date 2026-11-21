@@ -14,6 +14,7 @@ variables:
   needs: []
 test:
   stage: test
+  needs: [test-js]
   before_script:
     # `python3-esprima` no existe en bookworm: el apt respondía "E: Unable to locate package
     # python3-esprima" y el job moría con exit 100 antes de `go vet` (run 18246371597, y ya la
@@ -27,10 +28,8 @@ test:
     - go test -race -count=1 ./...
     - python3 scripts/jslint.py web/js
     - go run golang.org/x/vuln/cmd/govulncheck@latest ./...
-# The bundle check and the Go syntax check need different runtimes, so they are
-# separate jobs instead of one `make test` on a hand-assembled image: that way
-# each runner stays distro-free (apt/nodesource churn was the fragile part) and
-# `make all` in binaries keeps its ui prerequisite unmet-by-design.
+# Pass the generated web assets to the Go job so it tests the embedded bundle,
+# not only the classic fallback.
 test-js:
   <<: *test-js-common
   script:
@@ -39,11 +38,17 @@ test-js:
     # depend on npm ci reaching the network from inside a test.
     - node scripts/build-ui.mjs
     - node --test tests/*.test.mjs
-    - for f in web/js/*.js; do node --input-type=module --check < "$f"; done
+    - for f in web/js/*.js; do node --input-type=module --check < "$f" || exit 1; done
     - node --check web/sw.js
+  artifacts:
+    paths:
+      - web/studio.html
+      - web/js/*-????????.js
+      - web/css/*-????????.css
+      - web/js/sw-assets.json
 test-ui:
   <<: *test-js-common
-  needs: [test-js]
+  needs: []
   cache:
     key: ui-node-modules
     paths: [ui/node_modules]
@@ -77,7 +82,7 @@ binaries:
     - npm --version
   script:
     - make all
-    - cd dist && sha256sum * > SHA256SUMS.txt
+    - cd dist && sha256sum streamwebrom-* > SHA256SUMS.txt
   artifacts:
     paths: [dist/]
     expire_in: 30 days

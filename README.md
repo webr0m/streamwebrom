@@ -148,6 +148,8 @@ make all          # binarios para linux/mac/windows (amd64 y arm64)
 make launcher     # app Windows .NET con el servidor embebido
 ```
 
+`make build`, `make all` y `make launcher` requieren Node.js 22.12+ y npm para reconstruir el bundle del Studio. Una compilación directa con Go en un checkout sin bundle conserva el Studio clásico, pero no ofrece `?ui=next`.
+
 En PowerShell: `./scripts/build.ps1` genera los seis servidores, el lanzador Windows y `dist/SHA256SUMS.txt` (requiere Go y SDK .NET 8). `./scripts/build-android.ps1` genera los APK con JDK 17 y SDK Android 35. Después de agregar artefactos, vuelve a calcular los checksums antes de publicar.
 
 ```

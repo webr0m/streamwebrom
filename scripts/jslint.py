@@ -130,7 +130,7 @@ def main(root):
         for (mod, imp) in imports:
             if imp in unused: print(f"{name}: warning: import '{imp}' unused")
     print(f"jslint: {len(info)} módulo(s) fuente, {len(skipped)} chunk(s) de build fuera "
-          f"del parser → " + ("OK" if not bad else f"{bad} problem(s)"))
+          f"del parser: " + ("OK" if not bad else f"{bad} problem(s)"))
     return 1 if bad else 0
 
 if __name__ == "__main__":

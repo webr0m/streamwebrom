@@ -1,7 +1,7 @@
 // Builds the React Studio shell into web/js and web/css, then publishes the
 // versioned asset list the service worker reads through Go's __SWR_SHELL__.
-import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -59,23 +59,22 @@ export async function pruneOrphanChunks(web, list) {
 }
 
 // One command shape covers every environment (Windows, WSL interop, the Alpine
-// and Debian node images): spawn `npm` with `shell: true` and `cwd: ui`.
-//  * `shell: true` is what makes it work on Windows, where Node refuses to spawn
+// and Debian node images): run a fixed command through a shell with `cwd: ui`.
+//  * The shell is what makes it work on Windows, where Node refuses to spawn
 //    the npm shim directly (ENOENT for bare `npm`, EINVAL for `npm.cmd` without a
-//    shell). The arguments below are fixed literals, never user input, so the
-//    DEP0190 warning about unescaped args does not apply here.
+//    shell). The command strings below are fixed literals, never user input.
 //  * cwd selects the package; `--prefix` is deliberately not used, because npm
 //    runs a lifecycle script from the prefix directory, so `vite build` would
 //    not be found on PATH (npm >= 11 stopped moving the script cwd).
-const npmArgs = { ci: ["ci", "--no-audit", "--no-fund"], build: ["run", "build"] };
+const npmCommands = { ci: "npm ci --no-audit --no-fund", build: "npm run build" };
 
-function runNpm(args) {
+function runNpm(command) {
   try {
-    execFileSync("npm", args, { cwd: ui, stdio: "inherit", shell: true });
+    execSync(command, { cwd: ui, stdio: "inherit" });
   } catch (cause) {
     // stdio is inherited, so npm already printed why. Name the entry point the
     // reader has to re-run, as documented in the plan.
-    throw new Error(`npm ${args.join(" ")} failed: rerun node scripts/build-ui.mjs`, { cause });
+    throw new Error(`${command} failed: rerun node scripts/build-ui.mjs`, { cause });
   }
 }
 
@@ -84,10 +83,20 @@ function runNpm(args) {
 // pathToFileURL because on Windows process.argv[1] is "D:\dir\file" and a naive
 // `file://` prefix produces a URL that never matches import.meta.url.
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  if (!existsSync(resolve(ui, "node_modules"))) {
-    runNpm(npmArgs.ci);
+  const marker = resolve(ui, "node_modules/.swr-install");
+  const fingerprint = createHash("sha256")
+    .update(`${process.platform}/${process.arch}/${process.versions.modules}\n`)
+    .update(await readFile(resolve(ui, "package.json"))).update("\0")
+    .update(await readFile(resolve(ui, "package-lock.json"))).digest("hex");
+  const installed = await readFile(marker, "utf8").catch((err) => {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  });
+  if (installed !== fingerprint) {
+    runNpm(npmCommands.ci);
+    await writeFile(marker, fingerprint);
   }
-  runNpm(npmArgs.build);
+  runNpm(npmCommands.build);
 
   const manifest = JSON.parse(await readFile(resolve(web, ".vite/manifest.json"), "utf8"));
   const list = collectSwAssets(manifest);

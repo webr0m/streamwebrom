@@ -2,49 +2,33 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: run ui ui-skip test test-race lint build all windows launcher docker clean overflow
+.PHONY: run ui test test-race lint build all windows launcher docker clean overflow
 
 run:
 	go run ./cmd/streamwebrom -open
 
-# The UI pipeline needs node; owners build from WSL, where node is not installed,
-# so every target that would chain `ui` — `test`, `build` and `all` — chains it only
-# when node is actually reachable. Without node the binary still builds, but from
-# whatever web/ is on disk: `ui-skip` says so loudly, because a silent pass reads
-# like "the bundle is current". CI (ubuntu + node) and the Dockerfile's own ui stage
-# always rebuild it. `ui-skip` has to be a real recipe rather than an empty
-# prerequisite: with nothing to do, make would report `build`/`all` up to date and
-# skip the Go compile too. Gap, deliberately not closed here: `windows` and the
-# `launcher` that depends on it never chained `ui`, so a release .exe embeds whatever
-# web/ holds — and the hashed bundle files are git-ignored, so a fresh clone ships
-# none. Parked for the next plan.
-UIPREREQ = $(shell command -v node >/dev/null 2>&1 && echo ui)
-
+# Release targets require a fresh bundle. For Go-only development, `make run`
+# still works on a clean checkout and serves the classic Studio.
 ui:
 	node scripts/build-ui.mjs
 
-ui-skip:
-	@echo "node not found: skipping the UI bundle — the binary embeds whatever web/ already holds"
-
-.PHONY: ui ui-skip
-
-test: $(UIPREREQ)
-	@$(if $(UIPREREQ),true,$(MAKE) ui-skip)
+test: ui
 	go vet ./...
 	go test -count=1 ./...
-	for f in web/js/*.js; do cp $$f /tmp/$$(basename $$f).mjs && node --check /tmp/$$(basename $$f).mjs || exit 1; done
+	for f in web/js/*.js; do node --input-type=module --check < "$$f" || exit 1; done
+	node --check web/sw.js
 	python3 scripts/jslint.py web/js
 	node --test tests/*.test.mjs
+	cd ui && npm test
+	cd desktop && npm test
 
 test-race:
 	CGO_ENABLED=1 go test -race -count=1 ./...
 
-build: $(UIPREREQ)
-	@$(if $(UIPREREQ),true,$(MAKE) ui-skip)
+build: ui
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/streamwebrom ./cmd/streamwebrom
 
-all: $(UIPREREQ)
-	@$(if $(UIPREREQ),true,$(MAKE) ui-skip)
+all: ui
 	@mkdir -p dist
 	@for p in $(PLATFORMS); do \
 	  os=$${p%/*}; arch=$${p#*/}; ext=; [ $$os = windows ] && ext=.exe; \
@@ -52,7 +36,7 @@ all: $(UIPREREQ)
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o dist/streamwebrom-$$os-$$arch$$ext ./cmd/streamwebrom || exit 1; \
 	done
 
-windows:
+windows: ui
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/streamwebrom-windows-amd64.exe ./cmd/streamwebrom
 
 # Native Windows app (.NET 8, WinForms tray launcher) with the Go server embedded.

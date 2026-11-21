@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -46,7 +47,7 @@ func shellPrefix(files fs.FS) string {
 // registration and breaks offline for every user. Anything unusable degrades to
 // the empty list — the classic shell still precaches — and says so in the log.
 //
-// Each surviving element is then kept only when it starts with "js/" or "css/".
+// Each surviving element must name an actual file below "js/" or "css/".
 // That is the same shape scripts/build-ui.mjs filters the manifest with, and the
 // two halves have to agree because this program produces the file: web/sw.js
 // resolves every entry as ASSET_PREFIX + "/" + p, and the /assets/ handler rejects
@@ -73,8 +74,11 @@ func (s *Server) shellAssets() []byte {
 	// first bad URL and that list is this function's only consumer, so an element
 	// left behind in the source array would keep poisoning offline.
 	kept := make([]string, 0, len(assets))
+	seen := make(map[string]bool, len(assets))
 	for _, asset := range assets {
-		if strings.HasPrefix(asset, "js/") || strings.HasPrefix(asset, "css/") {
+		if (strings.HasPrefix(asset, "js/") || strings.HasPrefix(asset, "css/")) &&
+			!seen[asset] && fs.ValidPath(asset) && !strings.ContainsAny(asset, "?#%\\") && hasStaticFile(s.static, asset) {
+			seen[asset] = true
 			kept = append(kept, asset)
 		}
 	}
@@ -93,6 +97,29 @@ func (s *Server) shellAssets() []byte {
 	return out
 }
 
+func hasStaticFile(files fs.FS, name string) bool {
+	info, err := fs.Stat(files, name)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// Match only Vite's generated Studio entry, module preload and stylesheet.
+// The checked-in HTML still contains the complete classic Studio markup.
+var studioBundleTags = regexp.MustCompile(`(?m)^[ \t]*(?:<script type="module" crossorigin src="/(js/studio-[A-Za-z0-9_-]{8}\.js)"></script>|<link rel="modulepreload" crossorigin href="/(js/[A-Za-z0-9_-]+-[A-Za-z0-9_-]{8}\.js)">|<link rel="stylesheet" crossorigin href="/(css/studio-[A-Za-z0-9_-]{8}\.css)">)[ \t]*\r?\n`)
+
+func studioHTML(files fs.FS, data []byte) []byte {
+	for _, match := range studioBundleTags.FindAllSubmatch(data, -1) {
+		for _, asset := range match[1:] {
+			if len(asset) != 0 && !hasStaticFile(files, string(asset)) {
+				legacy := studioBundleTags.ReplaceAll(data, nil)
+				return bytes.Replace(legacy, []byte("</head>"), []byte(
+					`<script type="module" src="/js/studio.js"></script>`+"\n"+
+						`<script type="module" src="/js/pwa.js"></script>`+"\n</head>"), 1)
+			}
+		}
+	}
+	return data
+}
+
 func noShellCache(w http.ResponseWriter) {
 	for _, header := range []string{"Cache-Control", "CDN-Cache-Control", "Cloudflare-CDN-Cache-Control"} {
 		w.Header().Set(header, "no-store")
@@ -107,6 +134,9 @@ func (s *Server) serveShell(w http.ResponseWriter, r *http.Request, name string,
 	}
 	switch path.Ext(name) {
 	case ".html":
+		if name == "studio.html" {
+			data = studioHTML(s.static, data)
+		}
 		data = []byte(strings.NewReplacer(`"/js/`, `"`+s.assetPrefix+`/js/`, `"/css/`, `"`+s.assetPrefix+`/css/`).Replace(string(data)))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	case ".js":

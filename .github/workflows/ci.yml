@@ -25,8 +25,8 @@ jobs:
       # gitignorado, así que en un checkout limpio no existe: sin este paso
       # `TestServedServiceWorkerPrecachesTheBuiltBundle` (internal/server/assets_test.go) se salta
       # en macOS y Windows y el job quedaba verde sin haber embebido nunca nada que precachar.
-      # `scripts/build-ui.mjs` se instala sus propias dependencias (`npm ci` cuando falta
-      # `ui/node_modules`), así que no hace falta un paso de npm que condicionar. Node 24: es la
+      # `scripts/build-ui.mjs` instala sus dependencias según el lockfile, así que no
+      # hace falta un paso adicional de npm. Node 24: es la
       # versión con la que se mide esta rama en local y la que ya usa el job `browser`; 22 no se
       # había ejecutado nunca fuera de Linux.
       - uses: actions/setup-node@v4
@@ -41,8 +41,10 @@ jobs:
       - name: ui bundle tests
         run: npm -C ui test
       - name: check JS syntax
-        if: runner.os != 'Windows' # bucle de shell: `cp` y `/tmp` no son comandos de PowerShell
-        run: for f in web/js/*.js; do cp $f /tmp/$(basename $f).mjs; node --check /tmp/$(basename $f).mjs; done
+        shell: bash
+        run: |
+          for f in web/js/*.js; do node --input-type=module --check < "$f" || exit 1; done
+          node --check web/sw.js
       - name: static check JS (undeclared identifiers, bad imports)
         if: runner.os == 'Linux'
         run: pip install esprima && python3 scripts/jslint.py web/js
@@ -63,6 +65,8 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-go@v5
         with: { go-version: '1.27.x' }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
       - uses: actions/setup-dotnet@v4
         with: { dotnet-version: "8.0.x" }
       - run: make all
@@ -71,7 +75,7 @@ jobs:
           cd dist
           mv windows-launcher/StreamWebRom.exe StreamWebRom-Windows-x64.exe
           rm -rf windows-launcher
-          sha256sum * > SHA256SUMS.txt
+          sha256sum streamwebrom-* StreamWebRom-Windows-x64.exe > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with: { name: streamwebrom, path: dist/* }
       # Release assets are published together from the verified manifest after

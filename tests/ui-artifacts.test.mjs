@@ -202,7 +202,7 @@ test("the builder spawns npm in the one form that works on every platform", asyn
   // the npm shim without a shell is ENOENT/EINVAL on Windows.
   const source = await readFile(builder, "utf8");
   assert.doesNotMatch(source, /"--prefix/, "must not pass npm --prefix to run the build");
-  assert.match(source, /shell:\s*true/, "must spawn npm through a shell so Windows resolves the shim");
+  assert.match(source, /execSync\(command,\s*\{\s*cwd:\s*ui/, "must run npm through a shell in ui/ so Windows resolves the shim");
   assert.doesNotMatch(
     source,
     /npm-cli\.js|NPM_PREFIXES|npmCliCandidates/,
@@ -211,8 +211,8 @@ test("the builder spawns npm in the one form that works on every platform", asyn
 
   // The shapes npm must be called with, read straight from the builder so this
   // assertion cannot drift from the code it guards.
-  assert.match(source, /\["ci",\s*"--no-audit",\s*"--no-fund"\]/, "cold install must be npm ci --no-audit --no-fund");
-  assert.match(source, /\["run",\s*"build"\]/, "the build step must be npm run build with no --prefix");
+  assert.match(source, /"npm ci --no-audit --no-fund"/, "cold install must be npm ci --no-audit --no-fund");
+  assert.match(source, /"npm run build"/, "the build step must be npm run build with no --prefix");
 });
 
 test("the ui sources the bundle is hashed from are LF", async () => {

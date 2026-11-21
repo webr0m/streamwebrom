@@ -175,7 +175,8 @@ test("useStageHeight needs no ResizeObserver", () => {
 });
 
 test("useReducedMotion follows the media query", () => {
-  const match = vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true, addEventListener() {}, removeEventListener() {} });
+  const match = vi.fn().mockReturnValue({ matches: true, addEventListener() {}, removeEventListener() {} });
+  vi.stubGlobal("matchMedia", match);
   const { result } = renderHook(() => useReducedMotion());
   expect(result.current).toBe(true);
   match.mockReturnValue({ matches: false, addEventListener() {}, removeEventListener() {} });
@@ -189,7 +190,7 @@ test("useReducedMotion follows the change event of the media query", () => {
   // camino real entre el SO y la animación de la barra.
   let handler = null;
   const queries = [];
-  vi.spyOn(window, "matchMedia").mockImplementation(() => {
+  vi.stubGlobal("matchMedia", vi.fn(() => {
     const mq = {
       matches: false,
       addEventListener: (type, fn) => { if (type === "change") handler = fn; },
@@ -197,7 +198,7 @@ test("useReducedMotion follows the change event of the media query", () => {
     };
     queries.push(mq);
     return mq;
-  });
+  }));
   const { result, unmount } = renderHook(() => useReducedMotion());
   expect(result.current).toBe(false);
   expect(handler).toBeTruthy();

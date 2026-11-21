@@ -9,3 +9,20 @@ func TestSafeName(t *testing.T) {
 		}
 	}
 }
+
+func TestOldStreamCloseLeavesReplacementRecordingActive(t *testing.T) {
+	r := New(t.TempDir(), "")
+	const key = "room/cam"
+	old := &Recording{Stream: "cam"}
+	current := &Recording{Stream: "cam"}
+	r.active[key] = current
+	if rec, err := r.stop(key, old); rec != nil || err == nil {
+		t.Fatalf("stale callback returned (%p, %v)", rec, err)
+	}
+	if rec, err := r.stop(key, current); rec != current || err != nil {
+		t.Fatalf("current stream close returned (%p, %v)", rec, err)
+	}
+	if _, err := r.Stop("room", "cam"); err == nil {
+		t.Fatal("recording remained active after its stream closed")
+	}
+}
