@@ -15,6 +15,13 @@ jobs:
         with: {node-version: '24'}
       - uses: actions/setup-go@v5
         with: {go-version: '1.27.x'}
+      # El fixture de abajo embebe `web/` en tiempo de compilación y `web/js/sw-assets.json`
+      # está gitignorado: en un checkout limpio no hay chunks, la página versionada nombra un
+      # bundle que el binario no tiene y `/studio` se queda en "conectando…". Medido en la run
+      # 44910548463: `smoke.cjs:18` falla con Expected "conectado" / Received "conectando…".
+      # `scripts/build-ui.mjs` se hace el `npm ci` de ui/ cuando falta node_modules.
+      - name: build the UI bundle the fixture binary embeds
+        run: node scripts/build-ui.mjs
       - name: install locked build dependencies without implicit lifecycle scripts
         working-directory: desktop
         run: npm ci --ignore-scripts --no-audit --no-fund
