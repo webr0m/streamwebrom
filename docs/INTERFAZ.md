@@ -10,6 +10,24 @@ Vista también agrupa Solo escenario, pantalla completa y visualización de late
 
 La portada separa Salas guardadas de Estudios recientes. La configuración no usa una biblioteca gráfica ni fuentes remotas: variables CSS para colores, preferencias locales y un ResizeObserver para ajustar el escenario. No se crean pistas, workers de video ni temporizadores por cambiar el tema o plegar paneles.
 
+## Modo `next` del Studio
+
+`/studio` puede arrancar con dos interfaces. La predeterminada **sigue siendo la de siempre**: con
+`?ui=next` o con `localStorage.setItem("swr.ui","next")` se carga el shell React de `ui/`, y con
+`?ui=legacy` se vuelve a la actual sin tocar nada más. La consulta gana a lo guardado, y un valor que
+no sea `legacy` ni `next` se ignora.
+
+En modo `next` la interfaz se pinta desde `ui/src/fixtures/next-studio.js`: es la maqueta real, con
+los estilos y las primitivas definitivas, y todavía no manda órdenes al motor. Por eso el escenario
+sale en negro aunque el `canvas id="program"` esté montado: quien lo pinta es el `Compositor`, y ese
+aún no está conectado al shell nuevo. La portación del motor WebRTC a `StudioBridge` llega con el plan
+siguiente.
+
+Los estilos viven en `ui/src/styles/tokens.css` (Control Room Pro) y en los `*.module.css` de cada
+componente; `web/css/app.css` sigue vistiendo a las páginas que aún no migraron. Ninguna regla, vieja
+o nueva, selecciona el escenario por `id`: el canvas del shell nuevo se viste con una clase de módulo,
+y los píxeles los pinta siempre `Compositor`.
+
 Referencias de producto revisadas:
 
 - [StreamYard: apariencia clara, oscura y automática](https://support.streamyard.com/hc/en-us/articles/31567252131732-Does-StreamYard-have-a-Dark-Mode).

@@ -1,5 +1,6 @@
 // ui/src/components/primitives/StudioDialog.jsx
 import { useEffect, useId, useRef } from "react";
+import { t } from "../../i18n.js";
 import styles from "./StudioDialog.module.css";
 
 export function StudioDialog({ title, onClose, children, footer = null }) {
@@ -30,7 +31,7 @@ export function StudioDialog({ title, onClose, children, footer = null }) {
     <dialog ref={ref} className={styles.dialog} aria-labelledby={titleId}>
       <header className={styles.header}>
         <h2 id={titleId} className={styles.title}>{title}</h2>
-        <button type="button" data-close className={styles.close} aria-label="Cerrar" onClick={onClose}>✕</button>
+        <button type="button" data-close className={styles.close} aria-label={t("common.close")} onClick={onClose}>✕</button>
       </header>
       <div className={styles.body}>{children}</div>
       {footer ? <footer className={styles.footer}>{footer}</footer> : null}

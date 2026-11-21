@@ -1,5 +1,11 @@
 # Cambios
 
+## Sin publicar
+
+- El Studio estrena shell React + Vite con la paleta Control Room Pro, disponible detrás de `?ui=next`; la interfaz actual sigue siendo la predeterminada.
+- Nueva prueba bloqueante `scripts/overflow-smoke.py`: el Studio no puede recortar texto, crear scroll ni dejar controles sin nombre en 1440, 1120, 820 y 390 px, con los paneles plegados y sin plegar.
+- Dos controles más en `node --test`: las cadenas del shell nuevo no pueden estar escritas a mano y cada página que el service worker guarda para el offline tiene que ser una ruta que el servidor atienda.
+
 ## v1.12.1 — Emisión a Telegram
 
 - Telegram está disponible en Destinos. Inicia una transmisión con una aplicación externa en tu canal, copia la URL y la clave de Telegram al estudio y pulsa «Transmitir». El programa del estudio se envía por RTMP o RTMPS y la audiencia lo recibe en el canal.

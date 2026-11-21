@@ -31,6 +31,10 @@ async function shellConstants() {
   return runInNewContext(`${head}\n({ PAGES, CLASSIC, I18N, SHELL });`, {});
 }
 
+async function exists(rel) {
+  try { await readFile(join(root, "web", rel)); return true; } catch { return false; }
+}
+
 // Every first-party file that really exists under web/js/i18n/: the locale
 // aggregators at the root plus each <lang>/<module>.js dictionary.
 async function i18nUrlsOnDisk() {
@@ -87,4 +91,37 @@ test("the built asset list carries the chunks the mode switch imports lazily", a
     const chunk = new RegExp(`^js/${name}-[A-Za-z0-9_-]{8}\\.js$`);
     assert.ok(listed.some((file) => chunk.test(file)), `${raw} has no js/${name}-<hash>.js chunk`);
   }
+});
+
+// R9 bis: PAGES enumera URLs de navegación, y nadie comprobaba que el servidor las atienda. Un
+// renombre en la tabla de routes de Go deja una entrada que cache.addAll pide contra un 404, lo cual
+// aborta la instalación del worker y tumba el offline de todo el mundo — el mismo modo de fallo que
+// R9 ya cubre para CLASSIC/I18N contra el disco, pero en la otra mitad del shell.
+async function routeTable() {
+  const go = await readFile(join(root, "internal/server/server.go"), "utf8");
+  const body = go.match(/routes := map\[string\]string\{([^}]*)\}/);
+  assert.ok(body, "internal/server/server.go no contiene la tabla de rutas pretty");
+  return [...body[1].matchAll(/"(\/[^"]*)"\s*:\s*"(\/[^"]*)"/g)].map((m) => [m[1], m[2]]);
+}
+
+test("every page the offline shell precaches is a served route with a real file behind it", async () => {
+  const { PAGES, SHELL } = await shellConstants();
+  const routes = new Map(await routeTable());
+  assert.ok(PAGES.length >= 7, `PAGES se ha quedado en ${PAGES.length} entradas`);
+  const shell = new Set(SHELL);
+  const problems = [];
+  for (const url of PAGES) {
+    // Una página entra en SHELL sin prefijo: es una navegación, no un asset. Si alguien la prefija,
+    // el fetch handler (que compara pathname) deja de reconocerla y el offline muere en silencio.
+    if (!shell.has(url)) problems.push(`${url} no llega a SHELL`);
+    const target = routes.get(url);
+    if (target === undefined) {
+      // `/manifest.webmanifest` no es una pretty URL: lo sirve el manejador estático, así que su
+      // prueba es el fichero, no la tabla.
+      if (!(await exists(url.slice(1)))) problems.push(`${url} ni es ruta de Go ni existe en web/`);
+      continue;
+    }
+    if (!(await exists(target.slice(1)))) problems.push(`${url} routea a ${target}, que no existe en web/`);
+  }
+  if (problems.length) assert.fail(problems.join("; "));
 });
