@@ -2,20 +2,31 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: run ui test test-race lint build all windows launcher docker clean overflow
+.PHONY: run ui ui-skip test test-race lint build all windows launcher docker clean overflow
 
 run:
 	go run ./cmd/streamwebrom -open
 
 # The UI pipeline needs node; owners build from WSL, where node is not installed,
-# so `test` only chains it when node is actually reachable. CI (ubuntu + node) and
-# every release build (`build`, `all`, `launcher`) always require the bundle.
+# so every target that would chain `ui` — `test`, `build`, `all` and the release
+# path through `launcher` — chains it only when node is actually reachable. With-
+# out node the binary still builds, but from whatever web/ is on disk: `ui-skip`
+# says so loudly, because a silent pass reads like "the bundle is current". CI
+# (ubuntu + node) always rebuilds it. `ui-skip` has to be a real recipe rather than
+# an empty prerequisite: with nothing to do, make would report `build`/`all` up to
+# date and skip the Go compile too.
 UIPREREQ = $(shell command -v node >/dev/null 2>&1 && echo ui)
 
 ui:
 	node scripts/build-ui.mjs
 
+ui-skip:
+	@echo "node not found: skipping the UI bundle — the binary embeds whatever web/ already holds"
+
+.PHONY: ui ui-skip
+
 test: $(UIPREREQ)
+	@$(if $(UIPREREQ),true,$(MAKE) ui-skip)
 	go vet ./...
 	go test -count=1 ./...
 	for f in web/js/*.js; do cp $$f /tmp/$$(basename $$f).mjs && node --check /tmp/$$(basename $$f).mjs || exit 1; done
@@ -25,10 +36,12 @@ test: $(UIPREREQ)
 test-race:
 	CGO_ENABLED=1 go test -race -count=1 ./...
 
-build: ui
+build: $(UIPREREQ)
+	@$(if $(UIPREREQ),true,$(MAKE) ui-skip)
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/streamwebrom ./cmd/streamwebrom
 
-all: ui
+all: $(UIPREREQ)
+	@$(if $(UIPREREQ),true,$(MAKE) ui-skip)
 	@mkdir -p dist
 	@for p in $(PLATFORMS); do \
 	  os=$${p%/*}; arch=$${p#*/}; ext=; [ $$os = windows ] && ext=.exe; \
