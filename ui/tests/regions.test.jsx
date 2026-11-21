@@ -23,6 +23,11 @@ test("SceneRail marks the edited scene and asks for the OBS link", async () => {
   const cards = document.querySelectorAll("[data-scene]");
   expect(cards).toHaveLength(8);
   expect(cards[0]).toHaveAttribute("aria-current", "true");
+  // El nombre de cada escena pasa por TruncatedText, que es lo que le da tooltip cuando
+  // `SceneRail.module.css:10` lo corta con elipsis. Ocho tarjetas, un nombre recortable cada una:
+  // si el primitivo desaparece, esto se pone rojo y la prueba del título en
+  // primitives-text.test.jsx no tiene a quién aplicarse.
+  expect(document.querySelectorAll("[data-scene] [data-truncated]")).toHaveLength(8);
   await userEvent.click(cards[4]);
   expect(command).toHaveBeenCalledWith("scene.select", { name: "5" });
   await userEvent.click(document.querySelector('[data-action="obs-link"]'));

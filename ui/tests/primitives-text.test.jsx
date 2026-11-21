@@ -20,6 +20,23 @@ test("TruncatedText exposes the full string only when it really clipped", () => 
   expect(node).not.toHaveAttribute("title");
 });
 
+// La otra mitad del contrato, y la que el lector de SceneRail/SourceTray necesita: sin métricas
+// falsas, `clipped` nunca es verdad y la rama con `title` del `TruncatedText` embarcado jamás se
+// ejecuta —podría borrarse y estos tests seguirían verdes. El stub es lo que la hace alcanzable.
+test("TruncatedText hands the full string to the tooltip once the node is clipped", () => {
+  const saved = ["scrollWidth", "clientWidth"].map((name) => [name, Object.getOwnPropertyDescriptor(Element.prototype, name)]);
+  Object.defineProperty(Element.prototype, "scrollWidth", { configurable: true, get: () => 120 });
+  Object.defineProperty(Element.prototype, "clientWidth", { configurable: true, get: () => 10 });
+  try {
+    render(<TruncatedText>un nombre muy larguísimo</TruncatedText>);
+    const node = screen.getByText("un nombre muy larguísimo");
+    expect(node).toHaveAttribute("data-truncated", "true");
+    expect(node).toHaveAttribute("title", "un nombre muy larguísimo");
+  } finally {
+    for (const [name, descriptor] of saved) Object.defineProperty(Element.prototype, name, descriptor);
+  }
+});
+
 test("StatusPill announces its tone and never overflows the box", () => {
   render(<StatusPill tone="live" label="En directo" dot />);
   const pill = screen.getByRole("status");

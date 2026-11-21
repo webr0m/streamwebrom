@@ -129,14 +129,16 @@ test("an engine snapshot arriving does not clear the queue", () => {
   expect(bridge.getSnapshot().toasts.items.map((item) => item.text)).toEqual(["sigue ahí"]);
 });
 
-test("toasts are dismissible and announced politely", async () => {
+test("toasts are dismissible and announced by their own live roles", async () => {
   const bridge = createStudioBridge({ engine: createFixtureEngine(nextStudioFixture) });
   bridge.notify("Cámara añadida", "ok");
   bridge.notify("Sin conexión con el relé", "err");
   render(<ToastLayer bridge={bridge} />);
   const region = screen.getByRole("region", { name: "Avisos del estudio" });
-  expect(region).toHaveAttribute("aria-live", "polite");
-  expect(screen.getByText("Cámara añadida")).toBeInTheDocument();
+  // La viveza la ponen los hijos: `role="status"` y `role="alert"` ya abren región viva, y un
+  // ancestro `aria-live` anunciaba además cada mutación por su cuenta —el aviso se leía dos veces.
+  expect(region).not.toHaveAttribute("aria-live");
+  expect(screen.getByRole("status")).toHaveTextContent("Cámara añadida");
   expect(screen.getByRole("alert")).toHaveTextContent("Sin conexión con el relé");
   await userEvent.click(screen.getAllByRole("button", { name: /Cerrar aviso/i })[0]);
   expect(screen.queryByText("Cámara añadida")).toBeNull();
