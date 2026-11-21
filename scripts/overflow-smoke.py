@@ -14,7 +14,9 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 VIEWPORTS = [(1440, 900), (1120, 800), (820, 900), (390, 640)]
 PROBE = """
 () => {
-  const path = (n) => n.id ? '#' + n.id : n.tagName.toLowerCase() + '.' + String(n.className || '').split(' ')[0];
+  // `className` en un SVG es un SVGAnimatedString objeto, no el texto: su primer token era
+  // "[object SVGAnimatedString]" para todos los iconos y el informe señalaba el culpable con ruido.
+  const path = (n) => n.id ? '#' + n.id : n.tagName.toLowerCase() + '.' + String((n.getAttribute && n.getAttribute('class')) || '').split(' ')[0];
   const clipped = [];
   for (const node of document.querySelectorAll('.studio-root *')) {
     if (getComputedStyle(node).overflow !== 'visible') continue;
@@ -46,6 +48,22 @@ COLLAPSE = """
 }
 """
 
+COLLAPSE_STATE = """
+() => {
+  const after = {};
+  for (const region of ["scenesRail", "studioPanes"]) {
+    const toggle = document.querySelector('.studio-root [data-region="top"] [aria-controls="' + region + '"]');
+    after[region] = toggle ? toggle.getAttribute("aria-expanded") : null;
+  }
+  return { after, rootClass: String((document.querySelector('.studio-root') || {}).className || '') };
+}
+"""
+
+GEOMETRY = """
+() => [document.documentElement.scrollHeight, document.documentElement.scrollWidth,
+       [...document.querySelectorAll('.studio-root [data-region]')].map(n => [n.clientWidth, n.clientHeight])]
+"""
+
 # Las cuatro pasadas no son un capricho: `scenes-collapsed` y `panel-collapsed` redefinen columnas y,
 # por debajo de 820px, llegan hasta `display: none` sobre la propia región. Un fallo de rejilla en un
 # estado colapsado es invisible para una puerta que solo mira el estado abierto — y lo fue: la
@@ -58,6 +76,55 @@ LAYOUTS = [
     ("panel collapsed", ["studioPanes"]),
     ("both collapsed", ["scenesRail", "studioPanes"]),
 ]
+
+# El estado colapsado se comprueba por dos vías porque el objetivo de la pasada es la clase que leen
+# las rejillas, no el atributo del botón.
+COLLAPSE_CLASS = {"scenesRail": "scenes-collapsed", "studioPanes": "panel-collapsed"}
+
+
+def layout_problems(state, sides):
+    """Del cambio de estado se exigen dos lecturas: el `aria-expanded` del botón y la clase que de
+    verdad leen las rejillas. Basta la primera para que una puerta verde no garantice nada, porque
+    el objetivo de la pasada es lo que la hoja ve."""
+    problems = []
+    for region, value in state["after"].items():
+        want = "false" if region in sides else "true"
+        if value is None:
+            problems.append(f"{region}: no [aria-controls] toggle in the topbar")
+        elif value != want:
+            problems.append(f"{region}: aria-expanded {value!r}, wanted {want!r}")
+        elif (COLLAPSE_CLASS[region] in state["rootClass"]) != (region in sides):
+            problems.append(f"{region}: the root does not carry .{COLLAPSE_CLASS[region]}")
+    return problems
+
+
+def apply_layout(page, sides, tries=6):
+    """Pulsar y leer el atributo en el mismo tick no vale: medido el 2026-11-20, tras `toggle.click()`
+    el `aria-expanded` seguía con el valor viejo porque el estado vive fuera del componente y la
+    re-renderización llega después. Se pulsa, se espera y se vuelve a leer hasta que el DOM refleje
+    lo pedido; si no lo refleja en 720 ms, la pasada se reporta y no se mide."""
+    for _ in range(tries):
+        page.evaluate(COLLAPSE, sides)
+        page.wait_for_timeout(120)
+        problems = layout_problems(page.evaluate(COLLAPSE_STATE), sides)
+        if not problems:
+            return []
+    return problems
+
+
+def settle(page, tries=8, step=120):
+    """Espera a que la geometría se repita dos lecturas seguidas. Un `wait_for_timeout` fijo era
+    una apuesta: medido, 350 ms bastaba en los cuatro anchos, pero una transición más larga en el
+    futuro leería la maqueta a medio mover y daría verde sobre un layout que aún está cambiando.
+    Devuelve False si nunca se asienta: eso es un fallo de la puerta, no un ruido que ignorar."""
+    previous = page.evaluate(GEOMETRY)
+    for _ in range(tries):
+        page.wait_for_timeout(step)
+        current = page.evaluate(GEOMETRY)
+        if current == previous:
+            return True
+        previous = current
+    return False
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--url", default="http://localhost:18443")
@@ -79,13 +146,20 @@ with sync_playwright() as pw:
     page.wait_for_selector("[data-region='top']")
     failures = []
     for label, sides in LAYOUTS:
-        page.evaluate(COLLAPSE, sides)
-        page.wait_for_timeout(250)
+        # Sin este candado la barrida es decorativa: `COLLAPSE` solo pulsa si encuentra
+        # `[aria-controls]` con el `aria-expanded` equivocado, así que si esos enganches desaparecen
+        # las cuatro pasadas miden el mismo estado abierto y la puerta imprime `overflow gate ok`.
+        problems = apply_layout(page, sides)
+        if problems:
+            failures.append(f"{label}: the collapse sweep never reached that state (" + "; ".join(problems) + ")")
+            continue
         for width, height in VIEWPORTS:
-            page.set_viewport_size({"width": width, "height": height})
-            page.wait_for_timeout(350)
-            report = page.evaluate(PROBE)
             size = f"{label} @ {width}x{height}"
+            page.set_viewport_size({"width": width, "height": height})
+            errors.clear()
+            if not settle(page):
+                failures.append(f"{size}: the layout never settled in 960 ms")
+            report = page.evaluate(PROBE)
             if errors:
                 failures.append(f"{size}: page errors {errors}")
             if report["documentScroll"]:

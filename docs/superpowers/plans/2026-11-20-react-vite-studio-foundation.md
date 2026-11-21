@@ -4479,10 +4479,12 @@ Task 9; el (3) re-pina un bloque que Task 9 ya había escrito):
    con ese suelo, el alto de la celda queda a merced del contenido y `.canvas`
    (`ProgramStage.module.css:3`) mide `var(--stage-height)`, o sea el alto COMPLETO de su propio
    contenedor, mientras `useStageHeight.js` observa `[data-region="stage-inner"]` sin descontar el
-   hueco de 8px ni las dos líneas de LayoutBar (27px). Se re-pina desde aquí con `#studioRoot` delante:
-   sin él, `.swr-shell > [data-region="stage"]` (0,2,0) empata con el `.swr-shell > *` del módulo y
-   gana el orden de hoja —el módulo se inyecta después—, así que el prefijo (1,2,0) no es adorno sino
-   la razón de que no haga falta `!important`. El `calc` solo se aplica al slot de escenario:
+   hueco de 8px ni las dos líneas de LayoutBar (27px). Basta con `.swr-shell > [data-region="stage"]`
+   (0,2,0): gana por especificidad a las dos reglas suelo, el `.swr-shell > *` de arriba y el
+   `.slot` del módulo, ambas (0,1,0), así que no hace falta `!important` ni depender del orden de
+   hoja. El prefijo `#studioRoot[data-ui-mode="next"]` (1,2,0) se mantiene por otra razón: ancla la
+   regla SOLO al modo next, igual que el desmontaje de arriba, para que nada de esto alcance a una
+   página legacy. El `calc` solo se aplica al slot de escenario:
    las demás regiones ya caben, y tocarlas movería altores que Task 10 ancló en sus tests. */
 #studioRoot[data-ui-mode="next"] .swr-shell > [data-region="stage"] { min-block-size: 100%; }
 #studioRoot[data-ui-mode="next"] .swr-shell > [data-region="stage"] > [data-region="stage-inner"] { block-size: calc(100% - var(--swr-sp-2)); min-block-size: 0; }
@@ -4572,7 +4574,9 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 VIEWPORTS = [(1440, 900), (1120, 800), (820, 900), (390, 640)]
 PROBE = """
 () => {
-  const path = (n) => n.id ? '#' + n.id : n.tagName.toLowerCase() + '.' + String(n.className || '').split(' ')[0];
+  // `className` en un SVG es un SVGAnimatedString objeto, no el texto: su primer token era
+  // "[object SVGAnimatedString]" para todos los iconos y el informe señalaba el culpable con ruido.
+  const path = (n) => n.id ? '#' + n.id : n.tagName.toLowerCase() + '.' + String((n.getAttribute && n.getAttribute('class')) || '').split(' ')[0];
   const clipped = [];
   for (const node of document.querySelectorAll('.studio-root *')) {
     if (getComputedStyle(node).overflow !== 'visible') continue;
@@ -4604,6 +4608,22 @@ COLLAPSE = """
 }
 """
 
+COLLAPSE_STATE = """
+() => {
+  const after = {};
+  for (const region of ["scenesRail", "studioPanes"]) {
+    const toggle = document.querySelector('.studio-root [data-region="top"] [aria-controls="' + region + '"]');
+    after[region] = toggle ? toggle.getAttribute("aria-expanded") : null;
+  }
+  return { after, rootClass: String((document.querySelector('.studio-root') || {}).className || '') };
+}
+"""
+
+GEOMETRY = """
+() => [document.documentElement.scrollHeight, document.documentElement.scrollWidth,
+       [...document.querySelectorAll('.studio-root [data-region]')].map(n => [n.clientWidth, n.clientHeight])]
+"""
+
 # Las cuatro pasadas no son un capricho: `scenes-collapsed` y `panel-collapsed` redefinen columnas y,
 # por debajo de 820px, llegan hasta `display: none` sobre la propia región. Un fallo de rejilla en un
 # estado colapsado es invisible para una puerta que solo mira el estado abierto — y lo fue: la
@@ -4616,6 +4636,55 @@ LAYOUTS = [
     ("panel collapsed", ["studioPanes"]),
     ("both collapsed", ["scenesRail", "studioPanes"]),
 ]
+
+# El estado colapsado se comprueba por dos vías porque el objetivo de la pasada es la clase que leen
+# las rejillas, no el atributo del botón.
+COLLAPSE_CLASS = {"scenesRail": "scenes-collapsed", "studioPanes": "panel-collapsed"}
+
+
+def layout_problems(state, sides):
+    """Del cambio de estado se exigen dos lecturas: el `aria-expanded` del botón y la clase que de
+    verdad leen las rejillas. Basta la primera para que una puerta verde no garantice nada, porque
+    el objetivo de la pasada es lo que la hoja ve."""
+    problems = []
+    for region, value in state["after"].items():
+        want = "false" if region in sides else "true"
+        if value is None:
+            problems.append(f"{region}: no [aria-controls] toggle in the topbar")
+        elif value != want:
+            problems.append(f"{region}: aria-expanded {value!r}, wanted {want!r}")
+        elif (COLLAPSE_CLASS[region] in state["rootClass"]) != (region in sides):
+            problems.append(f"{region}: the root does not carry .{COLLAPSE_CLASS[region]}")
+    return problems
+
+
+def apply_layout(page, sides, tries=6):
+    """Pulsar y leer el atributo en el mismo tick no vale: medido el 2026-11-20, tras `toggle.click()`
+    el `aria-expanded` seguía con el valor viejo porque el estado vive fuera del componente y la
+    re-renderización llega después. Se pulsa, se espera y se vuelve a leer hasta que el DOM refleje
+    lo pedido; si no lo refleja en 720 ms, la pasada se reporta y no se mide."""
+    for _ in range(tries):
+        page.evaluate(COLLAPSE, sides)
+        page.wait_for_timeout(120)
+        problems = layout_problems(page.evaluate(COLLAPSE_STATE), sides)
+        if not problems:
+            return []
+    return problems
+
+
+def settle(page, tries=8, step=120):
+    """Espera a que la geometría se repita dos lecturas seguidas. Un `wait_for_timeout` fijo era
+    una apuesta: medido, 350 ms bastaba en los cuatro anchos, pero una transición más larga en el
+    futuro leería la maqueta a medio mover y daría verde sobre un layout que aún está cambiando.
+    Devuelve False si nunca se asienta: eso es un fallo de la puerta, no un ruido que ignorar."""
+    previous = page.evaluate(GEOMETRY)
+    for _ in range(tries):
+        page.wait_for_timeout(step)
+        current = page.evaluate(GEOMETRY)
+        if current == previous:
+            return True
+        previous = current
+    return False
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--url", default="http://localhost:18443")
@@ -4637,13 +4706,20 @@ with sync_playwright() as pw:
     page.wait_for_selector("[data-region='top']")
     failures = []
     for label, sides in LAYOUTS:
-        page.evaluate(COLLAPSE, sides)
-        page.wait_for_timeout(250)
+        # Sin este candado la barrida es decorativa: `COLLAPSE` solo pulsa si encuentra
+        # `[aria-controls]` con el `aria-expanded` equivocado, así que si esos enganches desaparecen
+        # las cuatro pasadas miden el mismo estado abierto y la puerta imprime `overflow gate ok`.
+        problems = apply_layout(page, sides)
+        if problems:
+            failures.append(f"{label}: the collapse sweep never reached that state (" + "; ".join(problems) + ")")
+            continue
         for width, height in VIEWPORTS:
-            page.set_viewport_size({"width": width, "height": height})
-            page.wait_for_timeout(350)
-            report = page.evaluate(PROBE)
             size = f"{label} @ {width}x{height}"
+            page.set_viewport_size({"width": width, "height": height})
+            errors.clear()
+            if not settle(page):
+                failures.append(f"{size}: the layout never settled in 960 ms")
+            report = page.evaluate(PROBE)
             if errors:
                 failures.append(f"{size}: page errors {errors}")
             if report["documentScroll"]:
@@ -4668,7 +4744,7 @@ print("overflow gate ok")
 
 Diferencias con el borrador inicial de esta tarea, cada una medida:
 
-1. La acción primaria se busca por `[data-action="live"]` (`ui/src/components/Topbar.jsx:43`), no por
+1. La acción primaria se busca por `[data-action="live"]` (`ui/src/components/Topbar.jsx:44`), no por
    `[data-status]`. `CommandButton` pone `data-status` con default `"idle"`, así que el selector del
    borrador encontraba el PRIMER `CommandButton` del DOM (el de grabar: 9 coincidencias medidas) y el
    gate no miraba nunca la acción primaria. Medido sobre la primaria real: texto `▲Transmitir`,
@@ -4694,12 +4770,12 @@ binario y cambiar `layout.css` exige reconstruir las dos cosas:
 ```bash
 node scripts/build-ui.mjs
 wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && \
-  go build -o /tmp/swr-green ./cmd/streamwebrom && \
-  (nohup /tmp/swr-green -addr 127.0.0.1:18493 -stun= -data /tmp/swr-green-data >/tmp/swr-green.log 2>&1 &); \
-  sleep 2; curl -s http://localhost:18493/api/health; \
-  curl -s http://localhost:18493/studio | grep -oE 'studio-[A-Za-z0-9_-]*\.(js|css)'"
+  go build -o /tmp/swr-overflow-bin ./cmd/streamwebrom && \
+  (nohup /tmp/swr-overflow-bin -addr 127.0.0.1:18497 -stun= -data /tmp/swr-overflow-data >/tmp/swr-overflow-run.log 2>&1 &); \
+  sleep 3; curl -s http://localhost:18497/api/health; \
+  curl -s http://localhost:18497/studio | grep -oE 'studio-[A-Za-z0-9_-]*\.(js|css)'"
 .superpowers/venv-win/Scripts/python.exe scripts/overflow-smoke.py \
-  --url http://localhost:18493 --browser "C:/Program Files/Google/Chrome/Application/chrome.exe"
+  --url http://localhost:18497 --browser "C:/Program Files/Google/Chrome/Application/chrome.exe"
 ```
 
 Expect: `overflow gate ok`, con `uptime` de pocos segundos y el hash servido igual al de
@@ -4708,6 +4784,24 @@ Expect: `overflow gate ok`, con `uptime` de pocos segundos y el hash servido igu
 ```
 {"ok":true,"uptime":2,"version":"dev"} → studio-Ca2SwZcV.js → overflow gate ok   (exit 0)
 ```
+
+Repetido tras la ronda de revisión con el candado de la barrida ya dentro, misma ruta de arriba
+(`uptime` 3, `studio-Ca2SwZcV.js`): `overflow gate ok`, exit 0. Y el rojo que el candado viene a
+impedir, medido renombrando el `aria-controls` del panel a `studioPanesNEVER` en
+`ui/src/components/Topbar.jsx:52` (binario `/tmp/swr-hookbroken`, puerto 18498, `-data` aparte):
+
+```
+OVERFLOW GATE FAILED
+ - expanded: the collapse sweep never reached that state (studioPanes: no [aria-controls] toggle in the topbar)
+ - scenes collapsed: the collapse sweep never reached that state (studioPanes: no [aria-controls] toggle in the topbar)
+ - panel collapsed: the collapse sweep never reached that state (studioPanes: no [aria-controls] toggle in the topbar)
+ - both collapsed: the collapse sweep never reached that state (studioPanes: no [aria-controls] toggle in the topbar)
+```
+
+exit 1, con `scenesRail` sin quejarse: la puerta ya no puede dar verde sobre un estado que no cambió.
+El primer intento de este candado fallaba las cuatro pasadas sobre una maqueta perfecta, y así se
+detectó que leer el `aria-expanded` en el mismo tick del `click()` devuelve el valor viejo porque el
+estado vive en el store del bridge: de ahí el bucle de re-lectura de `apply_layout`.
 
 Expect además, y es el motivo de este paso: **con las reglas del Step 1 desactivadas el gate da 1**.
 Se ejecuta primero rojo, luego verde; un `ok` sin haber visto el rojo no prueba nada. El rojo medido
@@ -4762,7 +4856,9 @@ Crear `docs/OVERFLOW-GATE.md` con: qué abre y a qué anchos; los cuatro criteri
 horizontales **y verticales** en elementos sin recorte intencional, scroll del documento en ambos
 ejes —que la spec sí prohíbe en móvil, líneas 12 y 25—, botones sin nombre, y la primaria
 `[data-action="live"]` visible, con etiqueta y sin corte); la barrida de los cuatro estados de
-colapso y por qué existe; que es bloqueante en el job `browser` de CI; la ruta local de Step 4; y lo
+colapso, por qué existe y **cómo se comprueba que el estado cambió de verdad** (candado de
+`aria-expanded` más clase en la raíz, con re-lectura porque el store actualiza fuera del tick del
+`click`); que es bloqueante en el job `browser` de CI; la ruta local de Step 4; y lo
 que el gate **no** cubre, medido hoy:
 
 - El despegue del aviso sobre el dock. En modo next ninguna acción del fixture lanza un error
@@ -4773,6 +4869,11 @@ que el gate **no** cubre, medido hoy:
   820x900 cae 1px dentro del dock y a 390x640 lo toca exacto. Va a la revisión final de rama con
   estos números, no a un test que no puede disparar el aviso.
 - El modo legacy: lo vigila `scripts/interface-smoke.py`.
+- **Lo que un recorte intencionado tapa.** El criterio 1 ignora a propósito los nodos con `overflow`
+  distinto de `visible`, y esa misma ceguera vale para el caso inverso: si un contenedor que recorta
+  queda más estrecho que su hijo, el hijo desborda dentro de una caja que ya recorta, no genera scroll
+  y ningún nodo delatora. No lo cubre la puerta sino una sonda manual (`[data-region]` →
+  `clientWidth`/`clientHeight` en la consola), cuyos números de referencia van en el propio doc.
 - El tamaño del objetivo táctil, medido en la propia barrida: por debajo de 1120px los botones de
   colapso de la barra superior se quedan en **18x29** —alcanzables, pero lejos de los 24-44px
   habituales—. Va a la revisión final de rama.
@@ -4823,9 +4924,12 @@ ancla—, 84/84 en `node --test`, `ok github.com/webr0m/streamwebrom/internal/se
 ejecutada roja primero y verde después. La puerta no cubre el modo legacy.
 
 Comprobar con `parity-check.mjs` que `ui/src/styles/layout.css` (último bloque) y
-`scripts/overflow-smoke.py` salen IDENTICAL; `ui/tests/shell.test.jsx`, `docs/OVERFLOW-GATE.md`,
-`Makefile` y `ci.yml` no son rutas paralizables por el tool (bloques sin comentario de ruta) y se
-revisan leyendo el diff. `web/studio.html` sí va en el commit: es tracked y el hash del bundle se
+`scripts/overflow-smoke.py` salen IDENTICAL. `ui/tests/shell.test.jsx` sí tiene fence —el de Task 9,
+único bloque con su ruta— y sale `DIFFERS` a propósito: Task 11 y Task 12 le añadieron tests sin
+reescribir el bloque de aquella tarea, y las tres anclas van citadas en el Step 2 de arriba. Medido
+con el tool, `docs/OVERFLOW-GATE.md`, `Makefile`, `.github/workflows/ci.yml` y `web/studio.html`
+responden `NO BLOCK` (prosilla o ficheros que el plan describe sin fencearse) y se revisan leyendo el
+diff. `web/studio.html` sí va en el commit: es tracked y el hash del bundle se
 moven con esta hoja (`js/studio-Ca2SwZcV.js`, `css/mount-next-0XHIzscc.css` al cerrar la tarea).
 
 Ojo con los finales de línea al tocar el plan desde Python: `parity-check.mjs` casa los fences con

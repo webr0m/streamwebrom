@@ -79,10 +79,12 @@
    con ese suelo, el alto de la celda queda a merced del contenido y `.canvas`
    (`ProgramStage.module.css:3`) mide `var(--stage-height)`, o sea el alto COMPLETO de su propio
    contenedor, mientras `useStageHeight.js` observa `[data-region="stage-inner"]` sin descontar el
-   hueco de 8px ni las dos líneas de LayoutBar (27px). Se re-pina desde aquí con `#studioRoot` delante:
-   sin él, `.swr-shell > [data-region="stage"]` (0,2,0) empata con el `.swr-shell > *` del módulo y
-   gana el orden de hoja —el módulo se inyecta después—, así que el prefijo (1,2,0) no es adorno sino
-   la razón de que no haga falta `!important`. El `calc` solo se aplica al slot de escenario:
+   hueco de 8px ni las dos líneas de LayoutBar (27px). Basta con `.swr-shell > [data-region="stage"]`
+   (0,2,0): gana por especificidad a las dos reglas suelo, el `.swr-shell > *` de arriba y el
+   `.slot` del módulo, ambas (0,1,0), así que no hace falta `!important` ni depender del orden de
+   hoja. El prefijo `#studioRoot[data-ui-mode="next"]` (1,2,0) se mantiene por otra razón: ancla la
+   regla SOLO al modo next, igual que el desmontaje de arriba, para que nada de esto alcance a una
+   página legacy. El `calc` solo se aplica al slot de escenario:
    las demás regiones ya caben, y tocarlas movería altores que Task 10 ancló en sus tests. */
 #studioRoot[data-ui-mode="next"] .swr-shell > [data-region="stage"] { min-block-size: 100%; }
 #studioRoot[data-ui-mode="next"] .swr-shell > [data-region="stage"] > [data-region="stage-inner"] { block-size: calc(100% - var(--swr-sp-2)); min-block-size: 0; }

@@ -21,8 +21,13 @@ breakpoints verificados (`docs/superpowers/specs/2026-11-20-react-vite-studio-ui
 | `820x900` | pila móvil con panel fijo (`layout.css:40`) |
 | `390x640` | teléfono pequeño, el ancho más apretado del diseño |
 
-Cada viewport se mide tras 350 ms de asentamiento; el contexto usa `locale="es-ES"`,
-`color_scheme="dark"` y `service_workers="block"` para que el precache no cambie lo que se sirve.
+Cada viewport se mide cuando la geometría se estabiliza (dos lecturas seguidas de los tamaños de
+las regiones y del alto del documento; hasta ocho intentos de 120 ms, y si nunca se asienta eso es
+un fallo, no un ruido). Sustituye al `wait_for_timeout(350)` fijo que había: 350 ms bastaba medido
+en los cuatro anchos, pero un tiempo quieto es una apuesta —una transición más tarde leería la
+maqueta a medio mover y daría verde sobre un layout que aún cambia. El contexto usa
+`locale="es-ES"`, `color_scheme="dark"` y `service_workers="block"` para que el precache no cambie
+lo que se sirve.
 
 Y cada ancho se mide **cuatro veces**, una por combinación de las dos barras laterales: abiertas,
 solo el rail de escenas colapsado, solo el panel colapsado, y las dos colapsadas. Los estados se
@@ -32,6 +37,18 @@ camino que el usuario. Son dieciséis combinaciones porque las clases `scenes-co
 `panel-collapsed` re-definen columnas y, por debajo de 820px, llegan hasta `display: none` sobre la
 región: un fallo de rejilla en un estado colapsado es invisible para quien solo mira el abierto —y
 lo fue, ver la causa 3 más abajo—.
+
+Ese cambio de estado está **candado**: tras pulsar, la puerta exige que el `aria-expanded` de los dos
+botones termine en el valor pedido y que la raíz cargue o suelte la clase
+`scenes-collapsed`/`panel-collapsed` que toca —las dos cosas, porque lo que determina la rejilla es la
+clase y el atributo es solo lo que el botón promete—. Si algo no coincide en 720 ms, esa pasada se
+reporta como `the collapse sweep never reached that state` con la región culpable y se omite medir sus
+viewports. Sin el candado la barrida era decorativa: `COLLAPSE` solo pulsaba si encontraba
+`[aria-controls]` con el `aria-expanded` equivocado, así que si esos enganches desaparecían las cuatro
+pasadas medían el mismo estado abierto y la puerta imprimía `overflow gate ok` igualmente. El bucle de
+re-lectura no es postureo: medido hoy, leer el atributo justo después del `click()` devolvía el valor
+viejo —el estado vive en el store del bridge y la re-renderización llega después—, con lo que un
+candado escrito «pulsa y comprueba» fallaba las cuatro pasadas sobre una maqueta perfecta.
 
 ## Los cuatro criterios
 
@@ -120,20 +137,44 @@ el binario de este worktree:
 ```bash
 node scripts/build-ui.mjs
 wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && \
-  go build -o /tmp/swr-gate ./cmd/streamwebrom && \
-  (nohup /tmp/swr-gate -addr 127.0.0.1:18455 -stun= -data /tmp/swr-overflow >/tmp/swr-overflow.log 2>&1 & \
-   sleep 2; curl -fsS http://localhost:18455/api/health; \
-   curl -fsS http://localhost:18455/studio | grep -o 'studio-[A-Za-z0-9_-]*\.js')"
+  go build -o /tmp/swr-overflow-bin ./cmd/streamwebrom && \
+  (nohup /tmp/swr-overflow-bin -addr 127.0.0.1:18497 -stun= -data /tmp/swr-overflow-data >/tmp/swr-overflow-run.log 2>&1 & \
+   sleep 3; curl -fsS http://localhost:18497/api/health; \
+   curl -fsS http://localhost:18497/studio | grep -o 'studio-[A-Za-z0-9_-]*\.js')"
 .superpowers/venv-win/Scripts/python.exe scripts/overflow-smoke.py \
-  --url http://localhost:18455 --browser "C:/Program Files/Google/Chrome/Application/chrome.exe"
+  --url http://localhost:18497 --browser "C:/Program Files/Google/Chrome/Application/chrome.exe"
 ```
 
-Dos trampas medidas, ambas con el mismo efecto —un verde falso—:
+Ejecutado así al cerrar la ronda de revisión: el health responde `ok` con `uptime` 3 y `/studio`
+sirve `studio-Ca2SwZcV.js`, el mismo hash que lee `web/studio.html`; la puerta imprime
+`overflow gate ok` con exit 0. Que el `uptime` sea 3 y no 2307 es parte del procedimiento, no un
+detalle: el `web/` se congela dentro del binario en `go build`, así que un servidor de hace una hora
+sirve una maqueta que ya no existe.
+
+Que el candado no es decorativo también está medido, no argumentado: con el `aria-controls` del panel
+renombrado a `studioPanesNEVER` en `ui/src/components/Topbar.jsx:52` (build aparte, puerto 18498), la
+puerta sale con código 1 y escupe las cuatro líneas
+
+```
+OVERFLOW GATE FAILED
+ - expanded: the collapse sweep never reached that state (studioPanes: no [aria-controls] toggle in the topbar)
+ - scenes collapsed: the collapse sweep never reached that state (studioPanes: no [aria-controls] toggle in the topbar)
+ - panel collapsed: the collapse sweep never reached that state (studioPanes: no [aria-controls] toggle in the topbar)
+ - both collapsed: the collapse sweep never reached that state (studioPanes: no [aria-controls] toggle in the topbar)
+```
+
+mientras `scenesRail` sigue contento: exactamente el verde falso que el candado existe para impedir.
+
+Tres trampas medidas, las tres con el mismo efecto —un verde falso—:
 
 - **El puerto.** `18443` puede estar ocupado por una instancia vieja que lleva horas sirviendo un
-  `web/` embebido anterior a tus cambios. Comprueba `uptime` en `/api/health` y que el hash
+  `web/` embebido anterior a tus cambios —y 18471, y del 18456 al 18461, todos encontrados durante
+  esta tarea—, porque `streamwebrom` no falla al no poder enbindar: el proceso arranca y `curl`
+  responde desde el impostor. Comprueba `uptime` en `/api/health` y que el hash
   `studio-<hash>.js` que devuelve `/studio` coincida con el de `web/studio.html` antes de creer un
   resultado; en caso de duda, otro puerto y otro `-data`.
+- **El `-data`.** Si `-data` y `-o` reciben la misma ruta, el servidor muere con `mkdir /tmp/swr-g1:
+  not a directory`: quiere un directorio y ahí hay un binario. Rutas distintas, siempre.
 - **La salida.** Un venv de Windows puede imprimir `Could not find platform independent libraries`
   por stderr; no es de la puerta. Lo que sí tiene que ser limpio es stdout: `overflow gate ok` o el
   informe de culpables. El script reconfigura stdout a UTF-8 porque la copia española trae glifos
@@ -153,6 +194,21 @@ Dos trampas medidas, ambas con el mismo efecto —un verde falso—:
   Van a la revisión final de rama con estos números, no a un test que no puede disparar el aviso.
 - **El modo legacy.** No se abre con `?ui=next`, así que nada de lo anterior aplica; lo vigila
   `scripts/interface-smoke.py`.
+- **Lo que un recorte intencionado tapa.** El criterio 1 solo mira nodos con `overflow` computado
+  `visible`, y esa decisión es correcta para el contenido que se corta: «layout adaptativo + elipsis
+  segura» significa que recortar es el diseño. Pero la misma regla vuelve a la puerta ciega ante el
+  caso inverso: si un contenedor con `overflow: hidden` queda más estrecho que su hijo, el hijo
+  desborda *dentro* de una caja que ya recorta y ningún nodo tiene `overflow: visible` que lo denote.
+  Una región entera puede quedar reducida a una franja sin que la puerta lo vea. Los criterios 3 y 4
+  sí la detectan si además pierde su nombre o su primaria, y el scroll del documento no ayuda porque
+  el recorte no genera scroll: lo que cubre este hueco no es la puerta. Es una sonda manual, y los
+  números de abajo (`top` 57, `rail` 753, `stage` 626, `tray` 120, `dock` 57) vienen de ejecutarla al
+  escribirla. Si se sospecha un recorte, medir las regiones en la consola del navegador:
+
+  ```js
+  [...document.querySelectorAll('.studio-root [data-region]')]
+    .map(n => [n.dataset.region, n.clientWidth, n.clientHeight]);
+  ```
 - **El alto efectivo del escenario respecto al píxel emitido.** La puerta comprueba que nada
   desborda, no que el compositor dibuje dentro del lienzo visible. `useStageHeight` sigue midiendo
   `[data-region="stage-inner"]` y `--stage-height` vale ahora el alto corregido; si algún día el
