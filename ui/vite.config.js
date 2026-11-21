@@ -10,6 +10,11 @@ export default defineConfig({
   // and from scripts/build-ui.mjs.
   root: fileURLToPath(new URL(".", import.meta.url)),
   base: "/",
+  experimental: {
+    // Keep the lazy chunk's CSS and preload requests beside the versioned
+    // entry module. Root-relative URLs bypass the service worker's precache.
+    renderBuiltUrl: (_filename, { hostType }) => hostType === "js" ? { relative: true } : undefined,
+  },
   build: {
     outDir: "../web",
     emptyOutDir: false,

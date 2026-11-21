@@ -115,6 +115,7 @@ jobs:
           python scripts/relay-handover-smoke.py --url http://localhost:18446 --fixture "${BROWSER_ARGS[@]}"
           python scripts/room-audio-smoke.py --url http://localhost:18446 --fixture "${BROWSER_ARGS[@]}"
       - run: playwright install --with-deps chromium webkit
+      - run: python scripts/studio-offline-smoke.py --url http://localhost:18443
       - run: python scripts/browser-smoke.py --url http://localhost:18443
       - run: python scripts/call-smoke.py --url http://localhost:18443
       - run: python scripts/framing-smoke.py --url http://localhost:18443

@@ -201,6 +201,8 @@ with sync_playwright() as pw:
         sweeps = LAYOUTS
     except ShellTimeout:
         failures.append("the studio shell never mounted: .studio-root [data-region='top'] is absent")
+        if errors:
+            failures.append(f"page errors during mount: {errors}")
     for label, sides in sweeps:
         # Sin este candado la barrida es decorativa: `COLLAPSE` solo pulsa si encuentra
         # `[aria-controls]` con el `aria-expanded` equivocado, así que si esos enganches desaparecen
