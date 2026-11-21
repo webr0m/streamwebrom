@@ -5008,15 +5008,52 @@ git commit -m "test(ui): block layout overflow and nameless controls in the stud
 ### Task 13: Idioma, shell offline y documentación
 
 **Files:**
-- Create: `tests/ui-i18n.test.mjs`, `tests/ui-shell-assets.test.mjs`
-- Modify: `docs/INTERFAZ.md`, `CHANGELOG.md`
+- Create: `tests/ui-i18n.test.mjs`
+- Modify: `tests/sw-shell-coverage.test.mjs`, `ui/src/components/primitives/StudioDialog.jsx:33`,
+  `web/studio.html` (queda regenerado por el paso 3 y **se commitea**), `docs/INTERFAZ.md`, `CHANGELOG.md`
+- No crear: `tests/ui-shell-assets.test.mjs`. El borrador lo pedía, y está borrado de este plan porque
+  duplica controles que ya existen y los hace peor. Medido: sus dos tests reproducen
+  `tests/sw-shell-coverage.test.mjs` (que ya comprueba CLASSIC/I18N contra el disco con el `sw.js`
+  evaluado de verdad) y `tests/ui-artifacts.test.mjs` (que ya comprueba `sw-assets.json`). Su
+  extractor es un regex `const NOMBRE = \[([^\]]*)\]` sobre el texto: con el `I18N` de `web/sw.js`,
+  que es un array construido con spread, el regex se corta en el primer `]` y devolvería 3 entradas
+  de las 33, o sea un test verde sobre una lista vacía.
 
 **Interfaces:**
-- Consumes: `ui/src/**` completo de las Tasks 5–11 y `web/sw.js` de la Task 2.
-- Produces: dos tests de `node --test` que `make test` ya ejecuta (`tests/*.test.mjs`), más la
-  documentación del modo `next`.
+- Consumes: `ui/src/**` completo de las Tasks 5–11, `web/sw.js` de la Task 2, la tabla de rutas
+  pretty de `internal/server/server.go:228` y las claves `common.close` de `web/js/i18n/*/common.js`.
+- Produces: un test de idioma y un control más dentro de `tests/sw-shell-coverage.test.mjs`, ambos
+  ejecutados por `node --test tests/*.test.mjs`, más la documentación del modo `next`.
 
-- [ ] **Step 1: Escribir el test de idioma que falla**
+**Pre-vuelo (medido el 2026-11-20 sobre `ae4c340`).** Estas cifras sustituyen las estimaciones del
+borrador; quien ejecute el task no debe volver a deducirlas:
+
+1. El escáner de claves encuentra **48 claves** usadas desde `ui/src` y **todas** existen en es, en y
+   ru. El test de claves llega verde: no hay nada que corregir, y su valor es la no-vacuidad.
+2. El escáner de cadenas duras encuentra **0** hijos de texto sin traducir y **exactamente 1** rótulo
+   literal: `ui/src/components/primitives/StudioDialog.jsx:33`, `aria-label="Cerrar"`. El borrador
+   solo miraba `>texto<`, y el único defecto real del shell vive justo en el hueco que no miraba
+   (`aria-label`/`title`/`placeholder`/`alt`). La corrección usa la clave que ya existe
+   (`common.close` → «Cerrar» / «Close» / «Закрыть»), no una nueva.
+3. Ningún fichero de `ui/src` lleva `i18n-lint-ignore`: la marca libre de exenciones se puede regular
+   hoy sin romper nada.
+4. `PAGES` tiene **7** entradas y las 7 o bien son clave de la tabla `routes` de Go, bien existen como
+   fichero en `web/`. Las 7 entran en `SHELL` **sin prefijo** (son URLs de navegación). Hay **1** ruta
+   de Go sin entrada en `PAGES`: `"/join": "/guest.html"`.
+5. `docs/INTERFAZ.md` son 17 líneas con un único título (`# Interfaz del estudio (1.10.0)`): no existe
+   «el apartado del Studio» donde insertar, el documento entero es ese apartado. `CHANGELOG.md` no tiene
+   sección «sin publicar»: su primer bloque es `## v1.12.1 — Emisión a Telegram`.
+6. `make test` **no** ejecuta `npm -C ui test` (los tests de vitest del shell) y sí ejecuta
+   `python3 scripts/jslint.py`, que en esta máquina no arranca (Task 12, R7). El Expected del paso 5 se
+   reescribe con la secuencia de puertas que sí existe; tocar el Makefile compartido queda aparcado.
+7. `#program` no aparece en ninguna regla de `web/css/app.css` ni de `ui/src/**/*.module.css`, ni lo
+   nombra `web/js/compositor.js`. Lo monta `ui/src/components/ProgramStage.jsx:14` como
+   `<canvas id="program">` vestido por `styles.canvas`, y en modo `next` el fixture no pinta nada ahí.
+
+- [ ] **Step 1: Escribir el test de idioma**
+
+Código validado: este bloque está ejecutado tal cual sobre `ae4c340`. Su salida medida es el Expected
+del paso 3, no una conjetura.
 
 ```js
 // tests/ui-i18n.test.mjs
@@ -5028,127 +5065,265 @@ import { moduleURL } from "./module-url.mjs";
 const es = (await import(await moduleURL("i18n/es.js"))).es;
 const en = (await import(await moduleURL("i18n/en.js"))).en;
 const ru = (await import(await moduleURL("i18n/ru.js"))).ru;
+const dicts = [["es", es], ["en", en], ["ru", ru]];
 
 async function sources(dir, acc = []) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const full = `${dir}/${entry.name}`;
     if (entry.isDirectory()) await sources(full, acc);
-    else if (full.endsWith(".jsx") || full.endsWith(".js")) acc.push(full);
+    else if (/\.(js|jsx)$/.test(full)) acc.push(full);
   }
   return acc;
 }
 
+// ui/src/i18n.js es la puerta que re-exporta el motor, no una consumidora de claves.
 const files = (await sources("ui/src")).filter((file) => !file.endsWith("ui/src/i18n.js"));
 
-test("every t() key used by the React shell exists in all three dictionaries", async () => {
-  const missing = [];
+// Solo líneas de código: un comentario que cite una clave o un rótulo no es una cadena que ver. Se
+// sustituyen por líneas vacías, no se eliminan: si se eliminan, el número que reporta el hallazgo ya
+// no es el número de línea del fichero, y quien repare el literal buscará en la línea equivocada.
+const code = (text) => text.split("\n").map((line) => (/^\s*(\/\/|\*|\/\*)/.test(line) ? "" : line)).join("\n");
+
+// Comillas cualquiera y cualquier número de segmentos: el regex del borrador
+// ([a-zA-Z]+\.[A-Za-z0-9]+) no ve "a.b.c", ni las comillas simples, ni los backtick. Medido hoy: 48
+// claves con el ancho y las mismas 48 con el estrecho, o sea que el ancho no añade ruido, solo deja
+// de ser ciego mañana.
+const KEY = /(?:^|[^A-Za-z0-9_])(?:t|tr)\(\s*["'`]([^"'`\s]+)["'`]/g;
+// Un `aria-label` con texto literal es tan duro de traducir como un hijo de texto, y el borrador no
+// lo miraba: medido, el único literal que hay en todo el shell vive justo ahí (StudioDialog.jsx:33).
+const LABEL = /\s(?:aria-label|title|placeholder|alt)\s*=\s*"([^"{}\n]{2,60})"/g;
+const TEXT = />([<>]?[A-ZÁÉÍÓÚÑa-záéíóúñ][^<>{}]{2,60})</g;
+
+test("every key the React shell asks for exists in the three dictionaries", async () => {
+  const used = new Set();
   for (const file of files) {
-    const text = await readFile(file, "utf8");
-    for (const [, key] of text.matchAll(/t\(\s*"([a-zA-Z]+\.[A-Za-z0-9]+)"/g)) {
-      for (const [code, dict] of [["es", es], ["en", en], ["ru", ru]]) {
-        if (!(key in dict)) missing.push(`${file}: ${key} (${code})`);
-      }
-    }
+    for (const [, key] of code(await readFile(file, "utf8")).matchAll(KEY)) used.add(key);
   }
+  assert.ok(used.size >= 40, `the key scan found ${used.size} keys; the floor keeps a blind regex from passing`);
+  const missing = [...used].flatMap((key) => dicts.filter(([, dict]) => !(key in dict)).map(([lang]) => `${key} (${lang})`));
   assert.deepEqual(missing, []);
 });
 
-test("no visible string is hardcoded in JSX", async () => {
+test("no string shown or named by the shell is hardcoded", async () => {
   const offenders = [];
   for (const file of files) {
-    const text = await readFile(file, "utf8");
-    if (text.includes("i18n-lint-ignore")) continue;
-    for (const [match] of [...text.matchAll(/>([<>]?[A-ZÁÉÍÓÚÑa-záéíóúñ][^<>{}]{2,48})</g)]) {
-      if (!/^\{/.test(match) && !/^\s*$/.test(match)) offenders.push(`${file}: ${match.trim()}`);
-    }
+    const lines = code(await readFile(file, "utf8")).split("\n");
+    lines.forEach((line, index) => {
+      // R35: el marcador exime la LÍNEA que lo lleva, nunca el fichero entero. Con `continue` por
+      // fichero, un solo nombre propio necesario desactiva la comprobación de todo lo demás.
+      if (line.includes("i18n-lint-ignore")) return;
+      for (const [, value] of line.matchAll(LABEL)) offenders.push(`${file}:${index + 1}: label "${value}"`);
+      for (const [, value] of line.matchAll(TEXT)) if (value.trim()) offenders.push(`${file}:${index + 1}: text "${value.trim()}"`);
+    });
   }
   assert.deepEqual(offenders, []);
 });
 ```
 
-- [ ] **Step 2: Escribir el test de coherencia del shell offline**
+Notas de diseño que el implementador no debe «mejorar»:
+
+- El suelo `used.size >= 40` es lo que impide que el primer test sea decorativo. Sin él, un regex que
+  no case nada da `missing = []` y el test pasa sobre cero claves — 48 medidas hoy, así que el suelo
+  deja margen para refactor y sigue siendo exigente.
+- `TEXT` exige que el primer carácter sea una letra (con tildes): por eso el `✕` de
+  `StudioDialog.jsx:33` no cuenta como cadena. Un glifo no es texto traducible, y obliga a que la
+  prueba del desbordamiento no dependa de él.
+- Los topes `{2,60}` son los del borrador, ensanchados de 48: `t("studio.closeCameraOptions")` tiene
+  27 caracteres de clave y un rótulo como «Cerrar opciones de la cámara» entra en 60 pero no en 48.
+
+- [ ] **Step 2: Ampliar el control del shell offline**
+
+En lugar del fichero nuevo del borrador, un test más en `tests/sw-shell-coverage.test.mjs`, que ya
+sabe extraer las constantes de `web/sw.js` evaluándolas con `runInNewContext` (`shellConstants()`) y
+ya las ve con `__SWR_SHELL__` y `__SWR_ASSET_PREFIX__` sustituidos. Reutilizar ese extractor es la
+razón por la que no se crea un segundo fichero con un regex propio.
 
 ```js
-// tests/ui-shell-assets.test.mjs
-import { readFile } from "node:fs/promises";
-import { test } from "node:test";
-import assert from "node:assert/strict";
+// R9 bis: PAGES enumera URLs de navegación, y nadie comprobaba que el servidor las atienda. Un
+// renombre en la tabla de routes de Go deja una entrada que cache.addAll pide contra un 404, lo cual
+// aborta la instalación del worker y tumba el offline de todo el mundo — el mismo modo de fallo que
+// R9 ya cubre para CLASSIC/I18N contra el disco, pero en la otra mitad del shell.
+async function routeTable() {
+  const go = await readFile(join(root, "internal/server/server.go"), "utf8");
+  const body = go.match(/routes := map\[string\]string\{([^}]*)\}/);
+  assert.ok(body, "internal/server/server.go no contiene la tabla de rutas pretty");
+  return [...body[1].matchAll(/"(\/[^"]*)"\s*:\s*"(\/[^"]*)"/g)].map((m) => [m[1], m[2]]);
+}
 
-const sw = await readFile("web/sw.js", "utf8");
-const list = (name) => {
-  const match = sw.match(new RegExp(`const ${name} = \\[([^\\]]*)\\]`, "s"));
-  assert.ok(match, `${name} list missing from sw.js`);
-  return [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-};
-
-test("every path the offline shell precaches exists in web/", async () => {
-  const paths = [...list("PAGES"), ...list("CLASSIC")].filter((path) => !/^\/(studio|guest|view|diagnostics|vdo)/.test(path) || path.endsWith(".html"));
-  const built = new Set(["/js/studio.js", "/css/app.css", "/img/logo.svg", "/manifest.webmanifest", "/"]);
-  const missing = [];
-  for (const path of [...list("PAGES"), ...list("CLASSIC")]) {
-    if (built.has(path)) continue;
-    try { await readFile(`web${path}`); } catch { missing.push(path); }
+test("every page the offline shell precaches is a served route with a real file behind it", async () => {
+  const { PAGES, SHELL } = await shellConstants();
+  const routes = new Map(await routeTable());
+  assert.ok(PAGES.length >= 7, `PAGES se ha quedado en ${PAGES.length} entradas`);
+  const shell = new Set(SHELL);
+  const problems = [];
+  for (const url of PAGES) {
+    // Una página entra en SHELL sin prefijo: es una navegación, no un asset. Si alguien la prefija,
+    // el fetch handler (que compara pathname) deja de reconocerla y el offline muere en silencio.
+    if (!shell.has(url)) problems.push(`${url} no llega a SHELL`);
+    const target = routes.get(url);
+    if (target === undefined) {
+      // `/manifest.webmanifest` no es una pretty URL: lo sirve el manejador estático, así que su
+      // prueba es el fichero, no la tabla.
+      if (!(await exists(url.slice(1)))) problems.push(`${url} ni es ruta de Go ni existe en web/`);
+      continue;
+    }
+    if (!(await exists(target.slice(1)))) problems.push(`${url} routea a ${target}, que no existe en web/`);
   }
-  assert.deepEqual(missing, [], "sw.js precaches files that are not in web/");
-});
-
-test("the generated asset list is what the worker will actually receive", async () => {
-  const list = JSON.parse(await readFile("web/js/sw-assets.json", "utf8"));
-  for (const file of list) {
-    assert.match(file, /^(js|css)\//);
-    await readFile(`web/${file}`);
-  }
+  if (problems.length) assert.fail(problems.join("; "));
 });
 ```
 
-- [ ] **Step 3: Ejecutar y corregir las desviaciones**
+y, junto a `shellConstants()`, el ayudante que ya falta:
 
-Run: `node --test tests/ui-i18n.test.mjs tests/ui-shell-assets.test.mjs`
-Expected: primero FAIL. Corregir **sin crear claves nuevas**: sustituir cada cadena literal de JSX por la
-clave `studio.*`/`studiojs.*` existente que la listaba (Task 9 y Task 10 ya usan `t("studio.hideScenes")`,
-`t("studio.record")`, etc.) y ajustar `PAGES`/`CLASSIC` de `web/sw.js` para que solo enumeren ficheros
-que existen de verdad. Donde un rótulo sea un nombre propio («OBS», «VDO») añadir la marca
-`/* i18n-lint-ignore */` en la línea del componente, no un texto nuevo.
+```js
+async function exists(rel) {
+  try { await readFile(join(root, "web", rel)); return true; } catch { return false; }
+}
+```
 
-Repetir hasta que ambos tests pasen.
+- [ ] **Step 3: Ejecutar y corregir la única desviación real**
+
+Run: `node --test tests/ui-i18n.test.mjs tests/sw-shell-coverage.test.mjs`
+Expected medido: el test de claves pasa, `tests/sw-shell-coverage.test.mjs` pasa entero, y el scan de
+cadenas falla con **una** línea:
+
+```
++ 'ui/src/components/primitives/StudioDialog.jsx:33: label "Cerrar"'
+```
+
+Corregirla **sin crear claves nuevas**, usando la que ya existe en los tres diccionarios:
+
+```jsx
+import { t } from "../../i18n.js";
+// ...
+        <button type="button" data-close className={styles.close} aria-label={t("common.close")} onClick={onClose}>✕</button>
+```
+
+`ui/src/components/primitives/` está a dos niveles de `ui/src/`, así que el import es `"../../i18n.js"`
+(igual que los componentes de `ui/src/components/`, que usan `"../i18n.js"`). El `useSyncExternalStore(onLangChange, …)`
+de `ui/src/hooks/useStudioSnapshot.js:10` ya re-renderiza el árbol al cambiar de idioma, y `t()` se
+evalúa en cada render: el rótulo sigue vivo sin Suscriptores nuevos.
+
+Run: `node --test tests/ui-i18n.test.mjs`
+Expected: PASS los dos tests.
+
+Cambiar un `.jsx` cambia el hash del bundle, así que hay que regenerar y commitear `web/studio.html`
+(es tracked; los `*-<hash>.js` de dentro de `web/js/` son git-ignored a propósito y **no** se añaden):
+
+Run: `node scripts/build-ui.mjs && git status --short web/studio.html`
+Expected: ` M web/studio.html` con la nueva referencia `js/studio-<hash>.js`.
+
+**Puertas de no-vacuidad (medido el 2026-11-20 con copias mutadas de los dos tests).** Un test que
+llega verde no vale si no se ha visto fallar: estas son las mutaciones que se ejecutaron y su salida
+exacta. Nadie tiene que repetirlas para commitear, pero el revisor debe saber que existen y a qué
+rama de cada test apunta cada una.
+
+| # | Mutación | Salida medida |
+|---|---|---|
+| 1 | `KEY` sustituido por un regex que no casa nada | `AssertionError: the key scan found 0 keys; the floor keeps a blind regex from passing` |
+| 2 | `used` con una clave inventada (`common.zzzfalta`) | `common.zzzfalta (es)`, `(en)`, `(ru)` — las tres lenguas, no la primera |
+| 3 | fichero de ensayo con `<p>Hola mundo</p>` | `ui/src/__probe-i18n.jsx:5: text "Hola mundo"` |
+| 4 | fichero de ensayo con `aria-label`/`title` literales y la marca en la misma línea | la línea marcada no produce nada; la línea siguiente produce `:7: label "Nombre propio"` |
+| 5 | `PAGES` + `"/ziggy"` | `/ziggy no llega a SHELL; /ziggy ni es ruta de Go ni existe en web/` |
+| 6 | `PAGES`: `/studio` → `/assets/js/studio` | `/assets/js/studio no llega a SHELL; … ni es ruta de Go ni existe en web/` |
+| 7 | `SHELL` sin `/guest` | `/guest no llega a SHELL` (solo esa cláusula) |
+| 8 | `routes` + `["/vdo", "/nope.html"]` | `/vdo routea a /nope.html, que no existe en web/` |
+| 9 | suelo `PAGES.length >= 8` | `PAGES se ha quedado en 7 entradas` |
+
+La 4 es la prueba de R35: el marcador exime la línea que lo lleva y nada más. La 4 también deja
+registada una consecuencia aceptada — un nombre propio **como hijo de texto** (`>OBS</`) sí cuenta
+como offender (la 4 lo midió con `>OBS<`) y necesita la marca; hoy no hay ni uno en `ui/src`, así que
+la regla no muerde, pero no es una omisión del escáner sino su comportamiento.
 
 - [ ] **Step 4: Documentar el modo `next`**
 
-En `docs/INTERFAZ.md`, al final del apartado del Studio:
+`docs/INTERFAZ.md` son 17 líneas con un único título (`# Interfaz del estudio (1.10.0)`) y sin
+subapartados: el documento **es** el apartado del Studio, y termina con una lista de «Referencias de
+producto revisadas». El texto nuevo se inserta **antes** de esa lista (entre la línea 11 y la 13), no
+al final, para que las referencias cierren el documento como ya lo hacían. El título con la versión
+no se toca: está desactualizado respecto a `v1.12.1` desde antes de este plan y corregirlo aquí sería
+mezclar dos cosas.
 
 ```markdown
 ## Modo `next` del Studio
 
-La página `/studio` arranca con el shell React de `ui/`, pero el **modo por defecto sigue siendo el
-Studio de siempre**. Para ver la interfaz nueva se añade `?ui=next` a la URL o se guarda
-`localStorage.setItem("swr.ui","next")`; con `?ui=legacy` se vuelve al comportamiento actual sin tocar
-nada más. En modo `next` la interfaz se pinta desde `ui/src/fixtures/next-studio.js`: es la maqueta
-real, con los estilos y las primitivas definitivas, y todavía no manda órdenes al motor. La portación del
-motor WebRTC a `StudioBridge` llega con el plan siguiente.
+`/studio` puede arrancar con dos interfaces. La predeterminada **sigue siendo la de siempre**: con
+`?ui=next` o con `localStorage.setItem("swr.ui","next")` se carga el shell React de `ui/`, y con
+`?ui=legacy` se vuelve a la actual sin tocar nada más. La consulta gana a lo guardado, y un valor que
+no sea `legacy` ni `next` se ignora.
+
+En modo `next` la interfaz se pinta desde `ui/src/fixtures/next-studio.js`: es la maqueta real, con
+los estilos y las primitivas definitivas, y todavía no manda órdenes al motor. Por eso el escenario
+sale en negro aunque el `canvas id="program"` esté montado: quien lo pinta es el `Compositor`, y ese
+aún no está conectado al shell nuevo. La portación del motor WebRTC a `StudioBridge` llega con el plan
+siguiente.
 
 Los estilos viven en `ui/src/styles/tokens.css` (Control Room Pro) y en los `*.module.css` de cada
-componente; `web/css/app.css` sigue vistiendo a las páginas que aún no migraron. Ninguna regla del shell
-nuevo toca `#program`: los píxeles del escenario los pinta siempre `Compositor`.
+componente; `web/css/app.css` sigue vistiendo a las páginas que aún no migraron. Ninguna regla, vieja
+o nueva, selecciona el escenario por `id`: el canvas del shell nuevo se viste con una clase de módulo,
+y los píxeles los pinta siempre `Compositor`.
 ```
 
-En `CHANGELOG.md`, bajo la versión sin publicar:
+`CHANGELOG.md` **no tiene sección sin publicar**: su primer bloque es `## v1.12.1 — Emisión a
+Telegram`. Se crea la sección entre `# Cambios` y esa versión:
 
 ```markdown
+## Sin publicar
+
 - El Studio estrena shell React + Vite con la paleta Control Room Pro, disponible detrás de `?ui=next`; la interfaz actual sigue siendo la predeterminada.
-- Nueva prueba bloqueante `scripts/overflow-smoke.py`: el Studio no puede recortar texto, crear scroll ni dejar controles sin nombre en 1440, 1120, 820 y 390 px.
+- Nueva prueba bloqueante `scripts/overflow-smoke.py`: el Studio no puede recortar texto, crear scroll ni dejar controles sin nombre en 1440, 1120, 820 y 390 px, con los paneles plegados y sin plegar.
+- Dos controles más en `node --test`: las cadenas del shell nuevo no pueden estar escritas a mano y cada página que el service worker guarda para el offline tiene que ser una ruta que el servidor atienda.
 ```
 
 - [ ] **Step 5: Verificación final del plan y commit**
 
-Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && make test"`
-Expected: verde — `go vet`, `go test`, `node --check` de todos los `web/js/*.js`, `jslint.py`,
-`node --test tests/*.test.mjs` (incluidos los dos ficheros nuevos) y `npm -C ui test`.
-
-Run: `python scripts/interface-smoke.py --url http://localhost:18443 && python scripts/studio-smoke.py --url http://localhost:18443`
-Expected: ambos PASS — el Studio real no cambió de comportamiento.
+Run: la secuencia de puertas completa del plan (Task 12), desde la raíz del **worktree**:
 
 ```bash
-git add tests/ui-i18n.test.mjs tests/ui-shell-assets.test.mjs ui/src docs/INTERFAZ.md CHANGELOG.md
+npm -C ui test
+node scripts/build-ui.mjs
+node --test tests/*.test.mjs
+node --check web/js/studio.js
+```
+
+Expected medido: `ui` verde; la build regenera `web/js/*-<hash>.js`, `web/css/*-<hash>.css` y
+`web/js/sw-assets.json` (los tres git-ignored); los `node --test` verdes, incluidos los dos controles
+nuevos; `--check` sin salida. **`make test` no es una de las puertas de este plan**: su receta
+`test:` no ejecuta `npm -C ui test` y sí ejecuta `python3 scripts/jslint.py`, que en Windows no
+arranca (R7). Queda aparcado como Minor para la revisión final; la corrección del Makefile toca
+infraestructura compartida y no es de este task.
+
+Go sigue sin estar en Windows, así que la parte de Go se comprueba en WSL **sobre el worktree**, no
+sobre `/mnt/d/Descargas/streamwebrom` (la raíz principal no tiene esta rama):
+
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && go test -count=1 ./internal/server/"`
+Expected: `ok` — el único cambio visible desde Go es el texto de `docs/` y `CHANGELOG.md`.
+
+Los humos de interfaz no pueden correr contra el puerto 18443: es un servidor ajeno y de larga vida
+que sirve un `studio-<hash>.js` sin `.studio-root` (medido en la Task 12), y un fallo de bind no avisa.
+Levantar uno propio y comprobar hash y `uptime` antes de fiarse:
+
+```bash
+wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && \
+  go build -o /tmp/swr-task13-bin ./cmd/streamwebrom && \
+  (nohup /tmp/swr-task13-bin -addr 127.0.0.1:18499 -stun= -data /tmp/swr-task13-data >/tmp/swr-task13-run.log 2>&1 & \
+   sleep 3; curl -fsS http://localhost:18499/api/health; \
+   curl -fsS http://localhost:18499/studio | grep -o 'studio-[A-Za-z0-9_-]*\.js')"
+```
+
+El `grep -o` debe imprimir **el hash que la build de este task acaba de generar** (el mismo que lee
+`web/studio.html`), y el `uptime` del health tiene que ser de segundos: las dos lecturas juntas son lo
+que descarta el impóster, porque el `web/` se congela dentro del binario en `go build`. Con el
+servidor propio en marcha:
+
+Run: `python scripts/interface-smoke.py --url http://localhost:18499 && python scripts/studio-smoke.py --url http://localhost:18499`
+Expected: ambos PASS — el Studio real (modo `legacy`, que es el predeterminado) no cambió de
+comportamiento. La puerta de desbordamiento se corre igual sobre ese puerto, con el venv de Windows y
+`--browser "C:/Program Files/Google/Chrome/Application/chrome.exe"` (receta en `docs/OVERFLOW-GATE.md`).
+
+```bash
+git add tests/ui-i18n.test.mjs tests/sw-shell-coverage.test.mjs ui/src web/studio.html docs/INTERFAZ.md CHANGELOG.md
+git status --short   # nada en web/js/*-<hash>.js ni sw-assets.json debe aparecer staged
 git commit -m "docs(ui): cover the next-mode switch and pin the shell's strings and precache"
 ```
 
