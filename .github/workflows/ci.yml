@@ -116,8 +116,13 @@ jobs:
       - run: python scripts/framing-smoke.py --url http://localhost:18443
       - run: python scripts/screen-share-smoke.py --url http://localhost:18443
       - run: python scripts/interface-smoke.py --url http://localhost:18443
+      # El refusar por `uptime` existe para no medir sobre un servidor ajeno al árbol en
+      # prueba. Aquí el servidor ES el binario que este job compiló hace ~4 minutos, tras
+      # varios smokes, y por eso pasa de los 120 s: medir en run 44910548479 dio
+      # "OVERFLOW GATE REFUSED: ... lleva 234s encendido" y exit 2. El opt-out es para
+      # este caso, no para el `make overflow` local, donde el impostor es lo habitual.
       - name: overflow gate (the studio must never clip)
-        run: python scripts/overflow-smoke.py --url http://localhost:18443
+        run: python scripts/overflow-smoke.py --url http://localhost:18443 --allow-stale
       - run: python scripts/studio-smoke.py --url http://localhost:18443
       - run: python scripts/relay-vdo-smoke.py --url http://localhost:18443
       - run: python scripts/effects-smoke.py --url http://localhost:18443

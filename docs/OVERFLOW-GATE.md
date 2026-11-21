@@ -281,8 +281,12 @@ Tres trampas medidas, las tres con el mismo efecto —un verde falso—:
   pide `/api/health` y, si el servidor declara más de `--max-uptime` segundos encendido (120 por
   defecto) sin que se le haya pasado `--allow-stale`, se niega con exit 2 y un mensaje que explica que
   el binario sirve el `web/` congelado en el momento de su compilación. `make overflow` pasa ahora
-  `--url http://localhost:18497`, un puerto propio de trabajo, en lugar del 18443 de CI; CI no cambia
-  porque su job arranca ahí mismo su propio binario (`ci.yml`) y su `uptime` es siempre reciente.
+  `--url http://localhost:18497`, un puerto propio de trabajo, en lugar del 18443 de CI. En CI sí
+  hubo que cambiar algo, y esto desmiente lo que esta sección afirmaba antes: el job `browser`
+  tardó 234 s en llegar a la puerta desde que arrancó su servidor, pasó del umbral de 120 s y el
+  gate se negó con exit 2 (run 44910548479) aunque el servidor era efectivamente su propio binario.
+  `ci.yml` añade `--allow-stale` a ese paso, con el motivo escrito junto a la línea: el opt-out es
+  para un servidor que el job compiló y levantó él mismo, no para un impostor de otra máquina.
   `--allow-stale` es la salida para cuando se sabe que el servidor viejo es tuyo y quieres medirlo tal
   cual; para cambiar de umbral sin desactivar el candado está `--max-uptime <segundos>`. El candado
   está ejecutado contra un impostor de verdad, no razonado: 18497 estaba ocupado por una instancia
