@@ -171,14 +171,18 @@ with sync_playwright() as pw:
     health = context.request.get(args.url + "/api/health").json()
     uptime = health.get("uptime")
     if not args.allow_stale and isinstance(uptime, (int, float)) and uptime > args.max_uptime:
-        raise SystemExit(
+        # 2, no 1: «la puerta se negó a medir» es otro fallo que «la maqueta desborda», y el
+        # job de CI imprime el código sin leer el mensaje.
+        print(
             f"OVERFLOW GATE REFUSED: {args.url} lleva {uptime}s encendido, más de los {args.max_uptime}s"
             " de esta puerta.\n"
             " El binario sirve el `web/` que tenía embebido cuando se compiló, así que puede ser otro"
             " árbol distinto al que estás midiendo y un verde aquí no diría nada de tus cambios.\n"
             " Levanta un servidor propio sobre un puerto libre (`make overflow` usa 18497), o añade"
-            " --allow-stale si sabes que ese servidor es tuyo."
+            " --allow-stale si sabes que ese servidor es tuyo.",
+            file=sys.stderr,
         )
+        raise SystemExit(2)
     room = args.room or f"overflow-{time.time_ns()}"
     keys = context.request.post(args.url + "/api/rooms", data={"room": room, "title": "Puerta de desbordamiento", "password": "overflow-password"}).json()
     page = context.new_page()

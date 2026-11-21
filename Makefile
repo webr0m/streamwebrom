@@ -63,5 +63,8 @@ clean:
 	rm -rf dist
 
 # Blocking layout gate: needs a Chromium and a running server, so it is not part of `test`.
+# 18497, not CI's 18443: locally that port is where a foreign instance from hours ago tends to
+# live, and the binary serves the web/ frozen at its own compile time. The gate now refuses an
+# uptime over 120s, so pointing it at a disposable port is what makes the refusal rare.
 overflow:
-	python3 scripts/overflow-smoke.py --url http://localhost:18443
+	python3 scripts/overflow-smoke.py --url http://localhost:18497
