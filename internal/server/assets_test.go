@@ -147,7 +147,8 @@ func TestEveryInjectedShellAssetIsServed(t *testing.T) {
 		"js/studio-abc12345.js":   {Data: []byte(`export const shell = 1;`)},
 		"css/studio-abc12345.css": {Data: []byte(`body{color:red}`)},
 		"img/x.png":               {Data: []byte("not a real png")},
-		"js/sw-assets.json":       {Data: []byte(`["css/studio-abc12345.css","img/x.png","js/missing.js","js/studio-abc12345.js","js/studio-abc12345.js?x","js/studio-abc12345.js"]`)},
+		"js/readme.txt":           {},
+		"js/sw-assets.json":       {Data: []byte(`["css/studio-abc12345.css","img/x.png","js/missing.js","js/readme.txt","js/studio-abc12345.js","js/studio-abc12345.js?x","js/studio-abc12345.js"]`)},
 		"sw.js":                   {Data: []byte(`const SHELL_ASSETS = __SWR_SHELL__;`)},
 	}
 	s := New(config.Default(), nil, files, slog.Default())

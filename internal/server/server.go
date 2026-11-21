@@ -233,7 +233,7 @@ func (s *Server) pages(files http.Handler) http.Handler {
 		}
 		if strings.HasPrefix(r.URL.Path, "/assets/") {
 			name := strings.TrimPrefix(r.URL.Path, s.assetPrefix+"/")
-			if !fs.ValidPath(name) || !(strings.HasPrefix(name, "js/") && strings.HasSuffix(name, ".js") || strings.HasPrefix(name, "css/") && strings.HasSuffix(name, ".css")) {
+			if !versionedAssetPath(name) {
 				http.NotFound(w, r)
 				return
 			}

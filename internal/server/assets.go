@@ -76,8 +76,7 @@ func (s *Server) shellAssets() []byte {
 	kept := make([]string, 0, len(assets))
 	seen := make(map[string]bool, len(assets))
 	for _, asset := range assets {
-		if (strings.HasPrefix(asset, "js/") || strings.HasPrefix(asset, "css/")) &&
-			!seen[asset] && fs.ValidPath(asset) && !strings.ContainsAny(asset, "?#%\\") && hasStaticFile(s.static, asset) {
+		if !seen[asset] && versionedAssetPath(asset) && !strings.ContainsAny(asset, "?#%\\") && hasStaticFile(s.static, asset) {
 			seen[asset] = true
 			kept = append(kept, asset)
 		}
@@ -95,6 +94,11 @@ func (s *Server) shellAssets() []byte {
 		return []byte("[]")
 	}
 	return out
+}
+
+func versionedAssetPath(name string) bool {
+	return fs.ValidPath(name) && (strings.HasPrefix(name, "js/") && strings.HasSuffix(name, ".js") ||
+		strings.HasPrefix(name, "css/") && strings.HasSuffix(name, ".css"))
 }
 
 func hasStaticFile(files fs.FS, name string) bool {
