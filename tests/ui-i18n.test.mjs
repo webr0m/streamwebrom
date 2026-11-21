@@ -27,9 +27,9 @@ const files = (await sources("ui/src")).filter((file) => !file.endsWith("ui/src/
 const code = (text) => text.split("\n").map((line) => (/^\s*(\/\/|\*|\/\*)/.test(line) ? "" : line)).join("\n");
 
 // Comillas cualquiera y cualquier número de segmentos: el regex del borrador
-// ([a-zA-Z]+\.[A-Za-z0-9]+) no ve "a.b.c", ni las comillas simples, ni los backtick. Medido hoy: 48
-// claves con el ancho y las mismas 48 con el estrecho, o sea que el ancho no añade ruido, solo deja
-// de ser ciego mañana.
+// ([a-zA-Z]+\.[A-Za-z0-9]+) no ve "a.b.c", ni las comillas simples, ni los backtick. Medido: 49
+// claves con el ancho y las mismas 49 con el estrecho (48 hasta que el literal de StudioDialog pasó a
+// `t("common.close")`), o sea que el ancho no añade ruido, solo deja de ser ciego mañana.
 const KEY = /(?:^|[^A-Za-z0-9_])(?:t|tr)\(\s*["'`]([^"'`\s]+)["'`]/g;
 // Un `aria-label` con texto literal es tan duro de traducir como un hijo de texto, y el borrador no
 // lo miraba: medido, el único literal que hay en todo el shell vive justo ahí (StudioDialog.jsx:33).

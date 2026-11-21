@@ -5031,6 +5031,9 @@ borrador; quien ejecute el task no debe volver a deducirlas:
 
 1. El escáner de claves encuentra **48 claves** usadas desde `ui/src` y **todas** existen en es, en y
    ru. El test de claves llega verde: no hay nada que corregir, y su valor es la no-vacuidad.
+   (Recontado tras la corrección: **49**. La que se suma es `common.close`, y la suma el propio task al
+   cambiar `aria-label="Cerrar"` por `aria-label={t("common.close")}`. Con el regex estrecho del
+   borrador salen también 49, así que la afirmación «el ancho no añade ruido» sigue en pie.)
 2. El escáner de cadenas duras encuentra **0** hijos de texto sin traducir y **exactamente 1** rótulo
    literal: `ui/src/components/primitives/StudioDialog.jsx:33`, `aria-label="Cerrar"`. El borrador
    solo miraba `>texto<`, y el único defecto real del shell vive justo en el hueco que no miraba
@@ -5104,9 +5107,9 @@ const files = (await sources("ui/src")).filter((file) => !file.endsWith("ui/src/
 const code = (text) => text.split("\n").map((line) => (/^\s*(\/\/|\*|\/\*)/.test(line) ? "" : line)).join("\n");
 
 // Comillas cualquiera y cualquier número de segmentos: el regex del borrador
-// ([a-zA-Z]+\.[A-Za-z0-9]+) no ve "a.b.c", ni las comillas simples, ni los backtick. Medido hoy: 48
-// claves con el ancho y las mismas 48 con el estrecho, o sea que el ancho no añade ruido, solo deja
-// de ser ciego mañana.
+// ([a-zA-Z]+\.[A-Za-z0-9]+) no ve "a.b.c", ni las comillas simples, ni los backtick. Medido: 49
+// claves con el ancho y las mismas 49 con el estrecho (48 hasta que el literal de StudioDialog pasó a
+// `t("common.close")`), o sea que el ancho no añade ruido, solo deja de ser ciego mañana.
 const KEY = /(?:^|[^A-Za-z0-9_])(?:t|tr)\(\s*["'`]([^"'`\s]+)["'`]/g;
 // Un `aria-label` con texto literal es tan duro de traducir como un hijo de texto, y el borrador no
 // lo miraba: medido, el único literal que hay en todo el shell vive justo ahí (StudioDialog.jsx:33).
@@ -5271,7 +5274,7 @@ rama de cada test apunta cada una.
 | 7 | `SHELL` sin `/guest` | `/guest no llega a SHELL` (solo esa cláusula) |
 | 8 | `routes` + `["/vdo", "/nope.html"]` | `/vdo routea a /nope.html, que no existe en web/` |
 | 9 | suelo `PAGES.length >= 8` | `PAGES se ha quedado en 7 entradas` |
-| 10 | regex de `routeTable()` sin tabla que casar | `AssertionError: internal/server/server.go no contiene la tabla de rutas pretty` (`fail 1`, `pass 4`) |
+| 10 | matcher **exterior** de `routeTable()` mutado (`map[string]string{` → `map[string]ZZZ{`), o sea `body` sale `undefined` | `AssertionError: internal/server/server.go no contiene la tabla de rutas pretty` (`fail 1`, `pass 4`) — es el guard de `assert.ok(body)`, no el suelo de la 12 |
 | 11 | fichero de ensayo con `aria-label={'Nombre propio'}` y `aria-label={cond ? "Uno" : "Dos"}` | un solo offender, `ui/src/__probe11.jsx:3: label "Nombre propio"`; la línea 4 (ternario) no se reporta |
 | 12 | `routeTable()` filtrado a tabla vacía | `AssertionError: la tabla de rutas de Go se ha leído vacía (0 entradas)` (`fail 1`, `pass 4`) |
 
