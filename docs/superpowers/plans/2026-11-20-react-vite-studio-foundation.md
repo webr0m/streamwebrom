@@ -4992,8 +4992,10 @@ reescribir el bloque de aquella tarea, y las tres anclas van citadas en el Step 
 con el tool, `docs/OVERFLOW-GATE.md`, `Makefile`, `.github/workflows/ci.yml` y `web/studio.html`
 responden `NO BLOCK` (prosilla o ficheros que el plan describe sin fencearse) y se revisan leyendo el
 diff. `web/studio.html` sí va en el commit: es tracked, es la única ruta con hash versionada, y los
-nombres que se mueven con esta hoja son `js/studio-Bz8EI3R_.js` y `css/mount-next-0XHIzscc.css` (medido
-al cerrar la ronda final; esta hoja decía `js/studio-Ca2SwZcV.js` antes de que la corrección del
+nombres que se mueven con esta hoja son `js/studio-W41f5AjJ.js` y `css/mount-next-Dp2pmOl_.css` (medido
+sobre el árbol ya normalizado a LF por `.gitattributes`; antes de esa normalización la hoja citaba
+`js/studio-Bz8EI3R_.js` y `css/mount-next-0XHIzscc.css`, hashes que salían de una copia de trabajo con
+`ToastLayer.module.css` en CRLF, y antes aún `js/studio-Ca2SwZcV.js` antes de que la corrección del
 `ToastLayer` moviera el grafo perezoso).
 
 Ojo con los finales de línea al tocar el plan desde Python: `parity-check.mjs` casa los fences con
@@ -5253,11 +5255,14 @@ Expected: PASS los dos tests.
 Cambiar un `.jsx` **sí** cambia el hash que nombra `web/studio.html`. La expectativa de esta hoja
 decía lo contrario —«el entry solo lleva el interruptor, su hash no se mueve»— y la corrección de la
 ronda final la desmiente medida en bytes: el chunk de entrada de 1 469 B lleva dentro, escritos, los
-nombres del grafo perezoso (`grep -o "mount-next[A-Za-z0-9_.-]*" web/js/studio-Bz8EI3R_.js` devuelve
-`mount-next-BsqyMY0A.js` y `mount-next-0XHIzscc.css`), así que cualquier cambio dentro de React mueve
+nombres del grafo perezoso (`grep -o "mount-next[A-Za-z0-9_.-]*" web/js/studio-W41f5AjJ.js` devuelve
+`mount-next-BmyHNl88.js` y `mount-next-Dp2pmOl_.css`), así que cualquier cambio dentro de React mueve
 el hash de `mount-next-*.js`, que mueve el del entry, que reescribe la etiqueta de `web/studio.html`.
 Consecuencia práctica para quien ejecute esta tarea: `web/studio.html` **va en el commit** tras cada
-build con `.jsx` tocado, y es la única ruta con hash que está versionada.
+build con `.jsx` tocado, y es la única ruta con hash que está versionada. Y esos nombres dependen de
+los bytes de entrada, no solo del contenido: un `.module.css` con CRLF cambia los idents de CSS Modules
+y con ellos los tres nombres, así que la puerta `the ui sources the bundle is hashed from are LF` en
+`tests/ui-artifacts.test.mjs` es parte de esta tarea, no un extra.
 
 Run: `node scripts/build-ui.mjs && grep -c 'common.close' web/js/mount-next-*.js`
 Expected: `1`, sobre un único fichero: `scripts/build-ui.mjs` poda los chunks con hash que la nueva

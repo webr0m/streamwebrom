@@ -214,3 +214,22 @@ test("the builder spawns npm in the one form that works on every platform", asyn
   assert.match(source, /\["ci",\s*"--no-audit",\s*"--no-fund"\]/, "cold install must be npm ci --no-audit --no-fund");
   assert.match(source, /\["run",\s*"build"\]/, "the build step must be npm run build with no --prefix");
 });
+
+test("the ui sources the bundle is hashed from are LF", async () => {
+  // Vite folds the input bytes into every CSS-module ident, so a line ending in ui/
+  // decides chunk names. Measured 2026-11-21: converting only
+  // ui/src/components/ToastLayer.module.css to CRLF renamed
+  // css/mount-next-Dp2pmOl_.css to 0XHIzscc.css, renamed its js and the 1 469 B entry
+  // with them, and reproduced exactly the hashes the reviewed worktree had built —
+  // which is how a tracked web/studio.html ended up naming a bundle no normalised
+  // checkout can rebuild. .gitattributes keeps checkouts LF; this is the gate that
+  // notices an editor writing CRLF back before the commit.
+  const dir = join(root, "ui/src");
+  const crlf = [];
+  for (const rel of (await readdir(dir, { recursive: true })).map(String)) {
+    if (!/\.(jsx?|css)$/.test(rel)) continue;
+    if ((await readFile(join(dir, rel), "utf8")).includes("\r")) crlf.push(join("ui/src", rel));
+  }
+  if ((await readFile(join(root, "ui", "vite.config.js"), "utf8")).includes("\r")) crlf.push("ui/vite.config.js");
+  assert.deepEqual(crlf, [], "CRLF inputs move the Vite hashes: convert these to LF and rebuild");
+});

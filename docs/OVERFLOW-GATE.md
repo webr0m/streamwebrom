@@ -175,6 +175,14 @@ ocupado por una instancia ajena (`swr-main-bin`, 5291 s encendida) que no es de 
 mata: el binario propio arrancó, falló el bind en silencio y el `curl` respondía desde el impostor. Es
 la escena que el control de `uptime` existe para impedir, y salió medida de verdad —ver «El puerto».
 
+Corrección registrada sin borrar la medida: ese `studio-Bz8EI3R_.js` es el hash que produce una copia de
+trabajo con EOL mixto. Al integrar en `main` se midió que convertir únicamente
+`ui/src/components/ToastLayer.module.css` a CRLF reproducía ese nombre exacto y sus dos chunks
+dependientes, y que el árbol ya normalizado a LF (`.gitattributes`, commit `48d6aea`) produce
+`studio-W41f5AjJ.js`. La página versionada es ahora la del árbol LF, y
+`tests/ui-artifacts.test.mjs` no deja volver atrás: «the ui sources the bundle is hashed from are LF»
+se vio fallar con el fichero concreto señalado, y con él cae también el test de determinismo del build.
+
 Que el `uptime` sea 3 y no 5291 es parte del procedimiento, no un detalle: el `web/` se congela dentro
 del binario en `go build`, así que un servidor de hace una hora sirve una maqueta que ya no existe.
 
