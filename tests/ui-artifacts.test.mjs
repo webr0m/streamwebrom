@@ -1,7 +1,9 @@
 // tests/ui-artifacts.test.mjs
 import { execFile } from "node:child_process";
-import { access, readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { access, mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -26,6 +28,15 @@ async function loadCollector() {
   const module = await import(pathToFileURL(builder).href);
   assert.equal(typeof module.collectSwAssets, "function", `${builder} must export collectSwAssets for these assertions`);
   return module.collectSwAssets;
+}
+
+// The pruning half of the builder, imported the same way: it has to be callable on
+// a throwaway tree so this file can prove the narrow pattern without deleting a
+// single real artifact.
+async function loadPruner() {
+  const module = await import(pathToFileURL(builder).href);
+  assert.equal(typeof module.pruneOrphanChunks, "function", `${builder} must export pruneOrphanChunks for these assertions`);
+  return module.pruneOrphanChunks;
 }
 
 test("the UI build emits only js/ and css/ paths", async () => {
@@ -68,6 +79,18 @@ test("the manifest collector refuses a build with nothing to precache", async ()
     assert.throws(() => collect(manifest), /vite emitted no js\/ or css\/ asset/);
   }
 });
+
+const HASHED_RE = /^(?:js|css)\/[A-Za-z0-9._-]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/;
+
+async function hashedArtifacts(dir) {
+  const found = [];
+  for (const sub of ["js", "css"]) {
+    let names;
+    try { names = await readdir(join(dir, sub)); } catch { continue; }
+    for (const name of names) if (HASHED_RE.test(`${sub}/${name}`)) found.push(`${sub}/${name}`);
+  }
+  return found.sort();
+}
 
 test("the builder regenerates sw-assets.json with the content it already had", async () => {
   // build() skips when the artifact exists, so the real script would otherwise
@@ -121,6 +144,55 @@ test("ui/tests/setup.js keeps its i18n wiring live", async () => {
   for (const name of names) {
     assert.ok(name in engineExports, `ui/src/i18n.js re-exports ${name}, which web/js/i18n.js does not export`);
   }
+});
+
+test("two builds in a row leave exactly the hashed chunks the manifest names", async () => {
+  // The bug this pins: vite rewrites web/js and web/css but `emptyOutDir` is false,
+  // so every renamed chunk from an earlier build survives forever. shellPrefix then
+  // hashes dead bytes into assetPrefix — which changes machine to machine — go:embed
+  // ships them in every binary, and a stale tag in web/studio.html resolves against
+  // an orphaned chunk instead of failing. Deterministic output makes the set itself
+  // the assertion: no orphans means run 1 and run 2 agree, and both must equal the
+  // published list.
+  await run("node", ["scripts/build-ui.mjs"], { cwd: root });
+  const first = await hashedArtifacts(join(root, "web"));
+  const afterFirst = JSON.parse(await readFile(join(root, "web/js/sw-assets.json"), "utf8")).sort();
+  await run("node", ["scripts/build-ui.mjs"], { cwd: root });
+  const second = await hashedArtifacts(join(root, "web"));
+  const afterSecond = JSON.parse(await readFile(join(root, "web/js/sw-assets.json"), "utf8")).sort();
+  assert.deepEqual(second, first, "a rebuild left hashed chunks behind that the previous build did not have");
+  assert.deepEqual(second, afterSecond, `hashed chunks on disk are not the manifest's: ${JSON.stringify({ disk: second, list: afterSecond })}`);
+  assert.deepEqual(afterFirst, afterSecond, "the published list changed between two builds of the same tree");
+});
+
+test("the prune keeps hand-written modules and drops only unlisted chunks", async () => {
+  // A fixture tree, never web/: the live checkout really does hold dozens of
+  // orphaned chunks, and pointing rm at it would delete tracked source on the first
+  // pattern slip. Everything here is invented, so the narrowness of the pattern is
+  // what is under test.
+  const dir = await mkdtemp(join(tmpdir(), "swr-prune-"));
+  const prune = await loadPruner();
+  const keep = "js/studio-Ca2SwZcV.js";
+  const files = [
+    keep,
+    "js/mount-next-BtLuOyvV.js", // hashed and unlisted: an orphan
+    "js/studio.js",              // hand-written module, no hash suffix
+    "js/i18n/en/studio.js",      // dictionaries live under js/ too
+    "css/app.css",               // the legacy stylesheet
+    "css/studio-xloB953p.css",   // hashed and unlisted
+    "css/studio-zz.css",         // shorter suffix: outside the pattern by design
+    "img/logo.svg",              // not under js/ or css/: never pruned
+  ];
+  for (const file of files) {
+    const target = join(dir, file);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, "x", "utf8");
+  }
+  const removed = await prune(dir, [keep, "css/studio-DzChoqY0.css"]);
+  assert.equal(removed, 2, `expected the two unlisted hashed chunks gone, prune reported ${removed}`);
+  const survivors = [];
+  for (const file of files) if (existsSync(join(dir, file))) survivors.push(file);
+  assert.deepEqual(survivors, files.filter((file) => !["js/mount-next-BtLuOyvV.js", "css/studio-xloB953p.css"].includes(file)));
 });
 
 test("the builder spawns npm in the one form that works on every platform", async () => {

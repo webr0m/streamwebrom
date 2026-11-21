@@ -2,7 +2,7 @@
 // versioned asset list the service worker reads through Go's __SWR_SHELL__.
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -25,6 +25,37 @@ export function collectSwAssets(manifest) {
   // Paths stay relative to web/ (no leading slash) and sorted: Task 2 feeds this
   // exact list to the service worker's precache.
   return [...files].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+// `emptyOutDir: false` is what lets the build write into web/ next to the
+// hand-written modules, and the price is that vite never removes the chunk a
+// later build renamed. The orphans are not cosmetic: shellPrefix hashes every
+// byte under js/ and css/, so dead chunks move assetPrefix from machine to
+// machine; go:embed ships them inside every binary; and a stale reference in a
+// badly committed web/studio.html resolves against an old chunk instead of 404ing.
+// The pattern is deliberately the narrowest thing that exists — Vite's own
+// `[name]-<8 chars>.js|css` — because /js/studio.js, /js/i18n/… and /css/app.css
+// are tracked source and must survive. Anything outside the pattern stays on disk
+// untouched even when the new list does not name it.
+const HASHED = /^(.+)-[A-Za-z0-9_-]{8}\.(js|css)$/;
+
+export async function pruneOrphanChunks(web, list) {
+  const keep = new Set(list);
+  let removed = 0;
+  for (const dir of ["js", "css"]) {
+    let names;
+    try {
+      names = await readdir(resolve(web, dir));
+    } catch {
+      continue; // no output directory yet: nothing can be orphaned in it
+    }
+    for (const name of names) {
+      if (!HASHED.test(name) || keep.has(`${dir}/${name}`)) continue;
+      await rm(resolve(web, dir, name), { force: true });
+      removed += 1;
+    }
+  }
+  return removed;
 }
 
 // One command shape covers every environment (Windows, WSL interop, the Alpine
@@ -60,7 +91,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
 
   const manifest = JSON.parse(await readFile(resolve(web, ".vite/manifest.json"), "utf8"));
   const list = collectSwAssets(manifest);
+  // Prune before publishing the list: from here on, the list is the definition of
+  // what the shell has, so anything it does not name is by construction an orphan.
+  const removed = await pruneOrphanChunks(web, list);
   await writeFile(resolve(web, "js/sw-assets.json"), JSON.stringify(list) + "\n", "utf8");
   await rm(resolve(web, ".vite"), { recursive: true, force: true });
-  console.log(`swr ui build → ${list.join(", ")}`);
+  console.log(`swr ui build → ${list.join(", ")}${removed ? ` (pruned ${removed} orphaned chunk${removed === 1 ? "" : "s"})` : ""}`);
 }
