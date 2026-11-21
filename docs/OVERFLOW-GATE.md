@@ -89,7 +89,9 @@ en el viewport en que estaba montada.
 
 Código de salida: `0` con `overflow gate ok`; `1` con `OVERFLOW GATE FAILED` y una línea por
 culpable (los seis primeros desbordes por viewport, con su caja `[scrollWidth, clientWidth,
-scrollHeight, clientHeight]` y 48 caracteres de texto para poder identificarlo sin screenshot). Si el
+scrollHeight, clientHeight]` y 48 caracteres de texto para poder identificarlo sin screenshot); `2`
+cuando la puerta se niega a medir —servidor con más de `--max-uptime` segundos encendido, ver «El
+puerto» más abajo—, que es otro fallo que «la maqueta desborda» y por eso no comparte código. Si el
 shell no monta, la lista se queda en una sola línea —`the studio shell never mounted`— en vez de un
 `TimeoutError` de Playwright en la consola de CI. Un mismo viewport puede aparecer dos veces: la
 primera por no asentarse y la segunda por lo que enseñe el `PROBE` sobre esa maqueta en movimiento.
@@ -190,7 +192,7 @@ OVERFLOW GATE FAILED
 
 mientras `scenesRail` sigue contento: exactamente el verde falso que el candado existe para impedir.
 
-Las tres variantes siguientes no requieren tocar el código del Studio: se generan copiando el gate
+Las cuatro variantes siguientes no requieren tocar el código del Studio: se generan copiando el gate
 embarcado e inyectando un `add_init_script` (o recortando el presupuesto de asentamiento), así que lo
 que se ejecuta es el `layout_problems`, el `settle` y el bucle que se commitean.
 
@@ -252,6 +254,11 @@ que se ejecuta es el `layout_problems`, el `settle` y el bucle que se commitean.
   dictionary o el componente, y eso ya no es «copiar el gate embarcado»—, así que esas dos ramas quedan
   como trabajo pendiente y el suelo de 4 se justifica en el comentario del `PROBE` con las longitudes
   reales medidas (`studio.goLive`: 6/7/10).
+
+  Nota sobre la copia: `.superpowers/gate-probe-primary.py` es scratch sin commitear y quedó congelada
+  en el `raise SystemExit(<mensaje>)` anterior a la corrección del exit 2. No afecta a lo registrado —la
+  sonda se corrió con `--allow-stale`, luego ese brazo nunca llegó a evaluarse—, pero si alguien la
+  reejecuta contra un impostor obtendrá 1 mientras el gate embarcado da 2.
 
 De paso, la primera de estas sondas midió el otro hueco que quedaba: los avisos que lanza el propio
 cambio de estado se perdían con el `continue`, y ahora se imprimen como

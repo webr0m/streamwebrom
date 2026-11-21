@@ -8,13 +8,16 @@ run:
 	go run ./cmd/streamwebrom -open
 
 # The UI pipeline needs node; owners build from WSL, where node is not installed,
-# so every target that would chain `ui` — `test`, `build`, `all` and the release
-# path through `launcher` — chains it only when node is actually reachable. With-
-# out node the binary still builds, but from whatever web/ is on disk: `ui-skip`
-# says so loudly, because a silent pass reads like "the bundle is current". CI
-# (ubuntu + node) always rebuilds it. `ui-skip` has to be a real recipe rather than
-# an empty prerequisite: with nothing to do, make would report `build`/`all` up to
-# date and skip the Go compile too.
+# so every target that would chain `ui` — `test`, `build` and `all` — chains it only
+# when node is actually reachable. Without node the binary still builds, but from
+# whatever web/ is on disk: `ui-skip` says so loudly, because a silent pass reads
+# like "the bundle is current". CI (ubuntu + node) and the Dockerfile's own ui stage
+# always rebuild it. `ui-skip` has to be a real recipe rather than an empty
+# prerequisite: with nothing to do, make would report `build`/`all` up to date and
+# skip the Go compile too. Gap, deliberately not closed here: `windows` and the
+# `launcher` that depends on it never chained `ui`, so a release .exe embeds whatever
+# web/ holds — and the hashed bundle files are git-ignored, so a fresh clone ships
+# none. Parked for the next plan.
 UIPREREQ = $(shell command -v node >/dev/null 2>&1 && echo ui)
 
 ui:
