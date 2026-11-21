@@ -15,7 +15,13 @@ variables:
 test:
   stage: test
   before_script:
-    - apt-get update && apt-get install -y ffmpeg python3-esprima
+    # `python3-esprima` no existe en bookworm: el apt respondía "E: Unable to locate package
+    # python3-esprima" y el job moría con exit 100 antes de `go vet` (run 18246371597, y ya la
+    # 17932428329 del 11-nov). Se instala el intérprete que la imagen de Go no trae y el parser
+    # por pip, que es donde sí está.
+    - apt-get update && apt-get install -y ffmpeg python3 python3-pip
+    # PEP 668: el python del sistema viene marcado "externally managed" y pip se niega sin esto.
+    - pip3 install --break-system-packages esprima
   script:
     - go vet ./...
     - go test -race -count=1 ./...
@@ -44,7 +50,11 @@ test-ui:
   script:
     # Vitest lives in ui/node_modules/.bin, so the package manager runs with
     # cwd=ui (npm --prefix does not move the script cwd since npm 11).
-    - cd ui && npm test
+    # `npm test` a secas respondía "sh: 1: vitest: not found" y exit 127 (run 18246371599):
+    # la caché `ui-node-modules` estaba vacía —"WARNING: file does not exist / Failed to
+    # extract cache"— porque ningún job la ha guardado nunca. Se instala siempre; la caché
+    # solo ahorra tiempo cuando exista.
+    - cd ui && npm ci --no-audit --no-fund && npm test
 binaries:
   stage: build
   # make all chains the `ui` target unconditionally, so this job needs node and
