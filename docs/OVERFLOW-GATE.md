@@ -165,11 +165,16 @@ wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && \
   --url http://localhost:18497 --browser "C:/Program Files/Google/Chrome/Application/chrome.exe"
 ```
 
-Ejecutado así al cerrar la ronda de revisión: el health responde `ok` con `uptime` 3 y `/studio`
-sirve `studio-Ca2SwZcV.js`, el mismo hash que lee `web/studio.html`; la puerta imprime
-`overflow gate ok` con exit 0. Que el `uptime` sea 3 y no 2307 es parte del procedimiento, no un
-detalle: el `web/` se congela dentro del binario en `go build`, así que un servidor de hace una hora
-sirve una maqueta que ya no existe.
+Ejecutado así al cerrar la ronda de corrección de la revisión final de rama (commitos `932ed54` y
+siguientes): el health responde `ok` con `uptime` 3 y `/studio` sirve `studio-Bz8EI3R_.js`, el mismo
+hash que lee `web/studio.html`; la puerta imprime `overflow gate ok` con exit 0. El puerto de esta
+medida es el 18499, no el 18497 del `make overflow`, porque al levantar el servidor el 18497 ya estaba
+ocupado por una instancia ajena (`swr-main-bin`, 5291 s encendida) que no es de este árbol y no se
+mata: el binario propio arrancó, falló el bind en silencio y el `curl` respondía desde el impostor. Es
+la escena que el control de `uptime` existe para impedir, y salió medida de verdad —ver «El puerto».
+
+Que el `uptime` sea 3 y no 5291 es parte del procedimiento, no un detalle: el `web/` se congela dentro
+del binario en `go build`, así que un servidor de hace una hora sirve una maqueta que ya no existe.
 
 Que el candado no es decorativo también está medido, no argumentado: con el `aria-controls` del panel
 renombrado a `studioPanesNEVER` en `ui/src/components/Topbar.jsx:52` (build aparte, puerto 18498), la
@@ -211,26 +216,35 @@ que se ejecuta es el `layout_problems`, el `settle` y el bucle que se commitean.
   más estrecha posible: borra el enganche, no el elemento, así que el botón sigue ahí, visible, con su
   aria-label y su rótulo de diez caracteres; todo lo demás de la página mide igual que en el verde. Lo
   único que puede dispararse es la rama `not report["primary"]`, y eso es lo que imprime, exit 1, una
-  línea por viewport con el criterio y el selector nombrados:
+  línea por combinación de pasada y viewport con el criterio y el selector nombrados. **Ejecutada por
+  el controlador** al cerrar la ronda (`--url http://localhost:18499`, `--allow-stale` porque el
+  servidor ya pasaba de los 120 s): exit 1 y **dieciséis** líneas, no cuatro —el criterio se evalúa en
+  los cuatro viewports *de cada una* de las cuatro pasadas, y el informe no corta esta rama (`[:6]` solo
+  afecta a `clipped`). Salida real:
 
   ```
   OVERFLOW GATE FAILED
    - expanded @ 1440x900: the primary action [data-action=live] is gone
-   - scenes collapsed @ 1120x800: the primary action [data-action=live] is gone
-   - panel collapsed @ 820x900: the primary action [data-action=live] is gone
-   - both collapsed @ 390x640: the primary action [data-action=live] is gone
+   - expanded @ 1120x800: the primary action [data-action=live] is gone
+   - expanded @ 820x900: the primary action [data-action=live] is gone
+   - expanded @ 390x640: the primary action [data-action=live] is gone
+   - scenes collapsed @ 1440x900: the primary action [data-action=live] is gone
   ```
 
-  Cuatro líneas, una por pasada, porque el criterio se evalúa en los cuatro viewports y el informe
-  imprime todas las que hay (`[:6]` solo corta la lista de `clipped`). **Esta sonda no está ejecutada
-  en esta ronda** —el navegador lo corre el controlador—, así que el bloque de arriba es la forma del
-  mensaje que produce el bucle commiteado, no un pegado de terminal. Lo que sí está comprobado sin
-  navegador es el mecanismo, leyendo el código embarcado: `Topbar.jsx:44` pone `data-action="live"` en
-  el único `CommandButton` primario del shell, `CommandButton.jsx` reparte `{...rest}` sobre el
+  La primera vez que se corrió dio **verde**, y la razón merece quedarse escrita: el observador estaba
+  declarado como `{subtree: true, attributes: true, attributeFilter: ['data-action']}`. Un
+  `MutationObserver` con solo filtros de atributo no ve el `data-action` que React pone con
+  `setAttribute` mientras el nodo todavía está fuera del documento, porque el cambio de atributo no
+  ocurre dentro del árbol observado; al añadir `childList: true` la inserción del shell dispara el
+  callback y el atributo desaparece. Es la trampa general de esta familia de sondas: un observador que
+  nunca se dispara convierte un rojo legítimo en un verde silencioso, igual que un candado ausente.
+
+  Lo que sostiene el mecanismo, leído en el código embarcado: `Topbar.jsx:44` pone `data-action="live"`
+  en el único `CommandButton` primario del shell, `CommandButton.jsx` reparte `{...rest}` sobre el
   `<button>` (misma vía por la que `regions.test.jsx` encuentra `[data-role="visibility"]`), de modo
   que quitar el atributo deja `.studio-root [data-action="live"]` en `null`, `report["primary"]` en
-  `null`, y la única rama alcanzable es `not report["primary"]`. El registro con la salida exacta queda
-  como primera tarea del controlador con navegador.
+  `null`, y la única rama alcanzable es `not report["primary"]` —que es exactamente lo que salieron a
+  decir las dieciséis líneas.
 
   Lo que **no** prueba esta sonda: las otras dos mitades del criterio (`labelLength < 4` y `clipped`)
   siguen sin rojo registrado. Borrar el `data-action` es el único fallo del primaria alcanzable desde un
@@ -255,10 +269,23 @@ Tres trampas medidas, las tres con el mismo efecto —un verde falso—:
   `--url http://localhost:18497`, un puerto propio de trabajo, en lugar del 18443 de CI; CI no cambia
   porque su job arranca ahí mismo su propio binario (`ci.yml`) y su `uptime` es siempre reciente.
   `--allow-stale` es la salida para cuando se sabe que el servidor viejo es tuyo y quieres medirlo tal
-  cual; para cambiar de umbral sin desactivar el candado está `--max-uptime <segundos>`. El candado no
-  está ejecutado con un impostor real en esta ronda: lo que fija su forma es que `/api/health` responde
-  `{"ok":true,"version":…,"uptime":<segundos>}` (`internal/server/server.go`), y el paso de navegador
-  con salida exacta queda para el controlador.
+  cual; para cambiar de umbral sin desactivar el candado está `--max-uptime <segundos>`. El candado
+  está ejecutado contra un impostor de verdad, no razonado: 18497 estaba ocupado por una instancia
+  ajena (`swr-main-bin`) llevaba 5303 s encendida, y la puerta no abrió una sola página —exit 2 con
+
+  ```
+  OVERFLOW GATE REFUSED: http://localhost:18497 lleva 5303s encendido, más de los 120s de esta puerta.
+   El binario sirve el `web/` que tenía embebido cuando se compiló, así que puede ser otro árbol distinto
+   al que estás midiendo y un verde aquí no diría nada de tus cambios.
+   Levanta un servidor propio sobre un puerto libre (`make overflow` usa 18497), o añade --allow-stale
+   si sabes que ese servidor es tuyo.
+  ```
+
+  y el mismo argumento con `--allow-stale` añadido corre la barrida entera (así se ejecutó la sonda del
+  criterio 4 sobre su propio servidor ya mayor de 120 s). El 2 era una corrección sobre el primer
+  commiteo: `raise SystemExit(<mensaje>)` vale 1, el mismo código con el que la puerta dice «desborda»,
+  mientras este documento prometía 2; ahora el rechazo sale por stderr con 2 y el fallo de maqueta
+  sigue en 1, que es lo que hace imprimible el código sin leer el texto.
 
   Comprueba además el hash `studio-<hash>.js` que devuelve `/studio` contra el de `web/studio.html`
   antes de creer un resultado; en caso de duda, otro puerto y otro `-data`. Medido contra el impostor

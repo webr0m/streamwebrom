@@ -4991,8 +4991,10 @@ Comprobar con `parity-check.mjs` que `ui/src/styles/layout.css` (último bloque)
 reescribir el bloque de aquella tarea, y las tres anclas van citadas en el Step 2 de arriba. Medido
 con el tool, `docs/OVERFLOW-GATE.md`, `Makefile`, `.github/workflows/ci.yml` y `web/studio.html`
 responden `NO BLOCK` (prosilla o ficheros que el plan describe sin fencearse) y se revisan leyendo el
-diff. `web/studio.html` sí va en el commit: es tracked y el hash del bundle se
-moven con esta hoja (`js/studio-Ca2SwZcV.js`, `css/mount-next-0XHIzscc.css` al cerrar la tarea).
+diff. `web/studio.html` sí va en el commit: es tracked, es la única ruta con hash versionada, y los
+nombres que se mueven con esta hoja son `js/studio-Bz8EI3R_.js` y `css/mount-next-0XHIzscc.css` (medido
+al cerrar la ronda final; esta hoja decía `js/studio-Ca2SwZcV.js` antes de que la corrección del
+`ToastLayer` moviera el grafo perezoso).
 
 Ojo con los finales de línea al tocar el plan desde Python: `parity-check.mjs` casa los fences con
 `^```…\n` y un fichero convertido a CRLF hace que reporte `NO BLOCK` para todas las rutas y que el
@@ -5248,15 +5250,20 @@ evalúa en cada render: el rótulo sigue vivo sin Suscriptores nuevos.
 Run: `node --test tests/ui-i18n.test.mjs`
 Expected: PASS los dos tests.
 
-Cambiar un `.jsx` cambia un hash de bundle, pero **no el del chunk que nombra `web/studio.html`**:
-medido tras la build, `StudioDialog.jsx` vive en el chunk perezoso `mount-next-<hash>.js` (376 kB) y la
-página sigue apuntando a `studio-Ca2SwZcV.js` (1,47 kB, solo el interruptor de modo), así que
-`web/studio.html` sale **sin modificar** y no hay nada que commitear ahí. La comprobación que sí vale:
+Cambiar un `.jsx` **sí** cambia el hash que nombra `web/studio.html`. La expectativa de esta hoja
+decía lo contrario —«el entry solo lleva el interruptor, su hash no se mueve»— y la corrección de la
+ronda final la desmiente medida en bytes: el chunk de entrada de 1 469 B lleva dentro, escritos, los
+nombres del grafo perezoso (`grep -o "mount-next[A-Za-z0-9_.-]*" web/js/studio-Bz8EI3R_.js` devuelve
+`mount-next-BsqyMY0A.js` y `mount-next-0XHIzscc.css`), así que cualquier cambio dentro de React mueve
+el hash de `mount-next-*.js`, que mueve el del entry, que reescribe la etiqueta de `web/studio.html`.
+Consecuencia práctica para quien ejecute esta tarea: `web/studio.html` **va en el commit** tras cada
+build con `.jsx` tocado, y es la única ruta con hash que está versionada.
 
 Run: `node scripts/build-ui.mjs && grep -c 'common.close' web/js/mount-next-*.js`
-Expected: el chunk recién escrito (el de `mtime` más reciente) lleva `common.close`; los demás son
-huérfonos de builds anteriores — `scripts/build-ui.mjs` no los poda, Minor ya aparcado. Nada de
-`web/js/*-<hash>.js` ni `web/js/sw-assets.json` entra en el commit: son git-ignored a propósito.
+Expected: `1`, sobre un único fichero: `scripts/build-ui.mjs` poda los chunks con hash que la nueva
+lista no nombra (corrección de la revisión final; aquí decía «no los poda, Minor aparcado» y el glob
+casaba varios huérfanos). Nada de `web/js/*-<hash>.js` ni `web/js/sw-assets.json` entra en el commit:
+son git-ignored a propósito.
 
 **Puertas de no-vacuidad (medido el 2026-11-20 con copias mutadas de los dos tests).** Un test que
 llega verde no vale si no se ha visto fallar: estas son las mutaciones que se ejecutaron y su salida
