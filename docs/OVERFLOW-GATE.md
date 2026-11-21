@@ -125,7 +125,11 @@ corte en los cuatro anchos.
   build no se publica (`.github/workflows/ci.yml`).
 - CI, job `test`: `test -s docs/OVERFLOW-GATE.md` impide que este documento desaparezca o se quede
   vacío.
-- Local: `make overflow`, que apunta a `http://localhost:18443` como el resto de los smokes.
+- Local: `make overflow`, que apunta a `http://localhost:18443`: es el puerto con el que el job
+  `browser` de CI invoca a todos los smokes (`interface-smoke.py`, `studio-smoke.py`, `call-smoke.py`,
+  …), que en el Makefile no tienen target propio. Es también el puerto donde esta tarea encontró un
+  servidor ajeno llevando ocho horas en pie, así que le aplica la regla de la ruta local: `uptime` en
+  `/api/health` y el hash servido antes de dar por bueno un verde.
 
 ## Ruta local
 
