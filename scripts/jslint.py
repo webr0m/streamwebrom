@@ -4,7 +4,7 @@
 - every named import exists as an export of the imported module
 Scope handling is intentionally loose (any declaration in the file counts), so
 it catches typos and missing imports, not shadowing bugs."""
-import os, sys, esprima
+import os, sys, json, esprima
 
 GLOBALS = set("""window document CSS Worker AbortSignal postMessage navigator location history localStorage sessionStorage console setTimeout clearTimeout
 setInterval clearInterval requestAnimationFrame cancelAnimationFrame fetch URL URLSearchParams JSON Math Date Number String
@@ -79,8 +79,38 @@ def analyse(path):
     walk(tree.body, fn)
     return declared, used, imports, exports
 
+def built_outputs(root):
+    """Names of the files `scripts/build-ui.mjs` emitted into this directory.
+
+    The check below is a source-code check: it reasons about declarations, imports and
+    browser globals. Vite's hashed chunks are minified module output, and esprima (the
+    parser Debian ships as python3-esprima) stops at their syntax — it predates parts of
+    it. Linting them was never the point, so the manifest the build publishes alongside
+    them is what says which files to hand to the parser and which to skip."""
+    manifest = os.path.join(root, "sw-assets.json")
+    if not os.path.exists(manifest):
+        return set()
+    try:
+        listed = json.load(open(manifest))
+    except (ValueError, OSError):
+        return set()
+    prefix = os.path.basename(os.path.abspath(root))
+    names = set()
+    for entry in listed:
+        if not isinstance(entry, str) or not entry.endswith(".js"):
+            continue
+        # Entries are relative to web/ ("js/studio-<hash>.js"), so the segment that
+        # names the file is the last one; matching it keeps the rule independent of how
+        # the caller spelled the directory. A hand-written module could only collide by
+        # carrying the exact name Vite just emitted into it, in which case it is gone.
+        if entry.split("/")[-2] == prefix or entry.count("/") == 1:
+            names.add(entry.rsplit("/", 1)[-1])
+    return names
+
 def main(root):
-    files = [os.path.join(root, f) for f in sorted(os.listdir(root)) if f.endswith(".js")]
+    skipped = built_outputs(root)
+    files = [os.path.join(root, f) for f in sorted(os.listdir(root))
+             if f.endswith(".js") and f not in skipped]
     info = {os.path.basename(f): analyse(f) for f in files}
     bad = 0
     for name, (declared, used, imports, _) in info.items():
@@ -94,7 +124,8 @@ def main(root):
         unused = {d for d in declared if d not in used}
         for (mod, imp) in imports:
             if imp in unused: print(f"{name}: warning: import '{imp}' unused")
-    print("jslint:", "OK" if not bad else f"{bad} problem(s)")
+    print(f"jslint: {len(info)} módulo(s) fuente, {len(skipped)} chunk(s) de build fuera "
+          f"del parser → " + ("OK" if not bad else f"{bad} problem(s)"))
     return 1 if bad else 0
 
 if __name__ == "__main__":
