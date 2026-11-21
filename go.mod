@@ -1,6 +1,8 @@
 module github.com/webr0m/streamwebrom
 
-go 1.26.0
+go 1.26.11
+
+toolchain go1.27.4
 
 require (
 	github.com/gorilla/websocket v1.5.3

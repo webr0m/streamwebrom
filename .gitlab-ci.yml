@@ -1,6 +1,6 @@
 stages: [test, build]
 default:
-  image: golang:1.27-bookworm
+  image: golang:1.27.4-bookworm
   cache:
     key: go-modules
     paths: [.cache/go]
@@ -63,7 +63,7 @@ test-ui:
 binaries:
   stage: build
   # make all chains the `ui` target unconditionally, so this job needs node and
-  # npm next to go; the default golang:1.27-bookworm ships neither (exit 127).
+  # npm next to go; the default Go image ships neither (exit 127).
   # node:22-bookworm carries npm out of the box; the Go toolchain is fetched
   # from go.dev because Debian's own golang-go lags several minors behind
   # go.mod. The URL is pinned per-architecture on purpose: a single hard-coded
@@ -74,7 +74,7 @@ binaries:
   before_script:
     - apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip git make
     - GO_ARCH=$(dpkg --print-architecture)
-    - curl -fsSL "https://go.dev/dl/go1.27.0.linux-${GO_ARCH}.tar.gz" | tar -C /usr/local -xz
+    - curl -fsSL "https://go.dev/dl/go1.27.4.linux-${GO_ARCH}.tar.gz" | tar -C /usr/local -xz
     - export PATH="/usr/local/go/bin:$PATH"
     - go version
     # `make all` chains the ui prerequisite, so npm must resolve from the job

@@ -8,7 +8,7 @@ COPY web ./web
 COPY scripts ./scripts
 RUN --mount=type=cache,target=/root/.npm node scripts/build-ui.mjs
 
-FROM golang:1.27-alpine AS build
+FROM golang:1.27.4-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
