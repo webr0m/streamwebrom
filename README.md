@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.12.1:** Telegram como destino de emisión RTMP/RTMPS desde el estudio. Captura avanzada de ventanas, pestañas y sistema con audio aislado en Windows x64, conservando la interfaz del estudio. Selector web de fuentes y sonido, con protección frente al retorno de voces. [Captura avanzada](docs/CAPTURA-AVANZADA.md), [audio y segundo plano](docs/AUDIO-Y-SEGUNDO-PLANO.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.13.0:** El Studio estrena shell React + Vite con la paleta Control Room Pro, disponible detrás de `?ui=next`; la interfaz de siempre sigue siendo la predeterminada y nada en el motor WebRTC cambia. Telegram como destino de emisión RTMP/RTMPS desde el estudio. Captura avanzada de ventanas, pestañas y sistema con audio aislado en Windows x64, conservando la interfaz del estudio. Selector web de fuentes y sonido, con protección frente al retorno de voces. [Interfaz](docs/INTERFAZ.md), [captura avanzada](docs/CAPTURA-AVANZADA.md), [audio y segundo plano](docs/AUDIO-Y-SEGUNDO-PLANO.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 
