@@ -38,6 +38,15 @@ PROBE = """
     clipped,
     emptyButtons,
     documentScroll: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 || document.documentElement.scrollHeight > document.documentElement.clientHeight + 1,
+    // `labelLength` mide el RÓTULO, no la anchura del botón, así que su suelo de 4 es un criterio
+    // semántico y se justifica con los rótulos que existen. Medidos en las tres dictionaries
+    // embarcadas para `studio.goLive`, la acción primaria solo sabe decir «В эфир» (6), «Go live» (7)
+    // y «Transmitir» (10): el más corto tiene 6, luego subir el suelo sería inventarse un requisito.
+    // Y 4 no es decorativo: `t()` devuelve la clave cuando falta (`web/js/i18n.js:72`) —eso da 13
+    // caracteres y lo coge el criterio de controles sin nombre—, pero una abreviatura de hasta 3 («▶»,
+    // «On», «Иди») sigue nombrando el botón a ojos del aria-label y deja de decir qué hace; por eso
+    // también se exige `visible`, porque el `<span class=label>` que `CommandButton.module.css:37`
+    // esconde bajo 820px respondería `labelLength: 0` si alguna vez el CSS le llegara al primario.
     primary: primary ? { visible: primary.getClientRects().length > 0, labelLength: label.length, clipped: primary.scrollWidth - primary.clientWidth > 1 } : null,
   };
 }
@@ -142,14 +151,34 @@ def settle(page, tries=SETTLE_TRIES, step=SETTLE_STEP):
     return False
 
 parser = argparse.ArgumentParser()
+# El `--url` por defecto es el puerto del job de CI, que arranca su propio binario justo antes. En
+# local hay que pasar uno de trabajo (`make overflow` pasa 18497): ver la sonda del puerto impostor
+# en docs/OVERFLOW-GATE.md.
 parser.add_argument("--url", default="http://localhost:18443")
 parser.add_argument("--browser")
 parser.add_argument("--room")
+# La puerta mide la maqueta que hay en el disco del SERVIDOR, no la de este árbol: el `web/` viaja
+# embebido en el binario, así que una instancia vieja todavía levantada responde 200 en /api/health y
+# el gate se pone verde sobre una página que ya no existe. Por eso se exige un `uptime` reciente salvo
+# que se pida lo contrario explicitamente.
+parser.add_argument("--allow-stale", action="store_true", help="aceptar un servidor con más de --max-uptime segundos encendido")
+parser.add_argument("--max-uptime", type=int, default=120)
 args = parser.parse_args()
 
 with sync_playwright() as pw:
     browser = pw.chromium.launch(headless=True, executable_path=args.browser)
     context = browser.new_context(locale="es-ES", viewport={"width": 1440, "height": 900}, color_scheme="dark", service_workers="block", ignore_https_errors=True)
+    health = context.request.get(args.url + "/api/health").json()
+    uptime = health.get("uptime")
+    if not args.allow_stale and isinstance(uptime, (int, float)) and uptime > args.max_uptime:
+        raise SystemExit(
+            f"OVERFLOW GATE REFUSED: {args.url} lleva {uptime}s encendido, más de los {args.max_uptime}s"
+            " de esta puerta.\n"
+            " El binario sirve el `web/` que tenía embebido cuando se compiló, así que puede ser otro"
+            " árbol distinto al que estás midiendo y un verde aquí no diría nada de tus cambios.\n"
+            " Levanta un servidor propio sobre un puerto libre (`make overflow` usa 18497), o añade"
+            " --allow-stale si sabes que ese servidor es tuyo."
+        )
     room = args.room or f"overflow-{time.time_ns()}"
     keys = context.request.post(args.url + "/api/rooms", data={"room": room, "title": "Puerta de desbordamiento", "password": "overflow-password"}).json()
     page = context.new_page()

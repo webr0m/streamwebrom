@@ -139,11 +139,13 @@ corte en los cuatro anchos.
   build no se publica (`.github/workflows/ci.yml`).
 - CI, job `test`: `test -s docs/OVERFLOW-GATE.md` impide que este documento desaparezca o se quede
   vacío.
-- Local: `make overflow`, que apunta a `http://localhost:18443`: es el puerto con el que el job
-  `browser` de CI invoca a todos los smokes (`interface-smoke.py`, `studio-smoke.py`, `call-smoke.py`,
-  …), que en el Makefile no tienen target propio. Es también el puerto donde esta tarea encontró un
-  servidor ajeno llevando ocho horas en pie, así que le aplica la regla de la ruta local: `uptime` en
-  `/api/health` y el hash servido antes de dar por bueno un verde.
+- Local: `make overflow`, que apunta a `http://localhost:18497`. Antes apuntaba al 18443 de CI, y ese
+  es justo el puerto donde esta tarea encontró un servidor ajeno llevando ocho horas en pie: el 18443
+  lo comparten todos los smokes del job `browser` (`interface-smoke.py`, `studio-smoke.py`,
+  `call-smoke.py`, …), que en el Makefile no tienen target propio, así que en local era un puerto con
+  papeletas de estar ocupado por otro. El número sigue siendo una convención, no un candado —lo que
+  impide medir sobre un impostor es el control de `uptime` del script, ver «El puerto» más abajo—; CI
+  se queda con el 18443 porque su job arranca ahí mismo su propio binario.
 
 ## Ruta local
 
@@ -204,6 +206,38 @@ que se ejecuta es el `layout_problems`, el `settle` y el bucle que se commitean.
 - **Asentamiento sin presupuesto** (`SETTLE_TRIES = 1`, una sola lectura): exit 1 con los dieciséis
   viewports en `the layout never settled in 120 ms`, o sea que la rama de no-asentamiento se emite
   de verdad y el verde que da el gate con `10, 120` no es un `return True` por defecto.
+- **Acción primaria descableada** (`.superpowers/gate-probe-primary.py`, observer que quita el
+  atributo `data-action` al botón del directo). Es la sonda del criterio 4, y está pensada para ser lo
+  más estrecha posible: borra el enganche, no el elemento, así que el botón sigue ahí, visible, con su
+  aria-label y su rótulo de diez caracteres; todo lo demás de la página mide igual que en el verde. Lo
+  único que puede dispararse es la rama `not report["primary"]`, y eso es lo que imprime, exit 1, una
+  línea por viewport con el criterio y el selector nombrados:
+
+  ```
+  OVERFLOW GATE FAILED
+   - expanded @ 1440x900: the primary action [data-action=live] is gone
+   - scenes collapsed @ 1120x800: the primary action [data-action=live] is gone
+   - panel collapsed @ 820x900: the primary action [data-action=live] is gone
+   - both collapsed @ 390x640: the primary action [data-action=live] is gone
+  ```
+
+  Cuatro líneas, una por pasada, porque el criterio se evalúa en los cuatro viewports y el informe
+  imprime todas las que hay (`[:6]` solo corta la lista de `clipped`). **Esta sonda no está ejecutada
+  en esta ronda** —el navegador lo corre el controlador—, así que el bloque de arriba es la forma del
+  mensaje que produce el bucle commiteado, no un pegado de terminal. Lo que sí está comprobado sin
+  navegador es el mecanismo, leyendo el código embarcado: `Topbar.jsx:44` pone `data-action="live"` en
+  el único `CommandButton` primario del shell, `CommandButton.jsx` reparte `{...rest}` sobre el
+  `<button>` (misma vía por la que `regions.test.jsx` encuentra `[data-role="visibility"]`), de modo
+  que quitar el atributo deja `.studio-root [data-action="live"]` en `null`, `report["primary"]` en
+  `null`, y la única rama alcanzable es `not report["primary"]`. El registro con la salida exacta queda
+  como primera tarea del controlador con navegador.
+
+  Lo que **no** prueba esta sonda: las otras dos mitades del criterio (`labelLength < 4` y `clipped`)
+  siguen sin rojo registrado. Borrar el `data-action` es el único fallo del primaria alcanzable desde un
+  init script sin tocar código del Studio —para forzar un rótulo de 3 caracteres habría que editar la
+  dictionary o el componente, y eso ya no es «copiar el gate embarcado»—, así que esas dos ramas quedan
+  como trabajo pendiente y el suelo de 4 se justifica en el comentario del `PROBE` con las longitudes
+  reales medidas (`studio.goLive`: 6/7/10).
 
 De paso, la primera de estas sondas midió el otro hueco que quedaba: los avisos que lanza el propio
 cambio de estado se perdían con el `continue`, y ahora se imprimen como
@@ -214,9 +248,21 @@ Tres trampas medidas, las tres con el mismo efecto —un verde falso—:
 - **El puerto.** `18443` puede estar ocupado por una instancia vieja que lleva horas sirviendo un
   `web/` embebido anterior a tus cambios —y 18471, y del 18456 al 18461, todos encontrados durante
   esta tarea—, porque `streamwebrom` no falla al no poder enbindar: el proceso arranca y `curl`
-  responde desde el impostor. Comprueba `uptime` en `/api/health` y que el hash
-  `studio-<hash>.js` que devuelve `/studio` coincida con el de `web/studio.html` antes de creer un
-  resultado; en caso de duda, otro puerto y otro `-data`. Medido contra el impostor de verdad (su
+  responde desde el impostor. El gate ya no deja pasar eso en silencio: antes de abrir una sola página
+  pide `/api/health` y, si el servidor declara más de `--max-uptime` segundos encendido (120 por
+  defecto) sin que se le haya pasado `--allow-stale`, se niega con exit 2 y un mensaje que explica que
+  el binario sirve el `web/` congelado en el momento de su compilación. `make overflow` pasa ahora
+  `--url http://localhost:18497`, un puerto propio de trabajo, en lugar del 18443 de CI; CI no cambia
+  porque su job arranca ahí mismo su propio binario (`ci.yml`) y su `uptime` es siempre reciente.
+  `--allow-stale` es la salida para cuando se sabe que el servidor viejo es tuyo y quieres medirlo tal
+  cual; para cambiar de umbral sin desactivar el candado está `--max-uptime <segundos>`. El candado no
+  está ejecutado con un impostor real en esta ronda: lo que fija su forma es que `/api/health` responde
+  `{"ok":true,"version":…,"uptime":<segundos>}` (`internal/server/server.go`), y el paso de navegador
+  con salida exacta queda para el controlador.
+
+  Comprueba además el hash `studio-<hash>.js` que devuelve `/studio` contra el de `web/studio.html`
+  antes de creer un resultado; en caso de duda, otro puerto y otro `-data`. Medido contra el impostor
+  de verdad (su
   `studio-BkPzSsCw.js` no lleva `.studio-root` por dentro), la puerta ya no suelta un traceback sino
   su propio contrato, `exit 1` con
   `- the studio shell never mounted: .studio-root [data-region='top'] is absent`: un verde sobre ese
