@@ -147,7 +147,9 @@ corte en los cuatro anchos.
   `call-smoke.py`, …), que en el Makefile no tienen target propio, así que en local era un puerto con
   papeletas de estar ocupado por otro. El número sigue siendo una convención, no un candado —lo que
   impide medir sobre un impostor es el control de `uptime` del script, ver «El puerto» más abajo—; CI
-  se queda con el 18443 porque su job arranca ahí mismo su propio binario.
+  se queda con el 18443 porque su job arranca ahí mismo su propio binario, pero eso no implica que
+  llegue pronto: el job tardó 234 s en alcanzar la puerta y rebasó los 120 s del control, así que su
+  paso lleva `--allow-stale` y el motivo escrito junto a la línea.
 
 ## Ruta local
 
