@@ -1,0 +1,23 @@
+# El contexto de `docker build` se envía entero al daemon, y este árbol lleva dentro
+# cosas que no son código del producto: `.git`, worktrees locales (cada uno con su
+# propio `web/` y su propio node_modules) y los entornos virtuales usados por las
+# puertas. Peor que lento: `Dockerfile:12` hace `COPY ui ./ui` justo después del
+# `npm ci` alpino de `Dockerfile:10`, así que un `ui/node_modules` del host —binarios
+# nativos de Windows o de WSL— sustituye la instalación de la imagen y el build pasa a
+# depender de lo que hubiera en el disco de quien lo lanza.
+.git
+.github
+.worktrees
+.superpowers
+# En Docker los patrones sin `**` solo casan en la raíz del contexto: `ui/node_modules`
+# sobreviviría a un `node_modules` a secas.
+**/node_modules
+ui/dist
+web/.vite
+# Lo genera `node scripts/build-ui.mjs` dentro de la etapa `ui`; si viaja desde el host,
+# la etapa mediría una lista de assets que no corresponde a su propio build.
+web/js/sw-assets.json
+dist
+*.log
+.dockerignore
+Dockerfile
