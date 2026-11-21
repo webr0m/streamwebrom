@@ -132,6 +132,46 @@ func (w testWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// Guaranting an array of strings is not guaranteeing it resolves: web/sw.js turns
+// every injected element into ASSET_PREFIX + "/" + p and hands the whole list to
+// cache.addAll, which rejects on a single non-2xx and aborts the install — offline
+// dead for everyone. So each path the served worker advertises must really be
+// served, and a manifest that lists something outside js/ and css/ (here
+// img/x.png, which scripts/build-ui.mjs would never have published) must have it
+// dropped rather than precached.
+func TestEveryInjectedShellAssetIsServed(t *testing.T) {
+	files := fstest.MapFS{
+		"studio.html":             {Data: []byte(`<!doctype html><html><body></body></html>`)},
+		"js/studio-abc12345.js":   {Data: []byte(`export const shell = 1;`)},
+		"css/studio-abc12345.css": {Data: []byte(`body{color:red}`)},
+		"img/x.png":               {Data: []byte("not a real png")},
+		"js/sw-assets.json":       {Data: []byte(`["css/studio-abc12345.css","img/x.png","js/studio-abc12345.js"]`)},
+		"sw.js":                   {Data: []byte(`const SHELL_ASSETS = __SWR_SHELL__;`)},
+	}
+	s := New(config.Default(), nil, files, slog.Default())
+	handler := s.Handler()
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sw.js?build=current", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("sw.js: %d", w.Code)
+	}
+	injected := strings.TrimSuffix(strings.TrimPrefix(w.Body.String(), "const SHELL_ASSETS = "), ";")
+	var list []string
+	if err := json.Unmarshal([]byte(injected), &list); err != nil {
+		t.Fatalf("injected %q is not a JSON array of paths: %v", injected, err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("only js/ and css/ may reach the precache, got %v", list)
+	}
+	for _, file := range list {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, s.assetPrefix+"/"+file, nil))
+		if w.Code != http.StatusOK {
+			t.Errorf("%s%s: %d — cache.addAll would abort the install", s.assetPrefix, "/"+file, w.Code)
+		}
+	}
+}
+
 func TestShellUpdateBypassesCachedModuleGraph(t *testing.T) {
 	files := fstest.MapFS{
 		"diagnostics.html":  {Data: []byte(`<script type="module" src="/js/diagnostics.js"></script><link href="/css/app.css">`)},
