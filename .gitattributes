@@ -1,0 +1,17 @@
+# Line endings. The repository stores LF; without this file core.autocrlf smudged
+# Windows checkouts to CRLF and those bytes reached the browser. Measured 2026-11-21
+# on the merged main: a CRLF working copy changes the Vite content hashes
+# (studio-Bz8EI3R_.js -> studio-B_D0mWBr.js, mount-next 375.93 kB -> 375.94 kB),
+# rewrites the tracked web/studio.html, and tests/studio-page-drift.test.mjs already
+# refuses a CRLF ui/studio.html for that same reason.
+* text=auto eol=lf
+
+# The PowerShell build scripts (scripts/build.ps1, scripts/build-android.ps1) stay in
+# this rule: measured 2026-11-21 with `powershell.exe -NoProfile -File` on an LF-only
+# script, which ran and parsed its blocks normally, so they need no CRLF exception.
+
+# Byte-exact assets: no EOL logic may ever touch these.
+*.png binary
+*.ico binary
+*.tflite binary
+*.wasm binary
