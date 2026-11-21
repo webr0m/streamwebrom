@@ -1,6 +1,6 @@
 # Cambios
 
-## Sin publicar
+## v1.13.0 — El Studio estrena shell React detrás de `?ui=next`
 
 - El Studio estrena shell React + Vite con la paleta Control Room Pro, disponible detrás de `?ui=next`; la interfaz actual sigue siendo la predeterminada.
 - Nueva prueba bloqueante `scripts/overflow-smoke.py`: el Studio no puede recortar texto, crear scroll ni dejar controles sin nombre en 1440, 1120, 820 y 390 px, con los paneles plegados y sin plegar.
