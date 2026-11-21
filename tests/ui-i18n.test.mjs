@@ -34,9 +34,10 @@ const KEY = /(?:^|[^A-Za-z0-9_])(?:t|tr)\(\s*["'`]([^"'`\s]+)["'`]/g;
 // Un `aria-label` con texto literal es tan duro de traducir como un hijo de texto, y el borrador no
 // lo miraba: medido, el único literal que hay en todo el shell vive justo ahí (StudioDialog.jsx:33).
 // Con llaves es igual de literal: `aria-label={'Cerrar'}` no se traduce mejor que `="Cerrar"`, y era
-// la forma que el escáner no veía. Las expresiones de verdad (`{label}`, `{t("x")}`, `{a ? "x" : "y"}`)
-// siguen fuera, y así queda registrado: 24 atributos medidos en ui/src, los 24 con llaves son
-// expresiones, ninguno es una cadena entre llaves.
+// la forma que el escáner no veía. Las expresiones de verdad siguen fuera, y así queda registrado
+// (sonda 11): `{cond ? "Uno" : "Dos"}` NO se reporta. Medido en ui/src: 25 atributos de rótulo en 24
+// líneas (`IconButton.jsx:8` lleva `aria-label` y `title` en la misma), y los 25 van entre llaves con
+// una expresión (`{label}`, `{t("x")}`, `` {`${a} (${b})`} ``) — ninguno es una cadena entre llaves.
 const LABEL = /\s(?:aria-label|title|placeholder|alt)\s*=\s*(?:"([^"\n]+)"|'([^'\n]+)'|`([^`\n]+)`|\{\s*"([^"\n]+)"\s*\}|\{\s*'([^'\n]+)'\s*\})/g;
 const TEXT = />([<>]?[A-ZÁÉÍÓÚÑa-záéíóúñ][^<>{}]{2,60})</g;
 
