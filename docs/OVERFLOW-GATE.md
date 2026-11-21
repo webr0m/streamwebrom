@@ -154,11 +154,11 @@ corte en los cuatro anchos.
 El propietario construye y sirve en WSL pero no tiene `playwright` ahí, y `playwright==1.64.0` pide
 `chromium-1248` mientras su caché guarda `chromium-1255`: la ruta WSL obligaría a descargar un
 navegador (~170 MB). La ruta verificada y de descarga cero es el Chrome instalado conduciendo contra
-el binario de este worktree:
+el binario construido desde el checkout principal:
 
 ```bash
 node scripts/build-ui.mjs
-wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && \
+wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && \
   go build -o /tmp/swr-overflow-bin ./cmd/streamwebrom && \
   (nohup /tmp/swr-overflow-bin -addr 127.0.0.1:18497 -stun= -data /tmp/swr-overflow-data >/tmp/swr-overflow-run.log 2>&1 & \
    sleep 3; curl -fsS http://localhost:18497/api/health; \

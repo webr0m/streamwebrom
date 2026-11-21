@@ -3389,8 +3389,11 @@ vez.
 Run: `node --test tests/*.test.mjs`
 Expected: 83 PASS. Aquí se comprueban las claves nuevas: `tests/ui-i18n*.test.mjs` y el gate de artefactos exigen que todo idioma tenga las mismas claves y que ningún `.jsx` declare textos propios.
 
-Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && go test -count=1 ./internal/server/"`
-Expected: `ok` — el HTML generado sigue conteniendo los contenedores legacy. El `cd` va a la **worktree**, no al repositorio principal: en `/mnt/d/Descargas/streamwebrom` no existe ninguna de las tareas de este plan y el test diría `ok` sobre el árbol equivocado.
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
+Expected: `ok` — el HTML generado sigue conteniendo los contenedores legacy. El `cd` va a la raíz del
+repositorio porque este plan ya se fusionó en `main` (2026-11-21); durante la ejecución el `cd` apuntaba
+a la **worktree** `.worktrees/react-studio-ui`, y apuntar allí hoy sería un error de ruta: el árbol
+equivocado ya no existe.
 
 - [ ] **Step 6: Comprobar el arranque y commit**
 
@@ -3956,9 +3959,10 @@ Run: `node --check web/js/studio.js`
 Expected: sin salida —ninguna lógica del motor fue tocada—. Va en Windows porque el WSL del
 propietario no tiene `node` en PATH.
 
-Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && go test -count=1 ./internal/server/"`
-Expected: `ok` del paquete `internal/server`. El `cd` va al worktree: la ruta del repo principal
-comprobaría y testearía un árbol que esta rama no está cambiando.
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
+Expected: `ok` del paquete `internal/server`. El `cd` va a la raíz del repositorio: tras el merge local
+del plan en `main` (2026-11-21) esa es la copia que contiene la rama, y durante la ejecución el comando
+usaba `.worktrees/react-studio-ui`.
 
 `web/studio.html` sale regenerado con los hashes nuevos y ES de la rama (R32): se commitea, no se
 descarta. Los chunks con hash siguen ignorados.
@@ -4356,7 +4360,7 @@ git commit -m "feat(ui): add toast queue and per-domain error reporting"
   las barras laterales: abiertas, solo rail, solo panel, y las dos. Dieciséis combinaciones.
 
 **Pre-vuelo medido** (2026-11-20, Chrome del sistema conducido por Playwright 1.64.0 contra el
-binario de este worktree. Esta tarea existía para encontrar defectos de maqueta que jsdom no puede
+binario del worktree de ejecución. Esta tarea existía para encontrar defectos de maqueta que jsdom no puede
 ver; los encontró antes de existir el gate, y cambia el alcance: no es solo escribir la puerta, es
 arreglar lo que la puerta denuncia. Las cifras de abajo son de la puerta ya escrita, ejecutada con
 las reglas del Step 1 desactivadas sobre el mismo binario).
@@ -4806,7 +4810,7 @@ binario y cambiar `layout.css` exige reconstruir las dos cosas:
 
 ```bash
 node scripts/build-ui.mjs
-wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && \
+wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && \
   go build -o /tmp/swr-overflow-bin ./cmd/streamwebrom && \
   (nohup /tmp/swr-overflow-bin -addr 127.0.0.1:18497 -stun= -data /tmp/swr-overflow-data >/tmp/swr-overflow-run.log 2>&1 &); \
   sleep 3; curl -s http://localhost:18497/api/health; \
@@ -5348,7 +5352,8 @@ Telegram`. Se crea la sección entre `# Cambios` y esa versión:
 
 - [ ] **Step 5: Verificación final del plan y commit**
 
-Run: la secuencia de puertas completa del plan (Task 12), desde la raíz del **worktree**:
+Run: la secuencia de puertas completa del plan (Task 12), desde la raíz del repositorio (durante la
+ejecución, desde la raíz del worktree; hoy `main` ya contiene el plan):
 
 ```bash
 npm -C ui test
@@ -5364,10 +5369,11 @@ nuevos; `--check` sin salida. **`make test` no es una de las puertas de este pla
 arranca (R7). Queda aparcado como Minor para la revisión final; la corrección del Makefile toca
 infraestructura compartida y no es de este task.
 
-Go sigue sin estar en Windows, así que la parte de Go se comprueba en WSL **sobre el worktree**, no
-sobre `/mnt/d/Descargas/streamwebrom` (la raíz principal no tiene esta rama):
+Go sigue sin estar en Windows, así que la parte de Go se comprueba en WSL **sobre el árbol que contiene
+la rama**: durante la ejecución era `.worktrees/react-studio-ui`, y tras el merge local es
+`/mnt/d/Descargas/streamwebrom` — que es la ruta que llevan ya los comandos de abajo:
 
-Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && go test -count=1 ./internal/server/"`
+Run: `wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go test -count=1 ./internal/server/"`
 Expected: `ok` — el único cambio visible desde Go es el texto de `docs/` y `CHANGELOG.md`.
 
 Los humos de interfaz no pueden correr contra el puerto 18443: es un servidor ajeno y de larga vida
@@ -5375,7 +5381,7 @@ que sirve un `studio-<hash>.js` sin `.studio-root` (medido en la Task 12), y un 
 Levantar uno propio y comprobar hash y `uptime` antes de fiarse:
 
 ```bash
-wsl bash -lc "cd /mnt/d/Descargas/streamwebrom/.worktrees/react-studio-ui && \
+wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && \
   go build -o /tmp/swr-task13-bin ./cmd/streamwebrom && \
   (nohup /tmp/swr-task13-bin -addr 127.0.0.1:18499 -stun= -data /tmp/swr-task13-data >/tmp/swr-task13-run.log 2>&1 & \
    sleep 3; curl -fsS http://localhost:18499/api/health; \
