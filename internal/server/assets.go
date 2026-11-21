@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"path"
@@ -36,6 +38,61 @@ func shellPrefix(files fs.FS) string {
 	return "/assets/" + hex.EncodeToString(h.Sum(nil)[:12])
 }
 
+// The Vite build publishes the hashed bundle list; the offline shell must
+// precache exactly those URLs, never a hand-maintained one. The file is raw
+// output of a build tool, so it is only trusted once it parses as []string and
+// is re-marshalled from there: splicing bytes that are not an array of paths
+// makes SHELL_ASSETS.map throw at worker top level (web/sw.js), which aborts
+// registration and breaks offline for every user. Anything unusable degrades to
+// the empty list — the classic shell still precaches — and says so in the log.
+//
+// Each surviving element is then kept only when it starts with "js/" or "css/".
+// That is the same shape scripts/build-ui.mjs filters the manifest with, and the
+// two halves have to agree because this program produces the file: web/sw.js
+// resolves every entry as ASSET_PREFIX + "/" + p, and the /assets/ handler rejects
+// anything else, so one stray "img/x.png" would make install's cache.addAll reject
+// and take offline down for everyone. A wrong shape is therefore a build error,
+// not a preference, so it is dropped rather than served.
+func (s *Server) shellAssets() []byte {
+	data, err := fs.ReadFile(s.static, "js/sw-assets.json")
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			s.log.Warn("shell asset list unreadable, precaching none", "err", err)
+		}
+		return []byte("[]")
+	}
+	var assets []string
+	if err := json.Unmarshal(bytes.TrimSpace(data), &assets); err != nil || len(assets) == 0 {
+		if err == nil {
+			err = errors.New("empty asset list")
+		}
+		s.log.Warn("shell asset list invalid, precaching none", "err", err)
+		return []byte("[]")
+	}
+	// A fresh slice, never `assets[:0]`: the worker's cache.addAll rejects on the
+	// first bad URL and that list is this function's only consumer, so an element
+	// left behind in the source array would keep poisoning offline.
+	kept := make([]string, 0, len(assets))
+	for _, asset := range assets {
+		if strings.HasPrefix(asset, "js/") || strings.HasPrefix(asset, "css/") {
+			kept = append(kept, asset)
+		}
+	}
+	if len(kept) != len(assets) {
+		s.log.Warn("shell asset list holds paths the server does not serve, dropping them",
+			"dropped", len(assets)-len(kept), "kept", len(kept))
+	}
+	if len(kept) == 0 {
+		return []byte("[]")
+	}
+	out, err := json.Marshal(kept)
+	if err != nil {
+		s.log.Warn("shell asset list unencodable, precaching none", "err", err)
+		return []byte("[]")
+	}
+	return out
+}
+
 func noShellCache(w http.ResponseWriter) {
 	for _, header := range []string{"Cache-Control", "CDN-Cache-Control", "Cloudflare-CDN-Cache-Control"} {
 		w.Header().Set(header, "no-store")
@@ -55,6 +112,7 @@ func (s *Server) serveShell(w http.ResponseWriter, r *http.Request, name string,
 	case ".js":
 		if name == "sw.js" {
 			data = bytes.ReplaceAll(data, []byte("__SWR_ASSET_PREFIX__"), []byte(s.assetPrefix))
+			data = bytes.ReplaceAll(data, []byte("__SWR_SHELL__"), s.shellAssets())
 		}
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	case ".css":

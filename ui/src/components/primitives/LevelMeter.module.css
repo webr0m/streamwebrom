@@ -1,0 +1,25 @@
+/* ui/src/components/primitives/LevelMeter.module.css */
+.meter {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  inline-size: 100%;
+  max-inline-size: 96px;
+  block-size: 4px;
+  border-radius: var(--swr-r-pill);
+  background: var(--swr-bg-raise);
+  box-shadow: inset 0 0 0 1px var(--swr-line);
+  overflow: hidden;
+}
+.fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--level, 0%);
+  background: linear-gradient(90deg, var(--swr-ok), var(--swr-warn) 78%, var(--swr-err));
+  transition: inline-size var(--swr-fast) linear;
+}
+[data-reduced="true"] .fill { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .fill { transition: none; }
+}

@@ -1,0 +1,11 @@
+/* ui/src/styles/motion.css */
+.swr-live-dot {
+  animation: swr-pulse 2s var(--swr-ease) infinite;
+}
+@keyframes swr-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 82, 0.55); }
+  60% { box-shadow: 0 0 0 8px rgba(255, 59, 82, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .swr-live-dot { animation: none; }
+}

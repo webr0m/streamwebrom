@@ -1,9 +1,25 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.26-alpine AS build
+FROM node:24-alpine AS ui
+# Repo-shaped layout: scripts/build-ui.mjs derives the repo root from its own
+# location, so web/ must be a sibling of scripts/, not a subdirectory of ui/.
+WORKDIR /src
+COPY ui/package.json ui/package-lock.json ./ui/
+# npm ci reads package.json/package-lock.json from the current directory, so the
+# install runs inside ui/ (same cwd form scripts/build-ui.mjs uses).
+WORKDIR /src/ui
+RUN npm ci --no-audit --no-fund
+WORKDIR /src
+COPY ui ./ui
+COPY web ./web
+COPY scripts ./scripts
+RUN node scripts/build-ui.mjs
+
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=ui /src/web web
 ARG VERSION=docker
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /streamwebrom ./cmd/streamwebrom
 

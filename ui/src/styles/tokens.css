@@ -1,0 +1,63 @@
+/* ui/src/styles/tokens.css */
+:root {
+  color-scheme: dark;
+  --swr-bg-deep: #05070d;
+  --swr-bg-raise: #0b1020;
+  --swr-bg-panel: #0e1526;
+  --swr-bg-glass: rgba(14, 21, 38, 0.72);
+  --swr-line: rgba(124, 92, 255, 0.16);
+  --swr-line-strong: rgba(124, 92, 255, 0.38);
+  --swr-text: #e8ecf8;
+  --swr-text-dim: #a6b0c8;
+  --swr-text-faint: #6f7a94;
+  --swr-brand: #7c5cff;
+  --swr-brand-soft: rgba(124, 92, 255, 0.18);
+  --swr-brand-deep: #4f2fd6;
+  --swr-on-brand: #ffffff;
+  --swr-ok: #34d399;
+  --swr-warn: #fbbf24;
+  --swr-err: #fb7185;
+  --swr-live: #ff3b52;
+
+  --swr-font-ui: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --swr-font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+  --swr-text-2xs: clamp(0.66rem, 0.62rem + 0.2vw, 0.74rem);
+  --swr-text-xs: clamp(0.74rem, 0.7rem + 0.25vw, 0.84rem);
+  --swr-text-sm: clamp(0.82rem, 0.78rem + 0.3vw, 0.92rem);
+  --swr-text-md: clamp(0.94rem, 0.9rem + 0.35vw, 1.06rem);
+  --swr-text-lg: clamp(1.08rem, 1rem + 0.5vw, 1.3rem);
+  --swr-text-xl: clamp(1.3rem, 1.15rem + 0.9vw, 1.8rem);
+
+  --swr-sp-1: 4px; --swr-sp-2: 8px; --swr-sp-3: 12px;
+  --swr-sp-4: 16px; --swr-sp-5: 24px; --swr-sp-6: 32px;
+
+  --swr-r-sm: 6px; --swr-r-md: 10px; --swr-r-pill: 999px;
+  --swr-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --swr-shadow-2: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --swr-blur: 14px;
+
+  --swr-fast: 120ms; --swr-base: 160ms; --swr-slow: 220ms;
+  --swr-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  --swr-z-stage: 1; --swr-z-panel: 2; --swr-z-dock: 3;
+  --swr-z-dialog: 4; --swr-z-toast: 5;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --swr-bg-deep: #eef1f8;
+  --swr-bg-raise: #f7f9ff;
+  --swr-bg-panel: #ffffff;
+  --swr-bg-glass: rgba(255, 255, 255, 0.8);
+  --swr-line: rgba(93, 66, 214, 0.18);
+  --swr-line-strong: rgba(93, 66, 214, 0.42);
+  --swr-text: #131a2b;
+  --swr-text-dim: #43506b;
+  --swr-text-faint: #6b7791;
+  --swr-brand: #5d42d6;
+  --swr-brand-soft: rgba(93, 66, 214, 0.14);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --swr-fast: 0ms; --swr-base: 0ms; --swr-slow: 0ms; }
+}

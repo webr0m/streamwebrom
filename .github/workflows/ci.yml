@@ -21,23 +21,36 @@ jobs:
       - name: ffmpeg (linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      # El bundle va antes que `go test` y en los tres sistemas. `web/js/sw-assets.json` está
+      # gitignorado, así que en un checkout limpio no existe: sin este paso
+      # `TestServedServiceWorkerPrecachesTheBuiltBundle` (internal/server/assets_test.go) se salta
+      # en macOS y Windows y el job quedaba verde sin haber embebido nunca nada que precachar.
+      # `scripts/build-ui.mjs` se instala sus propias dependencias (`npm ci` cuando falta
+      # `ui/node_modules`), así que no hace falta un paso de npm que condicionar. Node 24: es la
+      # versión con la que se mide esta rama en local y la que ya usa el job `browser`; 22 no se
+      # había ejecutado nunca fuera de Linux.
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - name: build the React studio shell
+        run: node scripts/build-ui.mjs
       - run: go vet ./...
       - run: go test -count=1 ./...
       - name: race detector
         if: runner.os == 'Linux'
         run: go test -race -count=1 ./...
-      - uses: actions/setup-node@v4
-        if: runner.os == 'Linux'
-        with: { node-version: 22 }
+      - name: ui bundle tests
+        run: npm -C ui test
       - name: check JS syntax
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows' # bucle de shell: `cp` y `/tmp` no son comandos de PowerShell
         run: for f in web/js/*.js; do cp $f /tmp/$(basename $f).mjs; node --check /tmp/$(basename $f).mjs; done
       - name: static check JS (undeclared identifiers, bad imports)
         if: runner.os == 'Linux'
         run: pip install esprima && python3 scripts/jslint.py web/js
       - name: signalling and storage regression tests
-        if: runner.os == 'Linux'
         run: node --test tests/*.test.mjs
+      - name: overflow gate documentation exists
+        if: runner.os != 'Windows' # `test -s` tampoco existe en PowerShell
+        run: test -s docs/OVERFLOW-GATE.md
       - name: known reachable vulnerabilities
         if: runner.os == 'Linux'
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
@@ -72,6 +85,9 @@ jobs:
         with: { go-version: '1.27.x' }
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: node scripts/build-ui.mjs
       - run: pip install playwright==1.64.0 Pillow==13.0.0
       - name: select existing Chromium for critical media tests
         run: |
@@ -100,6 +116,8 @@ jobs:
       - run: python scripts/framing-smoke.py --url http://localhost:18443
       - run: python scripts/screen-share-smoke.py --url http://localhost:18443
       - run: python scripts/interface-smoke.py --url http://localhost:18443
+      - name: overflow gate (the studio must never clip)
+        run: python scripts/overflow-smoke.py --url http://localhost:18443
       - run: python scripts/studio-smoke.py --url http://localhost:18443
       - run: python scripts/relay-vdo-smoke.py --url http://localhost:18443
       - run: python scripts/effects-smoke.py --url http://localhost:18443

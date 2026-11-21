@@ -1,0 +1,6 @@
+/* ui/src/components/primitives/Field.module.css */
+.field { display: flex; flex-direction: column; gap: var(--swr-sp-1); min-width: 0; }
+.label { color: var(--swr-text-dim); font-size: var(--swr-text-xs); letter-spacing: 0.03em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.control { min-width: 0; }
+.error { color: var(--swr-err); font-size: var(--swr-text-xs); overflow-wrap: anywhere; }
+.help { color: var(--swr-text-faint); font-size: var(--swr-text-2xs); overflow-wrap: anywhere; }

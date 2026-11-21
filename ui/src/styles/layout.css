@@ -1,0 +1,90 @@
+/* ui/src/styles/layout.css */
+/* Balanced density: rail 216px, stage absorbs the rest, panel 340px. */
+.swr-shell {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr) 340px;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "top  top   top"
+    "rail stage panel"
+    "rail tray  panel"
+    "dock dock  dock";
+  gap: var(--swr-sp-2);
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 0;
+  padding: var(--swr-sp-2);
+  background: radial-gradient(120% 120% at 12% 0%, var(--swr-bg-raise), var(--swr-bg-deep) 62%);
+  color: var(--swr-text);
+  font-family: var(--swr-font-ui);
+  font-size: var(--swr-text-sm);
+  overflow: hidden;
+}
+.swr-shell > * { min-width: 0; min-height: 0; }
+[data-region="top"] { grid-area: top; }
+[data-region="rail"] { grid-area: rail; }
+[data-region="stage"] { grid-area: stage; }
+[data-region="tray"] { grid-area: tray; }
+[data-region="dock"] { grid-area: dock; }
+[data-region="panel"] { grid-area: panel; background: var(--swr-bg-glass); backdrop-filter: blur(var(--swr-blur)); border: 1px solid var(--swr-line); border-radius: var(--swr-r-md); }
+
+.scenes-collapsed .swr-shell { grid-template-columns: 48px minmax(0, 1fr) 340px; }
+.panel-collapsed .swr-shell { grid-template-columns: 216px minmax(0, 1fr) 52px; }
+.scenes-collapsed.panel-collapsed .swr-shell { grid-template-columns: 48px minmax(0, 1fr) 52px; }
+
+@media (max-width: 1120px) {
+  .swr-shell,
+  .scenes-collapsed .swr-shell { grid-template-columns: 168px minmax(0, 1fr) 300px; }
+}
+
+/* Tercera causa, medida solo por la barrida de estados de la puerta: la lista de selectores del
+   bloque dejaba fuera `.scenes-collapsed.panel-collapsed .swr-shell` (0,3,0), que sigue vigente por
+   encima de 820px. Al colapsar las dos barras en un móvil, las áreas pasaban a ser una columna pero
+   las columnas se quedaban en `48px 688px 52px`: las cinco regiones medían 48px de ancho —la barra
+   superior, 237px de contenido en 48— y el panel, `0x0`. Se añade el selector combinado; las
+   demás combinaciones ya estaban cubiertas. */
+@media (max-width: 820px) {
+  .swr-shell,
+  .scenes-collapsed .swr-shell,
+  .panel-collapsed .swr-shell,
+  .scenes-collapsed.panel-collapsed .swr-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "top" "rail" "stage" "tray" "dock";
+    overflow: auto;
+  }
+  [data-region="panel"] { position: fixed; inset: auto 0 0 0; max-block-size: 62vh; z-index: var(--swr-z-panel); border-radius: var(--swr-r-md) var(--swr-r-md) 0 0; }
+  .panel-collapsed [data-region="panel"] { display: none; }
+}
+
+/* El contenedor de montaje conserva la clase legacy `.studio` (`web/studio.html:12`), y
+   `web/css/app.css` le da rejilla de 3 columnas (108), `height: auto` bajo 1001px (284) y
+   `100dvh` sobre ese ancho (534). Sin desmontar eso, el shell entero se alojaba en la celda `top`
+   de 68px: a 1440 las regiones medían 9-17px y nueve elementos desbordaban; a 820 y 390 el
+   documento crecía a 1662 y 2814px. Se re-pina SOLO el modo next — el legacy sigue leyendo
+   app.css intacto, que es la Enmienda A1 — y se ancla al `data-ui-mode` que ya pone `mountNext()`. */
+#studioRoot[data-ui-mode="next"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "root";
+  height: 100dvh;
+  min-height: 0;
+}
+
+/* Segundo desmontaje, medido tras el primero: anulada la rejilla legacy, la celda `stage` sigue
+   desbordando en ALTO — 661px de contenido en 626px a 1440x900, 561/526 a 1120x800, 535/500 a
+   820x900 y 139/106 a 390x640 — y la puerta lo denuncia en los cuatro anchos. El culpable es
+   `ui/src/components/StudioShell.module.css:3`, que pone `min-height: 0` a todo hijo del shell:
+   con ese suelo, el alto de la celda queda a merced del contenido y `.canvas`
+   (`ProgramStage.module.css:3`) mide `var(--stage-height)`, o sea el alto COMPLETO de su propio
+   contenedor, mientras `useStageHeight.js` observa `[data-region="stage-inner"]` sin descontar el
+   hueco de 8px ni las dos líneas de LayoutBar (27px). Basta con `.swr-shell > [data-region="stage"]`
+   (0,2,0): gana por especificidad a las dos reglas suelo, el `.swr-shell > *` de arriba y el
+   `.slot` del módulo, ambas (0,1,0), así que no hace falta `!important` ni depender del orden de
+   hoja. El prefijo `#studioRoot[data-ui-mode="next"]` (1,2,0) se mantiene por otra razón: ancla la
+   regla SOLO al modo next, igual que el desmontaje de arriba, para que nada de esto alcance a una
+   página legacy. El `calc` solo se aplica al slot de escenario:
+   las demás regiones ya caben, y tocarlas movería altores que Task 10 ancló en sus tests. */
+#studioRoot[data-ui-mode="next"] .swr-shell > [data-region="stage"] { min-block-size: 100%; }
+#studioRoot[data-ui-mode="next"] .swr-shell > [data-region="stage"] > [data-region="stage-inner"] { block-size: calc(100% - var(--swr-sp-2)); min-block-size: 0; }

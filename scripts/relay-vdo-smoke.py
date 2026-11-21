@@ -79,8 +79,8 @@ with sync_playwright() as pw:
     page.wait_for_function('()=>__pcs.some(pc=>pc.getSenders().some(s=>s.track?.kind==="video"&&s.getParameters().encodings?.[0]?.maxFramerate===30))')
     page.locator('#closeRelayDialog').click()
     # Additional publications let us verify actual OBS subscriptions, not CSS.
-    page.evaluate('''async key=>{
-      const url=document.querySelector('script[src$="/js/studio.js"]').src.replace('studio.js','rtc.js');const m=await import(url);
+    page.evaluate(r'''async key=>{
+      const tag=[...document.querySelectorAll('script[type="module"][src]')].find(s=>/(^|\/)js\/studio-[^/]+\.js$/.test(new URL(s.src,location.href).pathname));const url=tag?location.origin+new URL(tag.src,location.href).pathname.replace(/studio-[^/]+\.js$/,'rtc.js'):new URL('/js/rtc.js',location.origin).href;const m=await import(url);
       const sig=new m.Signal();await sig.connect({type:'join',room:new URL(location.href).searchParams.get('room'),role:'host',key});
       const c=document.createElement('canvas');c.width=320;c.height=180;const x=c.getContext('2d');let f=0;
       const timer=setInterval(()=>{x.fillStyle=`hsl(${f++%360} 70% 50%)`;x.fillRect(0,0,320,180)},100);

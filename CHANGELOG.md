@@ -1,5 +1,13 @@
 # Cambios
 
+## Sin publicar
+
+- El Studio estrena shell React + Vite con la paleta Control Room Pro, disponible detrás de `?ui=next`; la interfaz actual sigue siendo la predeterminada.
+- Nueva prueba bloqueante `scripts/overflow-smoke.py`: el Studio no puede recortar texto, crear scroll ni dejar controles sin nombre en 1440, 1120, 820 y 390 px, con los paneles plegados y sin plegar.
+- Dos controles más en `node --test`: las cadenas del shell nuevo no pueden estar escritas a mano y cada página que el service worker guarda para el offline tiene que ser una ruta que el servidor atienda.
+- El offline cubre ahora la entrada de invitados `/join` y los dos iconos instalables que promete el manifiesto; cada compilación del Studio borra además los paquetes con hash que ya no usa, de modo que el binario no arrastra código viejo.
+- Coste medido del interruptor `?ui` en la interfaz de siempre: 1 469 B de `js/studio-Bz8EI3R_.js`, 1 428 B de `js/mode-Dd6tgKmO.js` y 2 045 B de `css/studio-xloB953p.css` (hoja bloqueante) para decidir el modo y volver atrás —`js/boot-legacy-DfVoOUG2.js` son 156 B—. El bloque de React, 375 933 B de `js/mount-next-BsqyMY0A.js` con 15 771 B de `css/mount-next-0XHIzscc.css`, solo se pide en `?ui=next`: quien no entra no lo paga.
+
 ## v1.12.1 — Emisión a Telegram
 
 - Telegram está disponible en Destinos. Inicia una transmisión con una aplicación externa en tu canal, copia la URL y la clave de Telegram al estudio y pulsa «Transmitir». El programa del estudio se envía por RTMP o RTMPS y la audiencia lo recibe en el canal.

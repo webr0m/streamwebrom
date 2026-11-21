@@ -1,0 +1,17 @@
+/* ui/src/components/primitives/StudioDialog.module.css */
+.dialog {
+  inline-size: min(560px, calc(100vw - 2 * var(--swr-sp-4)));
+  max-block-size: calc(100vh - 2 * var(--swr-sp-4));
+  padding: 0;
+  border: 1px solid var(--swr-line-strong);
+  border-radius: var(--swr-r-md);
+  background: var(--swr-bg-panel);
+  color: var(--swr-text);
+  box-shadow: var(--swr-shadow-2);
+}
+.dialog::backdrop { background: color-mix(in srgb, var(--swr-bg-deep) 70%, transparent); backdrop-filter: blur(3px); }
+.header { display: flex; align-items: center; gap: var(--swr-sp-2); padding: var(--swr-sp-3) var(--swr-sp-4); border-bottom: 1px solid var(--swr-line); }
+.title { flex: 1 1 auto; min-width: 0; margin: 0; font-size: var(--swr-text-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.close { flex: 0 0 auto; border: 0; background: transparent; color: var(--swr-text-dim); font-size: var(--swr-text-md); cursor: pointer; }
+.body { padding: var(--swr-sp-4); overflow: auto; overscroll-behavior: contain; }
+.footer { display: flex; justify-content: flex-end; gap: var(--swr-sp-2); padding: var(--swr-sp-3) var(--swr-sp-4); border-top: 1px solid var(--swr-line); }

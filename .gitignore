@@ -24,3 +24,10 @@ __pycache__/
 
 # isolated workspaces for feature branches
 .worktrees/
+ui/node_modules/
+web/.vite/
+# Vite versiona cada chunk con un hash de 8 caracteres; los módulos escritos a
+# mano en web/js nunca llevan ese sufijo, así que el patrón solo caza artefactos.
+web/js/*-????????.js
+web/css/*-????????.css
+web/js/sw-assets.json

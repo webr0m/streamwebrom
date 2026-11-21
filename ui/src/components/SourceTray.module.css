@@ -1,0 +1,12 @@
+/* ui/src/components/SourceTray.module.css */
+.tray { display: flex; flex-direction: column; gap: var(--swr-sp-2); min-width: 0; }
+.heading { margin: 0; font-size: var(--swr-text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--swr-text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: var(--swr-sp-2); margin: 0; padding: 0; list-style: none; min-width: 0; max-block-size: 34vh; overflow: auto; }
+.card { display: flex; flex-direction: column; gap: var(--swr-sp-1); min-width: 0; padding: var(--swr-sp-2); border: 1px solid var(--swr-line); border-radius: var(--swr-r-md); background: linear-gradient(180deg, var(--swr-bg-panel), var(--swr-bg-raise)); }
+.card.pending { border-color: var(--swr-warn); }
+.card.error { border-color: var(--swr-err); }
+.head { display: flex; align-items: center; gap: var(--swr-sp-1); min-width: 0; }
+.name { min-width: 0; font-size: var(--swr-text-sm); }
+.meter { display: flex; align-items: center; gap: var(--swr-sp-1); min-width: 0; }
+.error { min-width: 0; color: var(--swr-err); font-size: var(--swr-text-2xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.controls { display: flex; align-items: center; gap: var(--swr-sp-1); min-width: 0; }
