@@ -5051,6 +5051,24 @@ borrador; quien ejecute el task no debe volver a deducirlas:
    nombra `web/js/compositor.js`. Lo monta `ui/src/components/ProgramStage.jsx:14` como
    `<canvas id="program">` vestido por `styles.canvas`, y en modo `next` el fixture no pinta nada ahí.
 
+**Pre-vuelo de la ronda de corrección 1 (medido sobre `199d04d`, sustituye lo que el borrador daba
+por supuesto):**
+
+8. El scrapeo de la tabla de rutas con el regex embarcado lee **7 pares** (`/ -> /index.html`,
+   `/studio`, `/guest`, `/view`, `/join`, `/diagnostics`, `/vdo`): el suelo `routes.size >= 7` está
+   justo en la cota, y salta con 0. El breve pedía clases POSIX `[[:space:]]` dentro del regex:
+   JavaScript no las soporta, y dentro de una clase negada eso es un conjunto literal que excluye
+   `/`, `a`, `c`, `i`… Medido: **0 pares** leídos y el suelo disparado — un rojo que parecía decir
+   «Go ha cambiado» y lo que decía era «el test está roto». Con `\s` la idea es la misma (una URL no
+   lleva espacios) y casa los 7.
+9. El escáner de rótulos ensanchado (comilla simple, backtick y cadena entre llaves) ve **25
+   atributos de rótulo en 24 líneas** de `ui/src` (`IconButton.jsx:8` lleva `aria-label` y `title` en
+   la misma) y los 25 van entre llaves con una expresión — `{label}`, `{t("x")}`,
+   `` {`${a} (${b})`} ``. Ninguno es una cadena literal entre llaves, así que el ensanchamiento no
+   añade offenders: sigue habiendo exactamente el de `StudioDialog.jsx:33`. Su contrapartida medida
+   con la sonda 11: `{cond ? "Uno" : "Dos"}` sigue sin verse, y queda en el comentario del `LABEL`
+   para que nadie lo confunda con un escáner completo.
+
 - [ ] **Step 1: Escribir el test de idioma**
 
 Código validado: este bloque está ejecutado tal cual sobre `ae4c340`. Su salida medida es el Expected
@@ -5092,7 +5110,12 @@ const code = (text) => text.split("\n").map((line) => (/^\s*(\/\/|\*|\/\*)/.test
 const KEY = /(?:^|[^A-Za-z0-9_])(?:t|tr)\(\s*["'`]([^"'`\s]+)["'`]/g;
 // Un `aria-label` con texto literal es tan duro de traducir como un hijo de texto, y el borrador no
 // lo miraba: medido, el único literal que hay en todo el shell vive justo ahí (StudioDialog.jsx:33).
-const LABEL = /\s(?:aria-label|title|placeholder|alt)\s*=\s*"([^"{}\n]{2,60})"/g;
+// Con llaves es igual de literal: `aria-label={'Cerrar'}` no se traduce mejor que `="Cerrar"`, y era
+// la forma que el escáner no veía. Las expresiones de verdad siguen fuera, y así queda registrado
+// (sonda 11): `{cond ? "Uno" : "Dos"}` NO se reporta. Medido en ui/src: 25 atributos de rótulo en 24
+// líneas (`IconButton.jsx:8` lleva `aria-label` y `title` en la misma), y los 25 van entre llaves con
+// una expresión (`{label}`, `{t("x")}`, `` {`${a} (${b})`} ``) — ninguno es una cadena entre llaves.
+const LABEL = /\s(?:aria-label|title|placeholder|alt)\s*=\s*(?:"([^"\n]+)"|'([^'\n]+)'|`([^`\n]+)`|\{\s*"([^"\n]+)"\s*\}|\{\s*'([^'\n]+)'\s*\})/g;
 const TEXT = />([<>]?[A-ZÁÉÍÓÚÑa-záéíóúñ][^<>{}]{2,60})</g;
 
 test("every key the React shell asks for exists in the three dictionaries", async () => {
@@ -5100,7 +5123,7 @@ test("every key the React shell asks for exists in the three dictionaries", asyn
   for (const file of files) {
     for (const [, key] of code(await readFile(file, "utf8")).matchAll(KEY)) used.add(key);
   }
-  assert.ok(used.size >= 40, `the key scan found ${used.size} keys; the floor keeps a blind regex from passing`);
+  assert.ok(used.size >= 40, `the key scan found ${used.size} keys: either the regex stopped matching or the call sites stopped being t("…")/tr("…")`);
   const missing = [...used].flatMap((key) => dicts.filter(([, dict]) => !(key in dict)).map(([lang]) => `${key} (${lang})`));
   assert.deepEqual(missing, []);
 });
@@ -5113,7 +5136,10 @@ test("no string shown or named by the shell is hardcoded", async () => {
       // R35: el marcador exime la LÍNEA que lo lleva, nunca el fichero entero. Con `continue` por
       // fichero, un solo nombre propio necesario desactiva la comprobación de todo lo demás.
       if (line.includes("i18n-lint-ignore")) return;
-      for (const [, value] of line.matchAll(LABEL)) offenders.push(`${file}:${index + 1}: label "${value}"`);
+      for (const groups of [...line.matchAll(LABEL)]) {
+        const value = groups.slice(1).find((g) => g !== undefined);
+        if (value && value.trim().length >= 2) offenders.push(`${file}:${index + 1}: label "${value.trim().slice(0, 60)}"`);
+      }
       for (const [, value] of line.matchAll(TEXT)) if (value.trim()) offenders.push(`${file}:${index + 1}: text "${value.trim()}"`);
     });
   }
@@ -5148,15 +5174,26 @@ async function routeTable() {
   const go = await readFile(join(root, "internal/server/server.go"), "utf8");
   const body = go.match(/routes := map\[string\]string\{([^}]*)\}/);
   assert.ok(body, "internal/server/server.go no contiene la tabla de rutas pretty");
-  return [...body[1].matchAll(/"(\/[^"]*)"\s*:\s*"(\/[^"]*)"/g)].map((m) => [m[1], m[2]]);
+  // El breve pedía `[[:space:]]`; JavaScript no tiene clases POSIX, y dentro de una clase negada eso
+  // es un conjunto literal que excluye `/`, `a`, `c`, `i`..., o sea cero pares leídos. Con `\s` queda
+  // la misma idea (una URL no lleva espacios) y los tres estilos de cadena de Go casan de verdad.
+  return [...body[1].matchAll(/[`"']?(\/[^`"'\s]*)[`"']?\s*:\s*[`"']?(\/[^`"'\s]*)[`"']?/g)]
+    .map((m) => [m[1], m[2]]);
 }
 
 test("every page the offline shell precaches is a served route with a real file behind it", async () => {
   const { PAGES, SHELL } = await shellConstants();
   const routes = new Map(await routeTable());
+  // Sin este suelo, una tabla leída vacía degradaría la comprobación a «el fichero existe en web/»,
+  // que es cierto para las cuatro páginas HTML y no dice nada de las rutas. La sonda 12 lo midió.
+  assert.ok(routes.size >= 7, `la tabla de rutas de Go se ha leído vacía (${routes.size} entradas)`);
   assert.ok(PAGES.length >= 7, `PAGES se ha quedado en ${PAGES.length} entradas`);
   const shell = new Set(SHELL);
   const problems = [];
+  // Conocido y no comprobado a propósito: "/join" está en la tabla de Go y no está en PAGES, así que
+  // un invitado que llegó por /join se queda sin página en el offline (sw.js compara pathname, línea
+  // 20). No es de este plan —es la lista del worker legacy, y la enmienda A1 no la toca— y va como
+  // Menor a la revisión final de rama.
   for (const url of PAGES) {
     // Una página entra en SHELL sin prefijo: es una navegación, no un asset. Si alguien la prefija,
     // el fetch handler (que compara pathname) deja de reconocerla y el offline muere en silencio.
@@ -5225,7 +5262,7 @@ rama de cada test apunta cada una.
 
 | # | Mutación | Salida medida |
 |---|---|---|
-| 1 | `KEY` sustituido por un regex que no casa nada | `AssertionError: the key scan found 0 keys; the floor keeps a blind regex from passing` |
+| 1 | `KEY` sustituido por un regex que no casa nada | `AssertionError: the key scan found 0 keys: either the regex stopped matching or the call sites stopped being t("…")/tr("…")` |
 | 2 | `used` con una clave inventada (`common.zzzfalta`) | `common.zzzfalta (es)`, `(en)`, `(ru)` — las tres lenguas, no la primera |
 | 3 | fichero de ensayo con `<p>Hola mundo</p>` | `ui/src/__probe-i18n.jsx:5: text "Hola mundo"` |
 | 4 | fichero de ensayo con `aria-label`/`title` literales y la marca en la misma línea | la línea marcada no produce nada; la línea siguiente produce `:7: label "Nombre propio"` |
@@ -5234,11 +5271,25 @@ rama de cada test apunta cada una.
 | 7 | `SHELL` sin `/guest` | `/guest no llega a SHELL` (solo esa cláusula) |
 | 8 | `routes` + `["/vdo", "/nope.html"]` | `/vdo routea a /nope.html, que no existe en web/` |
 | 9 | suelo `PAGES.length >= 8` | `PAGES se ha quedado en 7 entradas` |
+| 10 | regex de `routeTable()` sin tabla que casar | `AssertionError: internal/server/server.go no contiene la tabla de rutas pretty` (`fail 1`, `pass 4`) |
+| 11 | fichero de ensayo con `aria-label={'Nombre propio'}` y `aria-label={cond ? "Uno" : "Dos"}` | un solo offender, `ui/src/__probe11.jsx:3: label "Nombre propio"`; la línea 4 (ternario) no se reporta |
+| 12 | `routeTable()` filtrado a tabla vacía | `AssertionError: la tabla de rutas de Go se ha leído vacía (0 entradas)` (`fail 1`, `pass 4`) |
 
 La 4 es la prueba de R35: el marcador exime la línea que lo lleva y nada más. La 4 también deja
 registada una consecuencia aceptada — un nombre propio **como hijo de texto** (`>OBS</`) sí cuenta
 como offender (la 4 lo midió con `>OBS<`) y necesita la marca; hoy no hay ni uno en `ui/src`, así que
 la regla no muerde, pero no es una omisión del escáner sino su comportamiento.
+
+Las 10 y 12 son las dos ramas que la ronda de corrección 1 añadió y que nadie había visto en rojo:
+el guard de `routeTable()` antes de tocar `body[1]` (sin él, un renombrado en Go era un
+`TypeError: Cannot read properties of undefined` en vez de un mensaje que diga qué fichero mirar) y
+el suelo `routes.size >= 7`, que es lo único que impide que la comprobación degrade a «el fichero
+existe en `web/`» cuando el scrapeo vuelve vacío. La 11 mide el ensanchamiento de `LABEL`: ahora ven
+`{'…'}` y `{"…"}` entre llaves — la forma que R41 dice que más pesa en el nombre accesible y que el
+escáner ignoraba — y a cambio deja documentado su hueco: un ternario o un template literal entre
+llaves siguen sin reportarse. Es elección, no descuido: para cazarlos habría que quitar las llamadas
+`t()`/`tr()` y escanear las comillas que quedan dentro de las llaves, y eso daría falsos positivos con
+cualquier cadena que no sea un rótulo. Queda aparcado como Minor de la revisión final.
 
 - [ ] **Step 4: Documentar el modo `next`**
 
