@@ -5010,7 +5010,8 @@ git commit -m "test(ui): block layout overflow and nameless controls in the stud
 **Files:**
 - Create: `tests/ui-i18n.test.mjs`
 - Modify: `tests/sw-shell-coverage.test.mjs`, `ui/src/components/primitives/StudioDialog.jsx:33`,
-  `web/studio.html` (queda regenerado por el paso 3 y **se commitea**), `docs/INTERFAZ.md`, `CHANGELOG.md`
+  `docs/INTERFAZ.md`, `CHANGELOG.md`. `web/studio.html` **no** se toca: el literal arreglado vive en el
+  chunk perezoso, y la build deja el hash que esa página nombra sin cambiar (medido en el paso 3).
 - No crear: `tests/ui-shell-assets.test.mjs`. El borrador lo pedía, y está borrado de este plan porque
   duplica controles que ya existen y los hace peor. Medido: sus dos tests reproducen
   `tests/sw-shell-coverage.test.mjs` (que ya comprueba CLASSIC/I18N contra el disco con el `sw.js`
@@ -5207,11 +5208,15 @@ evalúa en cada render: el rótulo sigue vivo sin Suscriptores nuevos.
 Run: `node --test tests/ui-i18n.test.mjs`
 Expected: PASS los dos tests.
 
-Cambiar un `.jsx` cambia el hash del bundle, así que hay que regenerar y commitear `web/studio.html`
-(es tracked; los `*-<hash>.js` de dentro de `web/js/` son git-ignored a propósito y **no** se añaden):
+Cambiar un `.jsx` cambia un hash de bundle, pero **no el del chunk que nombra `web/studio.html`**:
+medido tras la build, `StudioDialog.jsx` vive en el chunk perezoso `mount-next-<hash>.js` (376 kB) y la
+página sigue apuntando a `studio-Ca2SwZcV.js` (1,47 kB, solo el interruptor de modo), así que
+`web/studio.html` sale **sin modificar** y no hay nada que commitear ahí. La comprobación que sí vale:
 
-Run: `node scripts/build-ui.mjs && git status --short web/studio.html`
-Expected: ` M web/studio.html` con la nueva referencia `js/studio-<hash>.js`.
+Run: `node scripts/build-ui.mjs && grep -c 'common.close' web/js/mount-next-*.js`
+Expected: el chunk recién escrito (el de `mtime` más reciente) lleva `common.close`; los demás son
+huérfonos de builds anteriores — `scripts/build-ui.mjs` no los poda, Minor ya aparcado. Nada de
+`web/js/*-<hash>.js` ni `web/js/sw-assets.json` entra en el commit: son git-ignored a propósito.
 
 **Puertas de no-vacuidad (medido el 2026-11-20 con copias mutadas de los dos tests).** Un test que
 llega verde no vale si no se ha visto fallar: estas son las mutaciones que se ejecutaron y su salida
@@ -5317,12 +5322,35 @@ que descarta el impóster, porque el `web/` se congela dentro del binario en `go
 servidor propio en marcha:
 
 Run: `python scripts/interface-smoke.py --url http://localhost:18499 && python scripts/studio-smoke.py --url http://localhost:18499`
-Expected: ambos PASS — el Studio real (modo `legacy`, que es el predeterminado) no cambió de
-comportamiento. La puerta de desbordamiento se corre igual sobre ese puerto, con el venv de Windows y
-`--browser "C:/Program Files/Google/Chrome/Application/chrome.exe"` (receta en `docs/OVERFLOW-GATE.md`).
+Expected corregido por lo medido: **ambos fallan, y fallan igual sobre `main`**. No son un verde
+alcanzable en esta rama, sino una deriva previa del tronco: `interface-smoke.py:79` se cae con
+`AssertionError: (320, 740, 'hidden save action')` y `studio-smoke.py` con
+`Page.wait_for_function: TypeError: Cannot read properties of undefined (reading 'getSettings')`, los
+dos con exit 1 contra un servidor construido desde `main` (`f884730`) en otro puerto. Lo que sí
+comprueba la enmienda A1 es la igualdad, y así se exige:
 
 ```bash
-git add tests/ui-i18n.test.mjs tests/sw-shell-coverage.test.mjs ui/src web/studio.html docs/INTERFAZ.md CHANGELOG.md
+wsl bash -lc "cd /mnt/d/Descargas/streamwebrom && go build -o /tmp/swr-main-bin ./cmd/streamwebrom && \
+  (nohup /tmp/swr-main-bin -addr 127.0.0.1:18497 -stun= -data /tmp/swr-main-data >/tmp/swr-main-run.log 2>&1 &); sleep 3"
+for s in interface studio; do
+  $V scripts/$s-smoke.py --url http://localhost:18497 --browser "$B" > /tmp/$s-main.out 2>&1; echo "main  $s exit=$?"
+  $V scripts/$s-smoke.py --url http://localhost:18499 --browser "$B" > /tmp/$s-branch.out 2>&1; echo "rama  $s exit=$?"
+  diff <(sed 's/1849[0-9]/PORT/g' /tmp/$s-main.out) <(sed 's/1849[0-9]/PORT/g' /tmp/$s-branch.out) && echo "$s: salida IDÉNTICA"
+done
+```
+
+Medido: `main interface exit=1 / rama interface exit=1`, `main studio exit=1 / rama studio exit=1`, y
+`diff` sin diferencias en los dos. El Studio real no cambió de comportamiento; el rojo es del humo, y
+lleva siendo del humo desde antes de este plan. Queda como Hallazgo para la revisión final de rama con
+su causa propuesta (`getSettings` ya no lo expone la página; `#openRoomDialog` se sale del viewport a
+320 px), no como fallo de esta tarea.
+
+Run: `python scripts/overflow-smoke.py --url http://localhost:18499 --browser "…/chrome.exe"`
+Expected: `overflow gate ok` con exit 0 — la puerta de la Task 12 sigue verde sobre el bundle
+reconstruido de este task.
+
+```bash
+git add tests/ui-i18n.test.mjs tests/sw-shell-coverage.test.mjs ui/src/components/primitives/StudioDialog.jsx docs/INTERFAZ.md CHANGELOG.md
 git status --short   # nada en web/js/*-<hash>.js ni sw-assets.json debe aparecer staged
 git commit -m "docs(ui): cover the next-mode switch and pin the shell's strings and precache"
 ```
