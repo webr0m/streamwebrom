@@ -9,9 +9,10 @@ los encontró antes de existir la puerta (ver el pre-vuelo del plan, Task 12).
 ## Qué abre y a qué anchos
 
 Abre `/studio?ui=next&room=<sala de un solo uso>#key=<clave de anfitrión>` sobre una sala creada por
-API en el propio smoke (`POST /api/rooms`), espera `[data-region='top']` —el shell llega por import
-dinámico y sin esperar la consulta `.studio-root *` devuelve 0 nodos, con lo que la puerta daría
-verde sobre una página vacía— y recorre cuatro viewports, los mismos que la spec fija como
+API en el propio smoke (`POST /api/rooms`), espera `.studio-root [data-region='top']` —el shell
+llega por import dinámico y sin esperar la consulta `.studio-root *` devuelve 0 nodos, con lo que la
+puerta daría verde sobre una página vacía; el selector lleva la raíz porque todo lo que se mide
+cuelga de ella— y recorre cuatro viewports, los mismos que la spec fija como
 breakpoints verificados (`docs/superpowers/specs/2026-11-20-react-vite-studio-ui-design.md:249`):
 
 | Ancho x alto | Cuándo se aplica |
@@ -21,11 +22,13 @@ breakpoints verificados (`docs/superpowers/specs/2026-11-20-react-vite-studio-ui
 | `820x900` | pila móvil con panel fijo (`layout.css:40`) |
 | `390x640` | teléfono pequeño, el ancho más apretado del diseño |
 
-Cada viewport se mide cuando la geometría se estabiliza (dos lecturas seguidas de los tamaños de
-las regiones y del alto del documento; hasta ocho intentos de 120 ms, y si nunca se asienta eso es
-un fallo, no un ruido). Sustituye al `wait_for_timeout(350)` fijo que había: 350 ms bastaba medido
-en los cuatro anchos, pero un tiempo quieto es una apuesta —una transición más tarde leería la
-maqueta a medio mover y daría verde sobre un layout que aún cambia. El contexto usa
+Cada viewport se mide cuando la geometría se estabiliza (tres lecturas seguidas de los tamaños de
+las regiones y del alto **y ancho** del documento, dos intervalos de 120 ms sin moversa, hasta diez
+intentos; si nunca se asienta eso es un fallo, no un ruido). Sustituye al `wait_for_timeout(350)`
+fijo que había: 350 ms bastaba medido en los cuatro anchos, pero un tiempo quieto es una apuesta
+—una transición más tarde leería la maqueta a medio mover y daría verde sobre un layout que aún
+cambia—, y comparar solo dos muestras tampoco cierra el caso: con una transición sobre las columnas
+del grid, dos enteros separados 120 ms pueden coincidir en pleno movimiento. El contexto usa
 `locale="es-ES"`, `color_scheme="dark"` y `service_workers="block"` para que el precache no cambie
 lo que se sirve.
 
@@ -38,17 +41,25 @@ camino que el usuario. Son dieciséis combinaciones porque las clases `scenes-co
 región: un fallo de rejilla en un estado colapsado es invisible para quien solo mira el abierto —y
 lo fue, ver la causa 3 más abajo—.
 
-Ese cambio de estado está **candado**: tras pulsar, la puerta exige que el `aria-expanded` de los dos
-botones termine en el valor pedido y que la raíz cargue o suelte la clase
-`scenes-collapsed`/`panel-collapsed` que toca —las dos cosas, porque lo que determina la rejilla es la
-clase y el atributo es solo lo que el botón promete—. Si algo no coincide en 720 ms, esa pasada se
-reporta como `the collapse sweep never reached that state` con la región culpable y se omite medir sus
-viewports. Sin el candado la barrida era decorativa: `COLLAPSE` solo pulsaba si encontraba
+Ese cambio de estado está **candado**, y por región se exigen las dos lecturas comprobadas de forma
+independiente: que el `aria-expanded` del botón termine en el valor pedido **y** que la raíz cargue o
+suelte la clase `scenes-collapsed`/`panel-collapsed` que toca. Son dos sentencias, no una cadena
+`elif`, porque lo que determina la rejilla es la clase y el atributo es solo lo que el botón promete:
+encadenadas, la ausencia del enganche eximiría de mirar la clase, que es justo la pareja de fallos que
+el candado existe para coger. La línea del desajuste nombra las dos mitades —`studioPanes:
+.panel-collapsed on the root is True, wanted False`—.
+Si algo no coincide en 720 ms, esa pasada se reporta como `the collapse sweep never reached that
+state` con la región culpable y se omite medir sus viewports; los `pageerror` lanzados durante el
+cambio de estado se imprimen antes de omitir la pasada, porque si no los borraría el
+`errors.clear()` del primer viewport. Sin el candado la barrida era decorativa: `COLLAPSE` solo
+pulsaba si encontraba
 `[aria-controls]` con el `aria-expanded` equivocado, así que si esos enganches desaparecían las cuatro
 pasadas medían el mismo estado abierto y la puerta imprimía `overflow gate ok` igualmente. El bucle de
 re-lectura no es postureo: medido hoy, leer el atributo justo después del `click()` devolvía el valor
 viejo —el estado vive en el store del bridge y la re-renderización llega después—, con lo que un
-candado escrito «pulsa y comprueba» fallaba las cuatro pasadas sobre una maqueta perfecta.
+candado escrito «pulsa y comprueba» fallaba las cuatro pasadas sobre una maqueta perfecta. Reintentar
+tampoco alterna el estado: `COLLAPSE` pulsa solo cuando el atributo no coincide con lo pedido, así
+que un click sin efecto repite el mismo click y un estado ya conseguido no vuelve a tocarse.
 
 ## Los cuatro criterios
 
@@ -78,7 +89,10 @@ en el viewport en que estaba montada.
 
 Código de salida: `0` con `overflow gate ok`; `1` con `OVERFLOW GATE FAILED` y una línea por
 culpable (los seis primeros desbordes por viewport, con su caja `[scrollWidth, clientWidth,
-scrollHeight, clientHeight]` y 48 caracteres de texto para poder identificarlo sin screenshot).
+scrollHeight, clientHeight]` y 48 caracteres de texto para poder identificarlo sin screenshot). Si el
+shell no monta, la lista se queda en una sola línea —`the studio shell never mounted`— en vez de un
+`TimeoutError` de Playwright en la consola de CI. Un mismo viewport puede aparecer dos veces: la
+primera por no asentarse y la segunda por lo que enseñe el `PROBE` sobre esa maqueta en movimiento.
 
 ## Qué encontró la primera vez que se ejecutó
 
@@ -169,6 +183,32 @@ OVERFLOW GATE FAILED
 
 mientras `scenesRail` sigue contento: exactamente el verde falso que el candado existe para impedir.
 
+Las tres variantes siguientes no requieren tocar el código del Studio: se generan copiando el gate
+embarcado e inyectando un `add_init_script` (o recortando el presupuesto de asentamiento), así que lo
+que se ejecuta es el `layout_problems`, el `settle` y el bucle que se commitean.
+
+- **Enganche arrancado del DOM** (observer que borra `[aria-controls=studioPanes]` al montarse). Sale
+  exit 1 con las cuatro pasadas omitidas, y las dos que pedían el panel colapsado llevan **las dos**
+  quejas: `no [aria-controls] toggle in the topbar; studioPanes: .panel-collapsed on the root is
+  False, wanted True`. Con la cadena `elif` que había antes, la segunda queja era inalcanzable: el
+  botón ausente se tragaba el `if` y la clase —que es lo que la rejilla lee— quedaba sin mirar.
+- **Clase forzada mientras el botón promete lo contrario** (observer que re-pone `panel-collapsed`
+  cada vez que React reescribe `class`). Exit 1 con
+  `scenes collapsed: the collapse sweep never reached that state (studioPanes: .panel-collapsed on
+  the root is True, wanted False)`: el brazo de la clase denuncia la mentira aunque el atributo
+  coincida. Solo se denunció en esa pasada, y el motivo es el mecanismo del `observer`: un elemento
+  que nace con su `className` puesto no dispara ninguna mutación de atributo, así que la clase forzada
+  no apareció hasta el primer click de la barrida. La pasada `expanded` midió con el panel oculto por
+  esa clase y salió limpia, que es el recordatorio de que la puerta mide desbordamiento, no fidelidad
+  de estado: lo que ata el estado a la rejilla es el candado, no el `PROBE`.
+- **Asentamiento sin presupuesto** (`SETTLE_TRIES = 1`, una sola lectura): exit 1 con los dieciséis
+  viewports en `the layout never settled in 120 ms`, o sea que la rama de no-asentamiento se emite
+  de verdad y el verde que da el gate con `10, 120` no es un `return True` por defecto.
+
+De paso, la primera de estas sondas midió el otro hueco que quedaba: los avisos que lanza el propio
+cambio de estado se perdían con el `continue`, y ahora se imprimen como
+`<pasada>: page errors while setting the layout [...]` antes de omitir la pasada.
+
 Tres trampas medidas, las tres con el mismo efecto —un verde falso—:
 
 - **El puerto.** `18443` puede estar ocupado por una instancia vieja que lleva horas sirviendo un
@@ -176,7 +216,11 @@ Tres trampas medidas, las tres con el mismo efecto —un verde falso—:
   esta tarea—, porque `streamwebrom` no falla al no poder enbindar: el proceso arranca y `curl`
   responde desde el impostor. Comprueba `uptime` en `/api/health` y que el hash
   `studio-<hash>.js` que devuelve `/studio` coincida con el de `web/studio.html` antes de creer un
-  resultado; en caso de duda, otro puerto y otro `-data`.
+  resultado; en caso de duda, otro puerto y otro `-data`. Medido contra el impostor de verdad (su
+  `studio-BkPzSsCw.js` no lleva `.studio-root` por dentro), la puerta ya no suelta un traceback sino
+  su propio contrato, `exit 1` con
+  `- the studio shell never mounted: .studio-root [data-region='top'] is absent`: un verde sobre ese
+  servidor es imposible ahora, y antes lo era solo por accidente.
 - **El `-data`.** Si `-data` y `-o` reciben la misma ruta, el servidor muere con `mkdir /tmp/swr-g1:
   not a directory`: quiere un directorio y ahí hay un binario. Rutas distintas, siempre.
 - **La salida.** Un venv de Windows puede imprimir `Could not find platform independent libraries`

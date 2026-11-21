@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 import time
+from playwright.sync_api import TimeoutError as ShellTimeout
 from playwright.sync_api import sync_playwright
 
 # Un terminal de Windows es cp1252 y la copia del estudio trae glifos («▢», «▲»): imprimir la lista
@@ -16,7 +17,11 @@ PROBE = """
 () => {
   // `className` en un SVG es un SVGAnimatedString objeto, no el texto: su primer token era
   // "[object SVGAnimatedString]" para todos los iconos y el informe señalaba el culpable con ruido.
-  const path = (n) => n.id ? '#' + n.id : n.tagName.toLowerCase() + '.' + String((n.getAttribute && n.getAttribute('class')) || '').split(' ')[0];
+  const path = (n) => {
+    if (n.id) return '#' + n.id;
+    const cls = String((n.getAttribute && n.getAttribute('class')) || '').trim().split(' ')[0];
+    return n.tagName.toLowerCase() + (cls ? '.' + cls : '');
+  };
   const clipped = [];
   for (const node of document.querySelectorAll('.studio-root *')) {
     if (getComputedStyle(node).overflow !== 'visible') continue;
@@ -50,12 +55,13 @@ COLLAPSE = """
 
 COLLAPSE_STATE = """
 () => {
+  const root = document.querySelector('.studio-root');
   const after = {};
   for (const region of ["scenesRail", "studioPanes"]) {
-    const toggle = document.querySelector('.studio-root [data-region="top"] [aria-controls="' + region + '"]');
+    const toggle = root.querySelector('[data-region="top"] [aria-controls="' + region + '"]');
     after[region] = toggle ? toggle.getAttribute("aria-expanded") : null;
   }
-  return { after, rootClass: String((document.querySelector('.studio-root') || {}).className || '') };
+  return { after, rootClass: String(root.className || '') };
 }
 """
 
@@ -83,9 +89,11 @@ COLLAPSE_CLASS = {"scenesRail": "scenes-collapsed", "studioPanes": "panel-collap
 
 
 def layout_problems(state, sides):
-    """Del cambio de estado se exigen dos lecturas: el `aria-expanded` del botón y la clase que de
-    verdad leen las rejillas. Basta la primera para que una puerta verde no garantice nada, porque
-    el objetivo de la pasada es lo que la hoja ve."""
+    """Del cambio de estado se exigen dos lecturas por región y las dos se comprueban siempre: el
+    `aria-expanded` que el botón promete y la clase que de verdad leen las rejillas. No se encadenan
+    con `elif`: si el enganche del botón desapareciera mientras la raíz sigue cargando la clase —o al
+    revés—, una comprobación encadenada a la primera omitiría la que la hoja lee. La ausencia total
+    del shell no llega aquí: el `wait_for_selector` de abajo está anclado a `.studio-root`."""
     problems = []
     for region, value in state["after"].items():
         want = "false" if region in sides else "true"
@@ -93,8 +101,9 @@ def layout_problems(state, sides):
             problems.append(f"{region}: no [aria-controls] toggle in the topbar")
         elif value != want:
             problems.append(f"{region}: aria-expanded {value!r}, wanted {want!r}")
-        elif (COLLAPSE_CLASS[region] in state["rootClass"]) != (region in sides):
-            problems.append(f"{region}: the root does not carry .{COLLAPSE_CLASS[region]}")
+        collapsed = COLLAPSE_CLASS[region] in state["rootClass"]
+        if collapsed != (region in sides):
+            problems.append(f"{region}: .{COLLAPSE_CLASS[region]} on the root is {collapsed}, wanted {region in sides}")
     return problems
 
 
@@ -102,7 +111,9 @@ def apply_layout(page, sides, tries=6):
     """Pulsar y leer el atributo en el mismo tick no vale: medido el 2026-11-20, tras `toggle.click()`
     el `aria-expanded` seguía con el valor viejo porque el estado vive fuera del componente y la
     re-renderización llega después. Se pulsa, se espera y se vuelve a leer hasta que el DOM refleje
-    lo pedido; si no lo refleja en 720 ms, la pasada se reporta y no se mide."""
+    lo pedido; si no lo refleja en 720 ms, la pasada se reporta y no se mide. Reintentar no alterna
+    el estado: `COLLAPSE` solo pulsa cuando el atributo no coincide con lo pedido, así que un click
+    sin efecto repite exactamente el mismo click y un estado ya conseguido no vuelve a tocarse."""
     for _ in range(tries):
         page.evaluate(COLLAPSE, sides)
         page.wait_for_timeout(120)
@@ -112,18 +123,22 @@ def apply_layout(page, sides, tries=6):
     return problems
 
 
-def settle(page, tries=8, step=120):
-    """Espera a que la geometría se repita dos lecturas seguidas. Un `wait_for_timeout` fijo era
-    una apuesta: medido, 350 ms bastaba en los cuatro anchos, pero una transición más larga en el
-    futuro leería la maqueta a medio mover y daría verde sobre un layout que aún está cambiando.
+SETTLE_TRIES, SETTLE_STEP = 10, 120
+
+
+def settle(page, tries=SETTLE_TRIES, step=SETTLE_STEP):
+    """Espera a que la geometría se repita tres lecturas seguidas, o sea dos intervalos de `step`
+    sin moversa. Comparar solo dos muestras basta mientras el asentamiento era un tiempo quieto,
+    pero con un `transition` sobre las columnas del grid dos enteros separados 120 ms pueden
+    coincidir y declarar asentado un layout que aún se mueve. La huella lleva alto y ancho del
+    documento además de las cajas de las regiones, porque el eje horizontal también es criterio.
     Devuelve False si nunca se asienta: eso es un fallo de la puerta, no un ruido que ignorar."""
-    previous = page.evaluate(GEOMETRY)
+    readings = [page.evaluate(GEOMETRY)]
     for _ in range(tries):
         page.wait_for_timeout(step)
-        current = page.evaluate(GEOMETRY)
-        if current == previous:
+        readings.append(page.evaluate(GEOMETRY))
+        if len(readings) > 2 and readings[-1] == readings[-2] == readings[-3]:
             return True
-        previous = current
     return False
 
 parser = argparse.ArgumentParser()
@@ -142,14 +157,27 @@ with sync_playwright() as pw:
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(f"{args.url}/studio?ui=next&room={room}#key={keys['hostKey']}")
     # El shell llega por import dinámico: medido, sin esperar, `document.querySelectorAll('.studio-root')`
-    # devuelve 0 y el gate daría verde sobre una página vacía.
-    page.wait_for_selector("[data-region='top']")
+    # devuelve 0 y el gate daría verde sobre una página vacía. El selector lleva la raíz porque todo lo
+    # que se mide cuelga de ella: esperar `[data-region='top']` a secas dejaría pasar una página que
+    # monta el shell en otro sitio y cuyo `.studio-root *` está vacío. Si el shell no monta, no hay
+    # barrida que hacer y se dice con una línea, no con un traceback.
+    sweeps = []
     failures = []
-    for label, sides in LAYOUTS:
+    try:
+        page.wait_for_selector(".studio-root [data-region='top']", timeout=15000)
+        sweeps = LAYOUTS
+    except ShellTimeout:
+        failures.append("the studio shell never mounted: .studio-root [data-region='top'] is absent")
+    for label, sides in sweeps:
         # Sin este candado la barrida es decorativa: `COLLAPSE` solo pulsa si encuentra
         # `[aria-controls]` con el `aria-expanded` equivocado, así que si esos enganches desaparecen
         # las cuatro pasadas miden el mismo estado abierto y la puerta imprime `overflow gate ok`.
         problems = apply_layout(page, sides)
+        # Un fallo de candado omite medir esa pasada entera, y los avisos que el cambio de estado
+        # pudiera haber lanzado se perderían con el `continue`: se reportan antes de omitir.
+        if errors:
+            failures.append(f"{label}: page errors while setting the layout {errors}")
+            errors.clear()
         if problems:
             failures.append(f"{label}: the collapse sweep never reached that state (" + "; ".join(problems) + ")")
             continue
@@ -158,7 +186,7 @@ with sync_playwright() as pw:
             page.set_viewport_size({"width": width, "height": height})
             errors.clear()
             if not settle(page):
-                failures.append(f"{size}: the layout never settled in 960 ms")
+                failures.append(f"{size}: the layout never settled in {SETTLE_TRIES * SETTLE_STEP} ms")
             report = page.evaluate(PROBE)
             if errors:
                 failures.append(f"{size}: page errors {errors}")
