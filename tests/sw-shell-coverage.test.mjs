@@ -101,15 +101,26 @@ async function routeTable() {
   const go = await readFile(join(root, "internal/server/server.go"), "utf8");
   const body = go.match(/routes := map\[string\]string\{([^}]*)\}/);
   assert.ok(body, "internal/server/server.go no contiene la tabla de rutas pretty");
-  return [...body[1].matchAll(/"(\/[^"]*)"\s*:\s*"(\/[^"]*)"/g)].map((m) => [m[1], m[2]]);
+  // El breve pedía `[[:space:]]`; JavaScript no tiene clases POSIX, y dentro de una clase negada eso
+  // es un conjunto literal que excluye `/`, `a`, `c`, `i`..., o sea cero pares leídos. Con `\s` queda
+  // la misma idea (una URL no lleva espacios) y los tres estilos de cadena de Go casan de verdad.
+  return [...body[1].matchAll(/[`"']?(\/[^`"'\s]*)[`"']?\s*:\s*[`"']?(\/[^`"'\s]*)[`"']?/g)]
+    .map((m) => [m[1], m[2]]);
 }
 
 test("every page the offline shell precaches is a served route with a real file behind it", async () => {
   const { PAGES, SHELL } = await shellConstants();
   const routes = new Map(await routeTable());
+  // Sin este suelo, una tabla leída vacía degradaría la comprobación a «el fichero existe en web/»,
+  // que es cierto para las cuatro páginas HTML y no dice nada de las rutas. La sonda 12 lo midió.
+  assert.ok(routes.size >= 7, `la tabla de rutas de Go se ha leído vacía (${routes.size} entradas)`);
   assert.ok(PAGES.length >= 7, `PAGES se ha quedado en ${PAGES.length} entradas`);
   const shell = new Set(SHELL);
   const problems = [];
+  // Conocido y no comprobado a propósito: "/join" está en la tabla de Go y no está en PAGES, así que
+  // un invitado que llegó por /join se queda sin página en el offline (sw.js compara pathname, línea
+  // 20). No es de este plan —es la lista del worker legacy, y la enmienda A1 no la toca— y va como
+  // Menor a la revisión final de rama.
   for (const url of PAGES) {
     // Una página entra en SHELL sin prefijo: es una navegación, no un asset. Si alguien la prefija,
     // el fetch handler (que compara pathname) deja de reconocerla y el offline muere en silencio.

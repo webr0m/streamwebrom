@@ -33,7 +33,11 @@ const code = (text) => text.split("\n").map((line) => (/^\s*(\/\/|\*|\/\*)/.test
 const KEY = /(?:^|[^A-Za-z0-9_])(?:t|tr)\(\s*["'`]([^"'`\s]+)["'`]/g;
 // Un `aria-label` con texto literal es tan duro de traducir como un hijo de texto, y el borrador no
 // lo miraba: medido, el único literal que hay en todo el shell vive justo ahí (StudioDialog.jsx:33).
-const LABEL = /\s(?:aria-label|title|placeholder|alt)\s*=\s*"([^"{}\n]{2,60})"/g;
+// Con llaves es igual de literal: `aria-label={'Cerrar'}` no se traduce mejor que `="Cerrar"`, y era
+// la forma que el escáner no veía. Las expresiones de verdad (`{label}`, `{t("x")}`, `{a ? "x" : "y"}`)
+// siguen fuera, y así queda registrado: 24 atributos medidos en ui/src, los 24 con llaves son
+// expresiones, ninguno es una cadena entre llaves.
+const LABEL = /\s(?:aria-label|title|placeholder|alt)\s*=\s*(?:"([^"\n]+)"|'([^'\n]+)'|`([^`\n]+)`|\{\s*"([^"\n]+)"\s*\}|\{\s*'([^'\n]+)'\s*\})/g;
 const TEXT = />([<>]?[A-ZÁÉÍÓÚÑa-záéíóúñ][^<>{}]{2,60})</g;
 
 test("every key the React shell asks for exists in the three dictionaries", async () => {
@@ -41,7 +45,7 @@ test("every key the React shell asks for exists in the three dictionaries", asyn
   for (const file of files) {
     for (const [, key] of code(await readFile(file, "utf8")).matchAll(KEY)) used.add(key);
   }
-  assert.ok(used.size >= 40, `the key scan found ${used.size} keys; the floor keeps a blind regex from passing`);
+  assert.ok(used.size >= 40, `the key scan found ${used.size} keys: either the regex stopped matching or the call sites stopped being t("…")/tr("…")`);
   const missing = [...used].flatMap((key) => dicts.filter(([, dict]) => !(key in dict)).map(([lang]) => `${key} (${lang})`));
   assert.deepEqual(missing, []);
 });
@@ -54,7 +58,10 @@ test("no string shown or named by the shell is hardcoded", async () => {
       // R35: el marcador exime la LÍNEA que lo lleva, nunca el fichero entero. Con `continue` por
       // fichero, un solo nombre propio necesario desactiva la comprobación de todo lo demás.
       if (line.includes("i18n-lint-ignore")) return;
-      for (const [, value] of line.matchAll(LABEL)) offenders.push(`${file}:${index + 1}: label "${value}"`);
+      for (const groups of [...line.matchAll(LABEL)]) {
+        const value = groups.slice(1).find((g) => g !== undefined);
+        if (value && value.trim().length >= 2) offenders.push(`${file}:${index + 1}: label "${value.trim().slice(0, 60)}"`);
+      }
       for (const [, value] of line.matchAll(TEXT)) if (value.trim()) offenders.push(`${file}:${index + 1}: text "${value.trim()}"`);
     });
   }
