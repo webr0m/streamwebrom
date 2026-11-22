@@ -30,7 +30,7 @@ export function createActions(engine) {
       // their real effect.
       "device.monitor", "device.vdo", "room.settings", "room.invite",
       "room.save", "room.forget", "brand.apply", "banner.set", "chat.send", "people.admit", "people.deny", "people.mute",
-      "network.retry",
+      "network.retry", "device.settings", "people.screen",
     ].map((name) => [name, run(name)]),
   );
 }

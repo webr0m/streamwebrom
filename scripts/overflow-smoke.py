@@ -188,7 +188,7 @@ with sync_playwright() as pw:
     page = context.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    page.goto(f"{args.url}/studio?ui=next&room={room}#key={keys['hostKey']}")
+    page.goto(f"{args.url}/studio?ui=next&demo=1&room={room}#key={keys['hostKey']}")
     # El shell llega por import dinámico: medido, sin esperar, `document.querySelectorAll('.studio-root')`
     # devuelve 0 y el gate daría verde sobre una página vacía. El selector lleva la raíz porque todo lo
     # que se mide cuelga de ella: esperar `[data-region='top']` a secas dejaría pasar una página que

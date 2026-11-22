@@ -1,9 +1,10 @@
 // ui/src/components/primitives/OverflowMenu.jsx
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { cx } from "./cx.js";
 import styles from "./OverflowMenu.module.css";
 
-export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", className = "", ...rest }) {
+export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", className = "", floating = false, ...rest }) {
   const [open, setOpen] = useState(false);
   const root = useRef(null);
   const menu = useRef(null);
@@ -24,7 +25,7 @@ export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", cla
   useEffect(() => {
     if (!open) return;
     menu.current?.querySelector("[role=menuitem]")?.focus();
-    const onPointer = (event) => { if (!root.current?.contains(event.target)) setOpen(false); };
+    const onPointer = (event) => { if (!root.current?.contains(event.target) && !menu.current?.contains(event.target)) setOpen(false); };
     const onKey = (event) => {
       if (event.key === "Escape") { setOpen(false); trigger.current?.focus(); }
     };
@@ -35,6 +36,21 @@ export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", cla
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+  const rect = open && floating ? trigger.current?.getBoundingClientRect() : null;
+  const panel = open ? (
+    <span ref={menu} role="menu" className={styles.menu} onKeyDown={onKeyDown} style={rect ? {
+      position: "fixed", inset: "auto", left: Math.max(8, Math.min(rect.right - 168, window.innerWidth - 176)),
+      bottom: Math.max(8, window.innerHeight - rect.top + 4), width: 168,
+    } : undefined}>
+      {items.map((item) => (
+        <button key={item.id} type="button" role="menuitem" className={cx(styles.item, item.danger && styles.danger)}
+          onClick={() => { setOpen(false); item.onClick?.(); }}>
+          {item.icon ? <span data-icon aria-hidden="true">{item.icon}</span> : null}
+          <span className={styles.itemLabel}>{item.label}</span>
+        </button>
+      ))}
+    </span>
+  ) : null;
   return (
     <span ref={root} className={cx(styles.slot, className)}>
       <button
@@ -50,22 +66,7 @@ export function OverflowMenu({ label = "Más acciones", items, icon = "⋯", cla
       >
         <span data-icon aria-hidden="true">{icon}</span>
       </button>
-      {open ? (
-        <span ref={menu} role="menu" className={styles.menu} onKeyDown={onKeyDown}>
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="menuitem"
-              className={cx(styles.item, item.danger && styles.danger)}
-              onClick={() => { setOpen(false); item.onClick?.(); }}
-            >
-              {item.icon ? <span data-icon aria-hidden="true">{item.icon}</span> : null}
-              <span className={styles.itemLabel}>{item.label}</span>
-            </button>
-          ))}
-        </span>
-      ) : null}
+      {panel && floating ? createPortal(panel, document.body) : panel}
     </span>
   );
 }

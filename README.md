@@ -1,6 +1,6 @@
 # StreamWebRom
 
-**Versión 1.13.0:** El Studio estrena shell React + Vite con la paleta Control Room Pro, disponible detrás de `?ui=next`; la interfaz de siempre sigue siendo la predeterminada y nada en el motor WebRTC cambia. Telegram como destino de emisión RTMP/RTMPS desde el estudio. Captura avanzada de ventanas, pestañas y sistema con audio aislado en Windows x64, conservando la interfaz del estudio. Selector web de fuentes y sonido, con protección frente al retorno de voces. [Interfaz](docs/INTERFAZ.md), [captura avanzada](docs/CAPTURA-AVANZADA.md), [audio y segundo plano](docs/AUDIO-Y-SEGUNDO-PLANO.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
+**Versión 1.13.0:** El nuevo Studio React + Vite se conecta a salas reales en modo **beta**. Elige **Clásico** (predeterminado) o **Nuevo Studio (beta)** antes de pulsar **Crear estudio**. Los invitados y OBS conservan sus enlaces habituales. [Interfaz](docs/INTERFAZ.md), [captura avanzada](docs/CAPTURA-AVANZADA.md), [audio y segundo plano](docs/AUDIO-Y-SEGUNDO-PLANO.md), [apps](mobile/README.md) y [cambios](CHANGELOG.md).
 
 Código y descargas: [GitHub](https://github.com/webr0m/streamwebrom) · [GitLab](https://gitlab.com/ridrogo/streamwebrom) · [Gitea](https://gitea.com/webrom/streamwebrom).
 
@@ -34,6 +34,12 @@ Ver [docs/AUDITORIA.md](docs/AUDITORIA.md).
 | 🔐 **Seguro** | Roles validados en servidor, bcrypt, claves separadas (anfitrión / ver / publicar), CSP estricta, rate-limit. |
 
 ## Inicio rápido
+
+### Elegir el Studio
+
+En la página inicial, selecciona **StreamWebRom** como servicio y luego una **Interfaz del estudio**. La beta usa la misma señalización y WebRTC que Clásico: permite gestionar invitados, mover fuentes a las escenas, usar cámara, pantalla o archivos, copiar enlaces OBS, grabar y emitir a destinos RTMP/RTMPS/SRT.
+
+El chat, los ajustes de marca, la persistencia de la sala y el control avanzado de cada invitado siguen en Clásico. Puedes abrirlo desde **Abrir Studio clásico** sin crear otra sala; el cambio recarga la página y puede interrumpir la emisión. Los estudios guardados se pueden abrir en cualquiera de los dos modos. `?ui=next&demo=1` es solo una demostración visual.
 
 Descarga el binario de tu plataforma en **Releases** y ejecútalo:
 

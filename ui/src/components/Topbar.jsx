@@ -25,6 +25,7 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
       <div className={styles.identity}>
         <TruncatedText className={styles.title} title={room.title}>{room.title}</TruncatedText>
         <StatusPill tone={status.tone} label={status.label} />
+        {room.beta ? <StatusPill tone="warn" label={t("studio.betaBadge")} /> : null}
         {live ? <StatusPill tone="live" dot label={t("studio.liveBadge")} /> : null}
         {production.recording ? <StatusPill tone="err" label={t("studio.record")} /> : null}
         {broadcast.relay?.active ? <StatusPill tone="idle" label={t("studio.relayBitrate", { rate })} /> : null}
@@ -32,7 +33,7 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
       <div className={styles.actions}>
         <CommandButton
           data-action="record"
-          status={production.recording ? "active" : "idle"}
+          status={snapshot.pending?.["record.toggle"] ? "pending" : production.recording ? "active" : "idle"}
           icon="●"
           label={t("studio.record")}
           title={t("studio.recordHint")}
@@ -42,10 +43,10 @@ export function Topbar({ snapshot, workspace, command, onToggleScenes, onToggleP
         />
         <CommandButton
           data-action="live"
-          status={live ? "active" : "idle"}
+          status={snapshot.pending?.["live.start"] || snapshot.pending?.["live.stop"] ? "pending" : live ? "active" : "idle"}
           icon="▲"
           primary
-          label={t("studio.goLive")}
+          label={room.beta && live ? t("studio.betaStopLive") : t("studio.goLive")}
           error={error("broadcast")}
           onClick={() => command(live ? "live.stop" : "live.start", {})}
         />

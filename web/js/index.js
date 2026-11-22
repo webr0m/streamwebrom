@@ -13,9 +13,14 @@ function syncEngineField() {
   document.querySelector('label[for="room"]').textContent = t(roomLabelKey());
   $("#roomEngineHelp").textContent = t(helpKey());
   $("#lobby").disabled = vdo;
+  $("#studioModeField").classList.toggle("hidden", vdo);
+  $("#studioMode").disabled = vdo;
+  $("#studioBetaHelp").classList.toggle("hidden", $("#studioMode").value !== "next");
 }
 
 $("#roomEngine").onchange = syncEngineField;
+$("#studioMode").onchange = syncEngineField;
+syncEngineField();
 // The help text lives in #roomEngineHelp, which installI18n() already rewrote:
 // keep it in sync with the selected engine, not just with the language.
 onLangChange(syncEngineField);
@@ -38,6 +43,7 @@ $("#create").addEventListener("click", async () => {
       location.href = vdoHostPath(config); return;
     }
     if (new TextEncoder().encode($("#pw").value).length > 72) throw new Error(t("home.passwordTooLong"));
+    const ui = $("#studioMode").value === "next" ? "next" : "legacy";
     const keys = await api("/api/rooms", {
       room: $("#room").value.trim().toLowerCase(),
       title: $("#title").value.trim(),
@@ -45,11 +51,11 @@ $("#create").addEventListener("click", async () => {
       lobby: $("#lobby").checked,
     });
     const all = saved();
-    all[keys.room] = { ...keys, title: $("#title").value.trim(), created: Date.now() };
+    all[keys.room] = { ...keys, ui, title: $("#title").value.trim(), created: Date.now() };
     try { localStorage.setItem("swr.rooms", JSON.stringify(all)); }
     catch { toast(t("home.saveStudioFailed")); }
     // The host key travels in the fragment: never sent to servers or logged.
-    location.href = `/studio?room=${encodeURIComponent(keys.room)}#key=${encodeURIComponent(keys.hostKey)}`;
+    location.href = studioLink(keys.room, keys.hostKey, ui);
   } catch (e) {
     toast(e.message, "err");
     btn.disabled = false;
@@ -64,6 +70,9 @@ $("#join").addEventListener("click", join);
 $("#joinRoom").addEventListener("keydown", (e) => e.key === "Enter" && join());
 
 const rooms = Object.values(saved()).filter(r=>r && typeof r.room === "string" && typeof r.hostKey === "string").sort((a,b)=>b.created-a.created);
+function studioLink(room, key, ui) {
+  return `/studio?${new URLSearchParams({ room, ui })}#${new URLSearchParams({ key })}`;
+}
 function studioCard(r) {
   const expired = r.persistent && r.expires && r.expires < Date.now();
   const state = expired ? t("home.expired") : r.persistent
@@ -71,7 +80,9 @@ function studioCard(r) {
     : t("home.temporary");
   return el("div",{class:"studio-card"},
     el("div",{class:"grow"},el("strong",{text:r.title || r.room}),el("span",{class:"muted",text:state})),
-    el("a",{class:"btn small",href:`/studio?room=${encodeURIComponent(r.room)}#key=${encodeURIComponent(r.hostKey)}`,text:t("home.openStudio")}));
+    el("div",{class:"row wrap"},
+      el("a",{class:"btn small",href:studioLink(r.room, r.hostKey, "legacy"),text:t("home.studioClassic")}),
+      el("a",{class:"btn small",href:studioLink(r.room, r.hostKey, "next"),text:t("home.studioBeta")})));
 }
 
 const vdoRecent = Object.values(readStored("swr.vdoRooms",{},true)).filter(r => {

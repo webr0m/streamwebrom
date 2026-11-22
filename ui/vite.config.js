@@ -37,7 +37,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: Object.fromEntries(
-      ["/ws", "/api", "/whip", "/whep", "/recordings", "/metrics"].map((path) => [
+      ["/ws", "/api", "/whip", "/whep", "/recordings", "/metrics", "/js"].map((path) => [
         path,
         { target: process.env.SWR_ORIGIN || "http://localhost:8443", changeOrigin: true, secure: false, ws: path === "/ws" },
       ]),

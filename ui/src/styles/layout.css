@@ -55,6 +55,11 @@
   }
   [data-region="panel"] { position: fixed; inset: auto 0 0 0; max-block-size: 62vh; z-index: var(--swr-z-panel); border-radius: var(--swr-r-md) var(--swr-r-md) 0 0; }
   .panel-collapsed [data-region="panel"] { display: none; }
+  .studio-beta .swr-shell {
+    grid-template-rows: auto auto minmax(190px, 1fr) auto auto auto;
+    grid-template-areas: "top" "rail" "stage" "tray" "dock" "panel";
+  }
+  .studio-beta [data-region="panel"] { position: static; max-block-size: none; }
 }
 
 /* El contenedor de montaje conserva la clase legacy `.studio` (`web/studio.html:12`), y

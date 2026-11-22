@@ -1,4 +1,5 @@
 // ui/src/components/SourceTray.jsx
+import { useEffect, useRef } from "react";
 import { TruncatedText } from "./primitives/TruncatedText.jsx";
 import { LevelMeter } from "./primitives/LevelMeter.jsx";
 import { IconButton } from "./primitives/IconButton.jsx";
@@ -10,7 +11,18 @@ import styles from "./SourceTray.module.css";
 
 const meters = (source) => Math.max(0, Math.min(1, (Number(source.level) + 60) / 60));
 
-export function SourceTray({ sources, command }) {
+function Preview({ stream }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const node = ref.current;
+    node.srcObject = stream;
+    node.play().catch(() => {});
+    return () => { node.srcObject = null; };
+  }, [stream]);
+  return <video ref={ref} className={styles.preview} muted autoPlay playsInline />;
+}
+
+export function SourceTray({ sources, command, engine, featured }) {
   return (
     <section id="backstage" className={styles.tray} aria-label={t("studio.backstage")}>
       <h2 className={styles.heading}>{t("studio.backstage")}</h2>
@@ -21,6 +33,7 @@ export function SourceTray({ sources, command }) {
               <span data-icon aria-hidden="true">{icon(source.kind)}</span>
               <TruncatedText className={styles.name} title={source.name}>{source.name}</TruncatedText>
             </div>
+            {engine && source.hasVideo && !source.hidden ? <Preview stream={engine.sourceStream(source.id)} /> : null}
             <div className={styles.meter}>
               <LevelMeter value={meters(source)} label={`${t("studio.monitor")} · ${source.name}`} />
               {source.error ? <span role="status" className={styles.error}>{t(source.error)}</span> : null}
@@ -38,11 +51,18 @@ export function SourceTray({ sources, command }) {
                 checked={!source.hidden}
                 onChange={(checked) => command("source.hide", { id: source.id, hidden: !checked })}
               />
+              {engine ? <IconButton data-role="source-stage" icon={source.onStage ? "−" : "+"}
+                label={t(source.onStage ? "studiojs.removeFromStage" : "studiojs.addToStage")}
+                onClick={() => command(source.onStage ? "scene.removeSource" : "scene.addSource", { id: source.id })} /> : null}
               <OverflowMenu
                 data-role="source-more"
+                floating={!!engine}
                 items={[
-                  { id: "hd", label: t("studio.qualityHd"), onClick: () => command("source.setQuality", { id: source.id, quality: "hd" }) },
-                  { id: "fhd", label: t("studio.qualityFullHd"), onClick: () => command("source.setQuality", { id: source.id, quality: "fhd" }) },
+                  ...(engine && source.onStage ? [{ id: "featured", label: t(featured === source.id ? "studiojs.unsetFeatured" : "studiojs.setFeatured"), onClick: () => command("scene.setFeatured", { id: featured === source.id ? "" : source.id }) }] : []),
+                  ...(!engine || source.local ? [
+                    { id: "hd", label: t("studio.qualityHd"), onClick: () => command("source.setQuality", { id: source.id, quality: "hd" }) },
+                    { id: "fhd", label: t("studio.qualityFullHd"), onClick: () => command("source.setQuality", { id: source.id, quality: "fhd" }) },
+                  ] : []),
                   { id: "remove", label: t("studio.removeSource"), danger: true, onClick: () => command("source.remove", { id: source.id }) },
                 ]}
               />

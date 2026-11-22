@@ -28,7 +28,7 @@ export function ProductionDock({ snapshot, command, collapsedActions = [] }) {
             label={action.label()}
             title={action.hint()}
             collapsible
-            status={snapshot.production.muteStage && action.id === "monitor" ? "active" : "idle"}
+            status={snapshot.pending?.[action.command] ? "pending" : (snapshot.production.monitor ?? snapshot.production.muteStage) && action.id === "monitor" ? "active" : "idle"}
             onClick={() => command(action.command, {})}
           />
         ))}

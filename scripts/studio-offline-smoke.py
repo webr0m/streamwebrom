@@ -17,7 +17,7 @@ with sync_playwright() as pw:
     context.set_offline(True)
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
-    page.goto(f"{args.url}/studio?ui=next&room={keys['room']}#key={keys['hostKey']}")
+    page.goto(f"{args.url}/studio?ui=next&demo=1&room={keys['room']}#key={keys['hostKey']}")
     expect(page.locator(".studio-root [data-region='top']")).to_be_visible(timeout=15000)
     page.goto(f"{args.url}/studio?ui=legacy&room={keys['room']}#key={keys['hostKey']}")
     # The classic shell starts signalling, which must fail offline; its status

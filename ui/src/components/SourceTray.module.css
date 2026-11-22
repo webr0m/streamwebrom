@@ -10,3 +10,4 @@
 .meter { display: flex; align-items: center; gap: var(--swr-sp-1); min-width: 0; }
 .error { min-width: 0; color: var(--swr-err); font-size: var(--swr-text-2xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .controls { display: flex; align-items: center; gap: var(--swr-sp-1); min-width: 0; }
+.preview { inline-size: 100%; block-size: 56px; object-fit: contain; background: var(--swr-bg-deep); }
